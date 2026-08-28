@@ -9,5 +9,10 @@ if [[ ! -f "$CONFIG" ]]; then
   exit 2
 fi
 
-python -m pip install --quiet "requests>=2.32" "build>=1.2"
+python -m pip install --quiet "requests>=2.32" "build>=1.2" "pyyaml>=6.0"
+
+echo "Running AuditHero offline preflight..."
+python "$ROOT/scripts/preflight.py" --platform fabric --fabric-config "$CONFIG"
+
+echo "Deploying AuditHero to Microsoft Fabric..."
 python "$ROOT/fabric/scripts/deploy_fabric.py" --config "$CONFIG"
