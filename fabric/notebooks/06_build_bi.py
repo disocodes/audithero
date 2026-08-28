@@ -1,4 +1,12 @@
 # Parameters: workspace_name, lakehouse_name, semantic_model_name, report_name
+from schads_audit.fabric_bi_preflight import validate_fabric_bi_runtime
+
+compatibility = validate_fabric_bi_runtime()
+print(
+    "Fabric BI runtime compatibility: "
+    f"semantic-link-labs={compatibility['semantic_link_labs']} ({compatibility['status']})"
+)
+
 import sempy.fabric as fabric
 import Microsoft.AnalysisServices.Tabular as TOM
 
