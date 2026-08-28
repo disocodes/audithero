@@ -1,0 +1,9 @@
+resources:
+  dashboards:
+    payroll_compliance_production:
+      display_name: "AuditHero - SCHADS Payroll Compliance (Production)"
+      file_path: ../dashboard/payroll_compliance_production.lvdash.json
+      warehouse_id: ${var.sql_warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: gold
+      embed_credentials: false
