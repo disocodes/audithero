@@ -9,6 +9,12 @@ build/
 .databricks/
 .DS_Store
 
+# Local payroll input files - may contain sensitive employee/payroll data
+audithero_input.xlsx
+audithero_input.xlsm
+input/
+local_inputs/
+
 # Fabric local deployment configuration/state
 fabric/config/fabric.json
 fabric/deployment_state.json
