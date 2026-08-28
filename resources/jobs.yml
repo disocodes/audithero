@@ -14,6 +14,13 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/01_validate_rules.py
 
+    self_test:
+      name: "AuditHero - Self Test"
+      tasks:
+        - task_key: self_test
+          notebook_task:
+            notebook_path: ../notebooks/01b_self_test.py
+
     connection_test:
       name: "AuditHero - Employment Hero Connection Test"
       tasks:
