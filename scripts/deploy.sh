@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${DATABRICKS_BUNDLE_VAR_sql_warehouse_id:?Set DATABRICKS_BUNDLE_VAR_sql_warehouse_id}"
 TARGET="${1:-dev}"
 
-echo "Validating bundle..."
+echo "Running repository preflight..."
+python "$ROOT/scripts/validate_repo.py"
+
+echo "Validating Databricks bundle..."
 databricks bundle validate -t "$TARGET"
 
 echo "Deploying AuditHero..."
@@ -21,7 +25,7 @@ AuditHero deployed and self-tested.
 
 NEXT:
 1. ./scripts/configure_secrets.sh
-2. Complete config mappings.
+2. Complete config mappings and controlled historical registers.
 3. databricks bundle run -t dev connection_test
 4. databricks bundle run -t dev audit_readiness
 5. Run a one-month historical validation sample.
