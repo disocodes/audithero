@@ -26,7 +26,9 @@ Effective-dated SCHADS JSON library
              |
 Entitlement engines
   ordinary/weekend/PH/shiftwork
-  roster/daily overtime
+  roster + daily + period overtime
+  broken-shift grouping
+  sleepover grouping
   supplemental entitlements
              |
   gold.audit_detail
@@ -79,17 +81,23 @@ The engine currently covers:
 - Saturday, Sunday and public-holiday ordinary penalties;
 - afternoon/night shift loadings;
 - minimum engagement;
-- state-wide public holidays plus controlled overrides;
+- state-wide public holidays;
+- **location-specific and substituted public-holiday overrides** using `holiday_location_key`;
 - Employment Hero roster matching;
 - full-time overtime outside a uniquely matched roster;
 - PT/casual daily overtime where allocation is unambiguous;
-- 38-hour weekly and 76-hour fortnightly overtime threshold detection;
+- **automatic 38-hour weekly / 76-hour fortnightly overtime repricing when the threshold allocation is unique**;
+- review flags where daily/weekly/fortnightly overtime rules overlap ambiguously;
+- **automatic broken-shift grouping from separate same-day work periods**;
+- broken-shift allowances and per-period minimum engagement;
+- broken-shift span and agreement review controls;
+- **automatic sleepover grouping of BEFORE / SLEEPOVER / AFTER records**;
 - sleepover allowance and the June 2026 sleepover rule boundary;
+- surrounding-work minimums and 2026 continuous-shift threshold checks;
 - on-call allowance;
 - recall to workplace;
 - active work during sleepover;
 - remote work minimums;
-- controlled broken-shift allowance facts;
 - higher duties;
 - controlled 24-hour-care calculations;
 - actual-versus-expected pay-period reconciliation.
@@ -115,12 +123,39 @@ export DATABRICKS_BUNDLE_VAR_accounts_email="payroll@your-company.example"
 
 Then complete the tenant mappings in `config/`, test the Employment Hero connection, and validate one month before running a multi-year audit.
 
+## Location-aware public holidays
+
+`config/work_location_state_mapping.json` can assign an Employment Hero work location both a state and a controlled holiday key:
+
+```json
+{
+  "employment-hero-location-id": {
+    "state": "WA",
+    "holiday_location_key": "KUNUNURRA"
+  }
+}
+```
+
+Then `config/public_holiday_overrides.csv` can contain a local holiday without incorrectly applying it to all WA employees:
+
+```csv
+state,holiday_date,holiday_name,holiday_location_key,holiday_scope,source
+WA,2026-09-28,Local public holiday,KUNUNURRA,LOCAL,manual_verified
+```
+
+A blank `holiday_location_key` means the override is statewide.
+
+## Broken shifts and sleepovers
+
+See **[docs/BROKEN_SHIFT_SLEEP_OVER.md](docs/BROKEN_SHIFT_SLEEP_OVER.md)** for grouping and review rules. The grouping engine deliberately leaves uncertain overtime/allocation interactions as `REQUIRES_REVIEW` rather than layering penalties twice.
+
 ## Monthly Accounts workflow
 
 The monthly job is deployed **PAUSED intentionally**. When enabled it:
 
 ```text
 Pull recent Employment Hero evidence
+        -> group broken shifts / sleepovers
         -> run SCHADS entitlement audit
         -> reconcile actual payroll
         -> refresh AI/BI dashboard
@@ -131,7 +166,7 @@ The default cadence is 09:00 on the 25th in `Australia/Perth` with a 45-day look
 
 ## Supplemental evidence
 
-Some facts are not safely inferable from a normal timesheet. Controlled items such as recall, active sleepover work and broken-shift evidence can be supplied through:
+Some facts are not safely inferable from a normal timesheet. Controlled items such as recall, active sleepover work and other one-off entitlements can be supplied through:
 
 `/Volumes/<catalog>/bronze/landing/supplemental_events.csv`
 
@@ -146,10 +181,10 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-For SACS and Home Care disability employees, the repository now contains effective-dated wage rates throughout that three-year window. Other unsupported SCHADS wage families fail closed until verified packs are added.
+For SACS and Home Care disability employees, the repository contains effective-dated wage rates throughout that three-year window. Other unsupported SCHADS wage families fail closed until verified packs are added.
 
 ## Validation principle
 
-Do not remediate wages from an unvalidated first run. Verify Award coverage, employee classification history, employment type, work-group mapping, pay-category mapping and representative manual calculations before acting on historical totals.
+Do not remediate wages from an unvalidated first run. Verify Award coverage, employee classification history, employment type, work-group mapping, pay-category mapping, location/public-holiday mapping and representative manual calculations before acting on historical totals.
 
 This repository is a compliance-engineering solution, not legal advice.
