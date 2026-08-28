@@ -1,6 +1,11 @@
 {
-  "_instructions": "Map Employment Hero work_site_id to state.",
-  "work-site-uuid": {
-    "state": "WA"
+  "_instructions": "Map Employment Hero work_site_id/location_id to state. Add holiday_location_key when a locality can have public holidays that do not apply statewide.",
+  "work-site-uuid-kununurra": {
+    "state": "WA",
+    "holiday_location_key": "KUNUNURRA"
+  },
+  "work-site-uuid-perth": {
+    "state": "WA",
+    "holiday_location_key": "PERTH"
   }
 }
