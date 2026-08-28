@@ -5,7 +5,7 @@ AuditHero is deliberately conservative. A review finding is not a compliance res
 ## Effective-dated wage coverage
 
 - SACS classification rate packs: July 2022 through July 2026.
-- Home Care employee — disability care rate packs: July 2024 through July 2026.
+- Home Care employee — disability care rate packs: July 2023 through July 2026.
 - Other SCHADS wage families require verified packs before automatic wage calculation.
 
 ## Overtime
