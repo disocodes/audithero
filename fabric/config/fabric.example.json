@@ -5,7 +5,12 @@
   "environment_name": "AuditHero_Environment",
   "semantic_model_name": "AuditHero - SCHADS Payroll Compliance",
   "report_name": "AuditHero - SCHADS Payroll Compliance",
-  "key_vault_url": "https://your-key-vault.vault.azure.net/",
+  "key_vault_url": "",
+  "manual_file_source": {
+    "enabled": true,
+    "input_root": "/lakehouse/default/Files/input",
+    "pipeline_name": "AuditHero - Uploaded Files Audit Pipeline"
+  },
   "monthly_schedule": {
     "enabled": false,
     "day_of_month": 25,
