@@ -1,79 +1,186 @@
 # AuditHero quickstart
 
-Choose **Microsoft Fabric** or **Databricks**. Both run the same SCHADS engine.
+Choose **Microsoft Fabric** or **Databricks**. Both run the same SCHADS engine and support two ingestion modes:
 
-## Microsoft Fabric
+- **FILES** — upload CSV/XLSX data; no Employment Hero credentials required.
+- **API** — connect directly to Employment Hero HR/Payroll for automated extraction.
 
-Prerequisites: Fabric workspace/capacity, Azure CLI or `FABRIC_ACCESS_TOKEN`, Azure Key Vault and Employment Hero API credentials.
+For an initial deployment, **FILES is the simplest path** and is the recommended way to validate the engine against a known pay period before enabling API automation.
+
+## Build the optional Excel input template
+
+From the repository:
+
+```bash
+pip install -e .
+python tools/build_input_workbook.py --output audithero_input.xlsx
+```
+
+The workbook contains these sheets:
+
+```text
+employees              required
+pay_details            required
+employment_history     required
+timesheets             required
+rostered_shifts        recommended
+payroll_earnings       optional for actual-vs-expected
+pay_runs               optional
+```
+
+You can instead use separate files named `employees.csv`, `timesheets.xlsx`, etc.
+
+---
+
+## Microsoft Fabric — file-first setup
+
+Prerequisites:
+
+- Microsoft Fabric workspace/capacity
+- Azure CLI or `FABRIC_ACCESS_TOKEN`
+
+**Azure Key Vault and Employment Hero credentials are optional.** They are needed only for API mode.
 
 ```bash
 cp fabric/config/fabric.example.json fabric/config/fabric.json
-# set workspace_id and key_vault_url
+# set workspace_id; key_vault_url may remain blank
 az login
 ./fabric/scripts/deploy.sh
 ```
 
-The installer creates the Lakehouse, Runtime 2.0 Environment, custom wheel, notebooks, historical/monthly pipelines, disabled monthly schedule, stable `gold.current_*` Direct Lake snapshots, semantic model and Power BI report.
+The installer creates:
 
-Add Key Vault secrets per `fabric/docs/KEY_VAULT.md`, then run connection/readiness checks and validate one known payroll period before enabling the schedule. Fabric setup creates empty controlled-register files in the Lakehouse for you; populate the registers that apply to your historical population.
+- schema-enabled Lakehouse
+- Fabric Runtime 2.0 Environment
+- AuditHero wheel + SCHADS rule packs
+- setup/self-test notebooks
+- file audit notebook + `AuditHero - Uploaded Files Audit Pipeline`
+- optional Employment Hero API notebooks/pipelines
+- disabled monthly API schedule
+- Direct Lake snapshot tables
+- semantic model
+- Power BI report
 
-Full instructions: `fabric/docs/DEPLOYMENT.md`.
+### Upload files
 
-## Databricks
+Upload either:
 
-Prerequisites: Databricks workspace with Unity Catalog, CLI 0.283.0+, SQL warehouse and Employment Hero API access.
+```text
+Files/input/audithero_input.xlsx
+```
+
+or separate canonical CSV/XLSX files into:
+
+```text
+Files/input/
+```
+
+Then run the Fabric pipeline:
+
+```text
+AuditHero - Uploaded Files Audit Pipeline
+```
+
+Set the date range you want to audit. No Key Vault configuration is required for this workflow.
+
+If you later want automated Employment Hero extraction, configure Azure Key Vault using `fabric/docs/KEY_VAULT.md` and use the API historical/monthly pipelines.
+
+---
+
+## Databricks — file-first setup
+
+Prerequisites:
+
+- Databricks workspace with Unity Catalog
+- Databricks CLI 0.283.0+
+- SQL warehouse
+
+Employment Hero API access is optional.
 
 ```bash
 databricks auth login --host https://<workspace>
 export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
 export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
 ./scripts/deploy.sh
+```
+
+The setup creates the default input Volume path:
+
+```text
+/Volumes/schads_payroll/bronze/landing/input
+```
+
+Upload `audithero_input.xlsx` or separate canonical files there, then run:
+
+```bash
+databricks bundle run manual_file_audit -- \
+  --start_date=2026-07-01 \
+  --end_date=2026-07-31
+```
+
+For a three-year file audit:
+
+```bash
+databricks bundle run manual_file_audit -- \
+  --start_date=2023-07-01 \
+  --end_date=2026-06-30
+```
+
+The job refreshes the Databricks dashboard after the audit.
+
+### Optional Employment Hero API mode
+
+Only if you want automated extraction:
+
+```bash
 ./scripts/configure_secrets.sh
-```
-
-Create tenant mappings and controlled registers from the version-controlled examples:
-
-```bash
-cp config/classification_mapping.example.json config/classification_mapping.json
-cp config/work_type_mapping.example.json config/work_type_mapping.json
-cp config/work_location_state_mapping.example.json config/work_location_state_mapping.json
-cp config/employee_overrides.example.json config/employee_overrides.json
-cp config/pay_category_mapping.example.json config/pay_category_mapping.json
-cp config/public_holiday_overrides.example.csv config/public_holiday_overrides.csv
-cp config/industrial_instrument_history.example.csv config/industrial_instrument_history.csv
-cp config/part_time_patterns.example.csv config/part_time_patterns.csv
-cp config/part_time_variations.example.csv config/part_time_variations.csv
-cp config/overtime_rest_controls.example.csv config/overtime_rest_controls.csv
-cp config/meal_break_events.example.csv config/meal_break_events.csv
-cp config/supplemental_events.example.csv config/supplemental_events.csv
-cp config/toil_register.example.csv config/toil_register.csv
-```
-
-Replace example rows with your controlled evidence. For a historical remediation audit, `industrial_instrument_history.csv` is a release gate because an employee classification by itself does not establish Award coverage. Part-time pattern history is also required where part-time employment exists. Optional event registers may remain empty only after confirming the event type was not applicable in the audit window.
-
-Then:
-
-```bash
 databricks bundle run connection_test
 databricks bundle run audit_readiness
-
-databricks bundle run historical_audit -- \
-  --start_date=2026-07-01 \
-  --end_date=2026-07-31 \
-  --actual_pay_source=PAYROLL_API
 ```
 
-After manual validation, run your full period, for example:
+Then use `historical_audit` or the paused `monthly_audit` job.
 
-```bash
-databricks bundle run historical_audit -- \
-  --start_date=2023-07-01 \
-  --end_date=2026-06-30 \
-  --actual_pay_source=PAYROLL_API
+---
+
+## Controlled compliance registers
+
+Both ingestion modes use the same controlled evidence. Create/populate these where applicable:
+
+```text
+industrial_instrument_history.csv
+part_time_patterns.csv
+part_time_variations.csv
+public_holiday_overrides.csv
+overtime_rest_controls.csv
+meal_break_events.csv
+supplemental_events.csv
+toil_register.csv
 ```
 
-Finally unpause the monthly job only after the validation run reconciles.
+Version-controlled `.example` files are in `config/`.
 
-## Common release gate
+For historical remediation, `industrial_instrument_history.csv` is especially important because classification alone does not prove that SCHADS rather than an enterprise agreement/IFA applied at the time.
 
-Do not use headline remediation totals until `REQUIRES_REVIEW` items, classifications, industrial instruments, work locations/public holidays and payroll-category mappings have been resolved and representative cases agree with manual calculations.
+## Recommended validation sequence
+
+```text
+Deploy
+  ↓
+Run platform self-test
+  ↓
+Upload one known payroll period
+  ↓
+Run FILES audit
+  ↓
+Compare representative employees manually
+  ↓
+Resolve REQUIRES_REVIEW
+  ↓
+Run multi-year audit
+  ↓
+Optionally configure Employment Hero API
+  ↓
+Enable recurring monthly automation
+```
+
+Do not use headline remediation totals until unresolved review items, historical instrument coverage, classifications, locations/public holidays and payroll-category treatment have been validated.
