@@ -36,9 +36,15 @@ for row in client.pay_categories(org):
 for row in client.work_types(org):
     rid=first(row,'id','Id');label=first(row,'name','display_name','displayName');mapped=any(k in work_map for k in (str(rid or ''),str(label or '')));add('WORK_TYPE',rid,label,'READY' if mapped else 'MAPPING_RECOMMENDED','Needed for sleepover/work-group automation')
 for row in client.work_locations(org):
-    rid=first(row,'id','Id');label=first(row,'name','display_name','displayName');mapped=str(rid or '') in loc_map;add('WORK_LOCATION',rid,label,'READY' if mapped else 'MAPPING_REQUIRED','State is required for public-holiday auditing')
+    rid=first(row,'id','Id');label=first(row,'name','display_name','displayName');cfgrow=loc_map.get(str(rid or ''));mapped=isinstance(cfgrow,dict) and bool(cfgrow.get('state'))
+    if not mapped:
+        add('WORK_LOCATION',rid,label,'MAPPING_REQUIRED','State is required for public-holiday auditing')
+    else:
+        key=cfgrow.get('holiday_location_key')
+        detail=f"state={cfgrow.get('state')}"+(f"; holiday_location_key={key}" if key else '; no local holiday key configured')
+        add('WORK_LOCATION',rid,label,'READY' if key else 'MAPPING_RECOMMENDED',detail)
 
 out=pd.DataFrame(findings).drop_duplicates(['finding_type','source_key','source_label']);out['checked_at']=pd.Timestamp.utcnow();write_df(spark,out,f'{catalog}.ops.readiness_findings','overwrite');display(out.sort_values(['status','finding_type','source_label']))
 critical=out[out.status=='MAPPING_REQUIRED'];print('\nAUDIT READINESS SUMMARY');print(out.status.value_counts().to_string())
 if len(critical):print(f'\nNEXT: resolve {len(critical)} required mappings before a remediation audit. See config/*.example files.')
-else:print('\n✓ Required mappings are present. Run a one-month validation audit next.')
+else:print('\n✓ Required mappings are present. Review MAPPING_RECOMMENDED items, then run a one-month validation audit.')
