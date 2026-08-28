@@ -10,13 +10,13 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import re
 import subprocess
 import sys
 from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+FABRIC_SEMANTIC_LINK_LABS_VERSION = "0.17.0"
 
 SHARED_STAGES = [
     "apply_broken_shift_rules",
@@ -166,11 +166,12 @@ def validate_platform_parity(errors: list[str]):
 
 
 def validate_deployment_contracts(errors: list[str], warnings: list[str]):
-    # Fabric dependency is intentionally pinned because the semantic model/report
-    # APIs have changed between Semantic Link Labs releases.
+    # Fabric BI APIs are version-sensitive, so the Environment is pinned to a
+    # release whose Direct Lake/report signatures were verified against source.
     env = (ROOT / "fabric/environment/environment.yml").read_text(encoding="utf-8")
-    if "semantic-link-labs==0.15.2" not in env:
-        fail(errors, "Fabric Environment must pin semantic-link-labs==0.15.2")
+    expected_pin = f"semantic-link-labs=={FABRIC_SEMANTIC_LINK_LABS_VERSION}"
+    if expected_pin not in env:
+        fail(errors, f"Fabric Environment must pin {expected_pin}")
 
     fabric_example = load_json(ROOT / "fabric/config/fabric.example.json")
     monthly = fabric_example.get("monthly_schedule", {})
@@ -188,6 +189,13 @@ def validate_deployment_contracts(errors: list[str], warnings: list[str]):
     fabric_deploy = (ROOT / "fabric/scripts/deploy.sh").read_text(encoding="utf-8")
     if "deploy_fabric.py" not in fabric_deploy:
         fail(errors, "Fabric shell entrypoint does not invoke deploy_fabric.py")
+    if "scripts/validate_repo.py" not in fabric_deploy or "fabric/scripts/preflight.py" not in fabric_deploy:
+        fail(errors, "Fabric shell entrypoint must run repository and Fabric preflights")
+
+    databricks_deploy = (ROOT / "scripts/deploy.sh").read_text(encoding="utf-8")
+    if "scripts/validate_repo.py" not in databricks_deploy or "scripts/databricks_preflight.py" not in databricks_deploy:
+        fail(errors, "Databricks shell entrypoint must run repository and Databricks preflights")
+
     for legacy in ("deploy_fabric_complete.py", "deploy_fabric_final.py"):
         if (ROOT / "fabric/scripts" / legacy).exists():
             fail(errors, f"Legacy Fabric installer still exists: {legacy}")
@@ -215,6 +223,20 @@ def validate_deployment_contracts(errors: list[str], warnings: list[str]):
         if secret not in key_vault_doc:
             fail(errors, f"Key Vault documentation missing secret: {secret}")
 
+    # Ensure cross-platform guided scripts remain present.
+    required_scripts = [
+        "fabric/scripts/configure_key_vault.sh",
+        "fabric/scripts/configure_key_vault.ps1",
+        "fabric/scripts/preflight.py",
+        "scripts/configure_secrets.sh",
+        "scripts/configure_secrets.ps1",
+        "scripts/databricks_preflight.py",
+        "scripts/deploy.ps1",
+    ]
+    for rel in required_scripts:
+        if not (ROOT / rel).exists():
+            fail(errors, f"Missing guided deployment script: {rel}")
+
     # Semantic model helper must build over current physical snapshot tables.
     bi = (ROOT / "fabric/notebooks/06_build_bi.py").read_text(encoding="utf-8")
     for table in (
@@ -225,6 +247,15 @@ def validate_deployment_contracts(errors: list[str], warnings: list[str]):
     ):
         if table not in bi:
             fail(errors, f"Fabric Direct Lake model missing snapshot table: {table}")
+
+    for api_name in (
+        "generate_direct_lake_semantic_model",
+        "create_report_from_reportjson",
+        "update_report_from_reportjson",
+        "report_rebind",
+    ):
+        if api_name not in bi:
+            fail(errors, f"Fabric BI notebook missing expected API: {api_name}")
 
     if "REQUIRES_REVIEW" not in bi or "Potential Underpayment" not in bi:
         warnings.append("Could not confirm remediation-safe DAX wording in BI notebook.")
