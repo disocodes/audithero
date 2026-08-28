@@ -36,7 +36,7 @@ resources:
               secret_scope: "${var.secret_scope}"
 
     audit_readiness:
-      name: "AuditHero - Audit Readiness"
+      name: "AuditHero - API Audit Readiness"
       tasks:
         - task_key: readiness
           notebook_task:
@@ -55,7 +55,15 @@ resources:
         - name: end_date
           default: "2026-06-30"
       tasks:
+        - task_key: validate_uploaded_files
+          notebook_task:
+            notebook_path: ../notebooks/02c_file_readiness.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              input_root: "{{job.parameters.input_root}}"
         - task_key: audit_uploaded_files
+          depends_on:
+            - task_key: validate_uploaded_files
           notebook_task:
             notebook_path: ../notebooks/03b_manual_file_audit.py
             base_parameters:
