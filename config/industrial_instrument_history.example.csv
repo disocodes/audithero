@@ -1,0 +1,4 @@
+employee_id,effective_from,effective_to,instrument_type,instrument_name,award_code,document_reference
+employee-uuid,2023-07-01,,AWARD,SCHADS Award,MA000100,HR-IR-REGISTER-001
+employee-uuid-2,2024-01-01,,ENTERPRISE_AGREEMENT,Example Enterprise Agreement,,EA-2024-001
+employee-uuid-3,2025-01-01,,IFA,Individual flexibility arrangement,MA000100,IFA-2025-007
