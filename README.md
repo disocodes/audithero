@@ -1,13 +1,51 @@
 # AuditHero — SCHADS payroll compliance
 
-AuditHero is a production-oriented payroll audit system for the **Social, Community, Home Care and Disability Services Industry Award (SCHADS / MA000100)**. It connects to Employment Hero, reconstructs historical Award entitlements with effective-dated rules, reconciles expected versus actual payroll and supports both ongoing payroll assurance and multi-year remediation audits.
+AuditHero is a production-oriented payroll audit system for the **Social, Community, Home Care and Disability Services Industry Award (SCHADS / MA000100)**. It reconstructs historical Award entitlements with effective-dated rules, reconciles expected versus actual payroll and supports both ongoing payroll assurance and multi-year remediation audits.
 
 The repository ships **two first-class deployments**:
 
-- **Microsoft Fabric** — schema-enabled Lakehouse, Runtime Environment, Fabric notebooks, Data Factory pipelines, monthly schedule, Direct Lake semantic model and Power BI report.
-- **Databricks** — Unity Catalog/Delta, notebooks, Declarative Automation Bundle jobs, monthly schedule and Databricks AI/BI dashboard.
+- **Microsoft Fabric** — schema-enabled Lakehouse, Runtime Environment, Fabric notebooks, Data Factory pipelines, Direct Lake semantic model and Power BI report.
+- **Databricks** — Unity Catalog/Delta, notebooks, Declarative Automation Bundle jobs and Databricks AI/BI dashboard.
 
-Both platforms use the **same `schads_audit` Python engine and the same source-controlled `rules/MA000100` JSON library**. Platform services differ; payroll calculations do not.
+Both platforms use the **same `schads_audit` Python engine and the same source-controlled `rules/MA000100` JSON library**.
+
+## Data sources: API is optional
+
+AuditHero supports two equally valid ingestion paths:
+
+### FILES — simplest / no credentials
+
+Upload either:
+
+```text
+audithero_input.xlsx
+```
+
+with canonical sheets, or separate files such as:
+
+```text
+employees.csv
+pay_details.csv
+employment_history.csv
+timesheets.csv
+rostered_shifts.csv
+payroll_earnings.csv
+```
+
+CSV and Excel can be mixed. Employment Hero credentials are **not required**.
+
+Generate a blank workbook with:
+
+```bash
+pip install -e .
+python tools/build_input_workbook.py --output audithero_input.xlsx
+```
+
+### API — optional automation
+
+Employment Hero HR/Payroll APIs can be enabled later for direct historical extraction and recurring monthly runs. Fabric uses Azure Key Vault; Databricks uses Databricks Secrets.
+
+This lets you validate the complete audit engine using exported payroll/timesheet data before granting API access.
 
 ## Shared calculation coverage
 
@@ -15,17 +53,30 @@ The engine covers effective-dated SACS and Home Care disability-care rates, clas
 
 ## Microsoft Fabric
 
-Use Fabric when Power BI and the Microsoft data platform are the preferred operating surface.
-
 ```bash
 cp fabric/config/fabric.example.json fabric/config/fabric.json
-# edit workspace_id and key_vault_url
+# edit workspace_id; key_vault_url can remain blank for FILES mode
+az login
 ./fabric/scripts/deploy.sh
 ```
 
-The installer creates/updates the Lakehouse, Runtime 2.0 Environment, AuditHero wheel, bound notebooks, historical/monthly Data Factory pipelines, disabled-by-default monthly schedule, Direct Lake semantic model and Power BI report. Employment Hero credentials remain in Azure Key Vault.
+The installer creates/updates the Lakehouse, Runtime 2.0 Environment, AuditHero wheel, self-tests, uploaded-file readiness/audit pipeline, optional Employment Hero API pipelines, Direct Lake semantic model and Power BI report.
 
-See `fabric/docs/DEPLOYMENT.md`.
+For FILES mode upload data to:
+
+```text
+Lakehouse / Files / input /
+```
+
+and run:
+
+```text
+AuditHero - Uploaded Files Audit Pipeline
+```
+
+Azure Key Vault is only required if you choose API mode.
+
+See `fabric/docs/DEPLOYMENT.md` and `QUICKSTART.md`.
 
 ## Databricks
 
@@ -33,19 +84,39 @@ See `fabric/docs/DEPLOYMENT.md`.
 databricks auth login --host https://<workspace>
 export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
 ./scripts/deploy.sh
-./scripts/configure_secrets.sh
 ```
 
-The bundle deploys setup/self-test/readiness jobs, canonical historical/monthly jobs and the Databricks AI/BI dashboard. The monthly schedule starts paused.
+The bundle deploys setup/self-test jobs, the credential-free `manual_file_audit` job, optional Employment Hero API jobs and the Databricks AI/BI dashboard.
 
-See `QUICKSTART.md` and `databricks/README.md`.
-
-## Safe operating sequence
+Default FILES path:
 
 ```text
-Deploy -> self-test -> configure secrets -> connection test -> readiness review
-       -> validate one known pay period -> run historical audit
-       -> resolve REQUIRES_REVIEW -> enable monthly payroll workflow
+/Volumes/schads_payroll/bronze/landing/input
+```
+
+Run:
+
+```bash
+databricks bundle run manual_file_audit -- \
+  --start_date=2023-07-01 \
+  --end_date=2026-06-30
+```
+
+Only run `./scripts/configure_secrets.sh` if you want API mode.
+
+## Recommended operating sequence
+
+```text
+Deploy
+  -> platform self-test
+  -> upload a known payroll period
+  -> file-readiness validation
+  -> FILES audit
+  -> manually validate representative calculations
+  -> resolve REQUIRES_REVIEW
+  -> run multi-year historical audit
+  -> optionally enable Employment Hero API automation
+  -> enable recurring monthly workflow
 ```
 
 ## Rule source of truth
