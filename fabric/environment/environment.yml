@@ -2,5 +2,5 @@ dependencies:
   - pip:
       - requests>=2.32,<3
       - holidays>=0.75
-      - semantic-link-labs>=0.15,<1
+      - semantic-link-labs==0.17.0
       - jsonschema>=4,<5
