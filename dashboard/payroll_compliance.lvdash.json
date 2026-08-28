@@ -1,0 +1,100 @@
+{
+  "datasets": [
+    {
+      "name": "exceptions",
+      "displayName": "Exceptions",
+      "queryLines": [
+        "SELECT employee_name, pay_period_start, pay_period_end, expected_amount, actual_auditable_amount, variance_actual_minus_expected, status, unmapped_pay_categories",
+        "FROM v_reconciliation_latest",
+        "ORDER BY ABS(COALESCE(variance_actual_minus_expected,0)) DESC"
+      ]
+    },
+    {
+      "name": "monthly",
+      "displayName": "Monthly status",
+      "queryLines": [
+        "SELECT date_trunc('MONTH', pay_period_end) AS month, status, COUNT(*) AS periods",
+        "FROM v_reconciliation_latest",
+        "GROUP BY ALL ORDER BY month"
+      ]
+    },
+    {
+      "name": "rules",
+      "displayName": "Rule coverage",
+      "queryLines": [
+        "SELECT pack_type, pack_id, operative_date, verification_status, source_url FROM rule_coverage ORDER BY pack_type, operative_date"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Payroll Overview",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "<span style=\"font-size: 24px;\">AuditHero \u2014 SCHADS Payroll Compliance</span>"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "exceptions",
+      "displayName": "Exceptions",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "title2",
+            "multilineTextboxSpec": {
+              "lines": [
+                "<span style=\"font-size: 24px;\">Underpayment / Overpayment / Review Queue</span>"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "rules",
+      "displayName": "Rule Library",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "title3",
+            "multilineTextboxSpec": {
+              "lines": [
+                "<span style=\"font-size: 24px;\">Effective-dated SCHADS Rule Library</span>"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        }
+      ]
+    }
+  ]
+}

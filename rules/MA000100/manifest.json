@@ -1,0 +1,11 @@
+{
+  "award_code":"MA000100",
+  "award_name":"Social, Community, Home Care and Disability Services Industry Award",
+  "library_version":"1.0.0",
+  "coverage_start":"2022-07-01",
+  "selection_rule":"Use latest pack with operative_date <= pay_period_start",
+  "fail_closed":true,
+  "rates":["rates/2022-07-01_sacs.json","rates/2023-07-01_sacs.json","rates/2024-07-01_sacs.json","rates/2025-07-01_sacs.json","rates/2026-07-01_sacs.json"],
+  "conditions":["conditions/2022-07-01.json","conditions/2023-07-01.json","conditions/2024-07-01.json","conditions/2025-07-01.json","conditions/2026-06-01.json","conditions/2026-07-01.json"],
+  "allowances":["allowances/2022-07-01.json","allowances/2023-07-01.json","allowances/2024-07-01.json","allowances/2025-07-01.json","allowances/2026-07-01.json"]
+}

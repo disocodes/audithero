@@ -1,0 +1,61 @@
+resources:
+  jobs:
+    setup:
+      name: "AuditHero - Setup"
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/00_setup.py
+            base_parameters:
+              catalog: "${var.catalog}"
+        - task_key: validate_rules
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/01_validate_rules.py
+
+    connection_test:
+      name: "AuditHero - Employment Hero Connection Test"
+      tasks:
+        - task_key: test
+          notebook_task:
+            notebook_path: ../notebooks/02_test_employment_hero.py
+            base_parameters:
+              secret_scope: "${var.secret_scope}"
+
+    historical_audit:
+      name: "AuditHero - Historical SCHADS Audit"
+      parameters:
+        - name: start_date
+          default: "2023-07-01"
+        - name: end_date
+          default: "2026-06-30"
+        - name: actual_pay_source
+          default: "PAYROLL_API"
+      tasks:
+        - task_key: audit
+          notebook_task:
+            notebook_path: ../notebooks/03_historical_audit.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              secret_scope: "${var.secret_scope}"
+              start_date: "{{job.parameters.start_date}}"
+              end_date: "{{job.parameters.end_date}}"
+              actual_pay_source: "{{job.parameters.actual_pay_source}}"
+          max_retries: 1
+
+    monthly_audit:
+      name: "AuditHero - Monthly Payroll Audit"
+      tasks:
+        - task_key: audit
+          notebook_task:
+            notebook_path: ../notebooks/04_monthly_payroll_audit.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              secret_scope: "${var.secret_scope}"
+              lookback_days: "45"
+          max_retries: 1
+      schedule:
+        quartz_cron_expression: "${var.monthly_cron}"
+        timezone_id: "${var.timezone}"
+        pause_status: PAUSED

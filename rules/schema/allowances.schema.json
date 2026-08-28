@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["award_code","allowance_pack_id","operative_date","allowances","source"]}

@@ -1,0 +1,29 @@
+bundle:
+  name: audithero
+include:
+  - resources/*.yml
+variables:
+  catalog:
+    default: schads_payroll
+  secret_scope:
+    default: audithero
+  sql_warehouse_id:
+    description: Databricks SQL warehouse ID for the AI/BI dashboard
+  monthly_cron:
+    default: "0 0 9 25 * ?"
+  timezone:
+    default: Australia/Perth
+workspace:
+  root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+sync:
+  include:
+    - notebooks/**
+    - src/**
+    - rules/**
+    - config/**
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production

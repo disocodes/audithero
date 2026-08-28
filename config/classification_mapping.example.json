@@ -1,0 +1,8 @@
+{
+  "_instructions": "Copy to classification_mapping.json. Map exact Employment Hero classification or pay_detail_id to canonical SCHADS code.",
+  "Social and community services employee level 2 - pay point 3": {
+    "classification_code": "SACS-L2-P3",
+    "verified_by": "Payroll Manager",
+    "verified_date": "YYYY-MM-DD"
+  }
+}

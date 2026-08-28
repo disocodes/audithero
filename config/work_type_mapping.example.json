@@ -1,0 +1,11 @@
+{
+  "_instructions": "Copy to work_type_mapping.json. This starter uses position_name where work type metadata is not returned on the timesheet.",
+  "Disability Support": {
+    "work_group": "DISABILITY_SERVICES",
+    "is_sleepover": false
+  },
+  "Sleepover": {
+    "work_group": "DISABILITY_SERVICES",
+    "is_sleepover": true
+  }
+}

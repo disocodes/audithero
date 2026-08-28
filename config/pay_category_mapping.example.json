@@ -1,0 +1,27 @@
+{
+  "_instructions": "Only AUDITABLE_WORK and ALLOWANCE count toward actual audited earnings. Unmapped categories force review.",
+  "Ordinary Hours": {
+    "audit_treatment": "AUDITABLE_WORK"
+  },
+  "Saturday": {
+    "audit_treatment": "AUDITABLE_WORK"
+  },
+  "Sunday": {
+    "audit_treatment": "AUDITABLE_WORK"
+  },
+  "Public Holiday": {
+    "audit_treatment": "AUDITABLE_WORK"
+  },
+  "Overtime": {
+    "audit_treatment": "AUDITABLE_WORK"
+  },
+  "Sleepover": {
+    "audit_treatment": "ALLOWANCE"
+  },
+  "Annual Leave": {
+    "audit_treatment": "EXCLUDE"
+  },
+  "Personal Leave": {
+    "audit_treatment": "EXCLUDE"
+  }
+}

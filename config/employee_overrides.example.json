@@ -1,0 +1,7 @@
+{
+  "_instructions": "Employee-level facts that are not reliably available from API.",
+  "employee-uuid": {
+    "work_group": "DISABILITY_SERVICES",
+    "state": "WA"
+  }
+}
