@@ -1,6 +1,5 @@
 import json,pandas as pd
 
-
 def create_catalog_objects(spark,catalog):
     spark.sql(f'CREATE CATALOG IF NOT EXISTS `{catalog}`')
     for s in ('bronze','silver','ref','gold','ops'):spark.sql(f'CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{s}`')
@@ -13,8 +12,7 @@ def overwrite_rule_tables(spark,lib,catalog):
     for p in lib.rate_packs:
         for r in p['rates']:
             x=dict(r);x.update({'award_code':p['award_code'],'rate_pack_id':p['rate_pack_id'],'classification_family':p.get('classification_family'),'operative_date':p['operative_date'],'application_basis':p['application_basis'],'source_json':json.dumps(p.get('source',{}))});rates.append(x)
-    conditions=[{'award_code':p['award_code'],'condition_pack_id':p['condition_pack_id'],'operative_date':p['operative_date'],'condition_json':json.dumps(p)} for p in lib.condition_packs]
-    allowances=[]
+    conditions=[{'award_code':p['award_code'],'condition_pack_id':p['condition_pack_id'],'operative_date':p['operative_date'],'condition_json':json.dumps(p)} for p in lib.condition_packs];allowances=[]
     for p in lib.allowance_packs:
         for r in p['allowances']:
             x=dict(r);x.update({'award_code':p['award_code'],'allowance_pack_id':p['allowance_pack_id'],'operative_date':p['operative_date'],'source_json':json.dumps(p.get('source',{}))});allowances.append(x)
@@ -24,3 +22,4 @@ def create_views(spark,catalog):
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_detail_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_detail` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id WHERE r.status='SUCCESS' ''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_event_adjustments_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_event_adjustments` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id WHERE r.status='SUCCESS' ''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_reconciliation_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`pay_period_reconciliation` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id WHERE r.status='SUCCESS' ''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_rule_coverage` AS SELECT * FROM `{catalog}`.`ref`.`rule_coverage` ''')

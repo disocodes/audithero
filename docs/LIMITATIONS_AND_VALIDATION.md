@@ -1,11 +1,31 @@
 # Limitations and validation
 
-AuditHero is deliberately conservative.
+AuditHero is deliberately conservative. A review finding is not a compliance result.
 
-The supplied historical wage packs automate the **SACS rate family** from July 2022 onward. Other SCHADS wage families require independently verified rate packs.
+## Effective-dated wage coverage
 
-Several conditions require facts that a basic timesheet cannot reliably prove, including part-time agreed-pattern changes, complex weekly/fortnightly overtime allocation, active work during sleepover, higher duties, remote work, 24-hour care, recall, TOIL, enterprise agreements and individual flexibility arrangements. Those cases are intended to remain review items until the required evidence/module is added.
+- SACS classification rate packs: July 2022 through July 2026.
+- Home Care employee — disability care rate packs: July 2024 through July 2026.
+- Other SCHADS wage families require verified packs before automatic wage calculation.
 
-Gross payroll must not be compared blindly against worked-time entitlements because leave, bonuses and reimbursements can mask an underpayment. `pay_category_mapping.json` controls which actual earnings are auditable.
+## Overtime
 
-Before remediation, manually reconcile representative cases and obtain competent payroll/industrial-relations review of Award coverage, classification, assumptions and interpretation.
+Daily overtime can be repriced automatically where allocation is unambiguous. Full-time work outside a uniquely matched Employment Hero roster can also be repriced. PT/casual weekly 38-hour and fortnightly 76-hour threshold breaches are identified, but overlaps across weekend/public-holiday/shiftwork are review-controlled rather than double-counted.
+
+Cross-midnight overtime allocation is currently `REQUIRES_REVIEW`; ordinary weekend/public-holiday splitting still occurs in the base engine.
+
+## Broken shifts and sleepovers
+
+Broken-shift allowances can be calculated from controlled supplemental facts. The system does not infer a broken shift from gaps alone. Active sleepover work should be supplied as a supplemental event or another separately usable work record.
+
+## Classification and coverage
+
+A current classification is not evidence of a historic classification. AuditHero uses Employment Hero Pay Details history and requires a canonical classification mapping where the tenant label cannot be parsed safely.
+
+## Payroll reconciliation
+
+Only pay categories explicitly mapped as `AUDITABLE_WORK` or `ALLOWANCE` count as actual audited earnings. Leave, reimbursements and unrelated bonuses must not mask an underpayment. Unmapped categories force review.
+
+## Before remediation
+
+Manually reconcile representative employees and pay periods across ordinary work, Saturday/Sunday, public holidays, overtime, sleepovers and broken shifts. Have payroll/industrial-relations specialists validate Award coverage, classifications and interpretation before back-pay or recovery decisions.

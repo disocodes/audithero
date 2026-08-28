@@ -41,16 +41,19 @@ def _load_supplemental_events(spark,catalog):
     try:return spark.read.option('header',True).option('inferSchema',True).csv(path).toPandas()
     except Exception:return pd.DataFrame()
 
+def _mark_cross_midnight_for_review(detail):
+    if detail is None or detail.empty:return detail,pd.Series(dtype=bool)
+    s=pd.to_datetime(detail['shift_start'],errors='coerce');e=pd.to_datetime(detail['shift_end'],errors='coerce');mask=s.dt.date!=e.dt.date
+    for idx in detail.index[mask]:
+        flags=[x for x in str(detail.at[idx,'review_flags'] or '').split('; ') if x];flags.append('CROSS_MIDNIGHT_OVERTIME_ALLOCATION_REVIEW');detail.at[idx,'review_flags']='; '.join(sorted(set(flags)));detail.at[idx,'entitlement_status']='REQUIRES_REVIEW'
+    return detail,mask
+
 def run_databricks_audit(spark,dbutils,config,lib,start_date,end_date,mapping_dir,run_type='HISTORICAL',actual_pay_source=None):
     run_id=str(uuid.uuid4());started=datetime.now(timezone.utc);source=(actual_pay_source or config.actual_pay_source).upper();mapping_dir=Path(mapping_dir)
     try:
-        org=_secret(dbutils,config.secret_scope,'EH_ORGANISATION_ID')
-        hr=EmploymentHeroHRClient(_secret(dbutils,config.secret_scope,'EH_HR_CLIENT_ID'),_secret(dbutils,config.secret_scope,'EH_HR_CLIENT_SECRET'),_secret(dbutils,config.secret_scope,'EH_HR_REFRESH_TOKEN'),config.hr_base_url,config.hr_token_url)
-        employees_raw=hr.employees(org);ids=[str(x.get('id')) for x in employees_raw if x.get('id')]
-        pay_raw,emp_hist_raw=hr.all_employee_histories(org,ids);ts_raw=hr.timesheets_chunked(org,start_date,end_date);roster_raw=hr.rostered_shifts_chunked(org,start_date,end_date)
-        employees=apply_employee_overrides(normalize_employees(employees_raw),load_json(mapping_dir/'employee_overrides.json',{}))
-        pay_details=apply_classification_mapping(normalize_pay_details(pay_raw),load_json(mapping_dir/'classification_mapping.json',{}));emp_hist=normalize_employment_history(emp_hist_raw)
-        rosters=normalize_rosters(roster_raw)
+        org=_secret(dbutils,config.secret_scope,'EH_ORGANISATION_ID');hr=EmploymentHeroHRClient(_secret(dbutils,config.secret_scope,'EH_HR_CLIENT_ID'),_secret(dbutils,config.secret_scope,'EH_HR_CLIENT_SECRET'),_secret(dbutils,config.secret_scope,'EH_HR_REFRESH_TOKEN'),config.hr_base_url,config.hr_token_url)
+        employees_raw=hr.employees(org);ids=[str(x.get('id')) for x in employees_raw if x.get('id')];pay_raw,emp_hist_raw=hr.all_employee_histories(org,ids);ts_raw=hr.timesheets_chunked(org,start_date,end_date);roster_raw=hr.rostered_shifts_chunked(org,start_date,end_date)
+        employees=apply_employee_overrides(normalize_employees(employees_raw),load_json(mapping_dir/'employee_overrides.json',{}));pay_details=apply_classification_mapping(normalize_pay_details(pay_raw),load_json(mapping_dir/'classification_mapping.json',{}));emp_hist=normalize_employment_history(emp_hist_raw);rosters=normalize_rosters(roster_raw)
         timesheets=_apply_timesheet_mappings(normalize_timesheets(ts_raw),load_json(mapping_dir/'work_type_mapping.json',{}),load_json(mapping_dir/'work_location_state_mapping.json',{}));timesheets=attach_rosters(timesheets,rosters)
         payroll=pd.DataFrame();pay_runs=[]
         if source=='PAYROLL_API':
@@ -60,9 +63,10 @@ def run_databricks_audit(spark,dbutils,config,lib,start_date,end_date,mapping_di
             else:source='NONE'
         holidays=pd.DataFrame(australian_public_holidays(start_date,end_date));override=mapping_dir/'public_holiday_overrides.csv'
         if override.exists():holidays=pd.concat([holidays,pd.read_csv(override)],ignore_index=True).drop_duplicates(['state','holiday_date'])
-        detail=calculate_entitlements(employees,emp_hist,pay_details,timesheets,holidays,lib);detail=apply_rostered_and_daily_overtime(detail,timesheets,holidays,lib);detail=flag_period_overtime(detail)
-        events=_load_supplemental_events(spark,config.catalog);event_adjustments=calculate_supplemental_events(events,employees,pay_details,holidays,lib);recon_input=merge_event_adjustments_into_entitlements(detail,event_adjustments)
-        recon=reconcile_pay_periods(recon_input,payroll,load_json(mapping_dir/'pay_category_mapping.json',{}),config.variance_tolerance)
+        detail=calculate_entitlements(employees,emp_hist,pay_details,timesheets,holidays,lib);detail,cross=_mark_cross_midnight_for_review(detail)
+        if not detail.empty:
+            safe=detail.loc[~cross].copy();safe_ts=timesheets[timesheets['timesheet_id'].astype(str).isin(safe['timesheet_id'].astype(str))];safe=apply_rostered_and_daily_overtime(safe,safe_ts,holidays,lib);detail=pd.concat([safe,detail.loc[cross]],ignore_index=True,sort=False);detail=flag_period_overtime(detail)
+        events=_load_supplemental_events(spark,config.catalog);event_adjustments=calculate_supplemental_events(events,employees,pay_details,holidays,lib);recon_input=merge_event_adjustments_into_entitlements(detail,event_adjustments);recon=reconcile_pay_periods(recon_input,payroll,load_json(mapping_dir/'pay_category_mapping.json',{}),config.variance_tolerance)
         finished=datetime.now(timezone.utc)
         for df in (detail,event_adjustments,recon):
             if df is not None and not df.empty:df['audit_run_id']=run_id;df['audit_window_start']=str(start_date)[:10];df['audit_window_end']=str(end_date)[:10];df['run_type']=run_type;df['run_finished_at']=finished
