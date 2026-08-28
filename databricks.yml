@@ -9,6 +9,9 @@ variables:
     default: audithero
   sql_warehouse_id:
     description: Databricks SQL warehouse ID for the AI/BI dashboard
+  accounts_email:
+    description: Workspace user/email receiving the monthly payroll dashboard snapshot
+    default: ${workspace.current_user.userName}
   monthly_cron:
     default: "0 0 9 25 * ?"
   timezone:

@@ -55,6 +55,17 @@ resources:
               secret_scope: "${var.secret_scope}"
               lookback_days: "45"
           max_retries: 1
+        - task_key: refresh_and_send_dashboard
+          depends_on:
+            - task_key: audit
+          dashboard_task:
+            dashboard_id: ${resources.dashboards.payroll_compliance.id}
+            warehouse_id: ${var.sql_warehouse_id}
+            subscription:
+              custom_subject: "AuditHero monthly SCHADS payroll audit"
+              paused: false
+              subscribers:
+                - user_name: ${var.accounts_email}
       schedule:
         quartz_cron_expression: "${var.monthly_cron}"
         timezone_id: "${var.timezone}"

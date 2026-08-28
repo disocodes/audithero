@@ -1,15 +1,27 @@
 # Historical audit runbook
 
-Do not begin with the entire three-year population.
+## Purpose
 
-## Validation sequence
+A historical audit must reconstruct the employment facts and Award version that applied at the time. Do not apply the current SCHADS rate to old shifts.
 
-1. **One employee / one pay period** — prove the Employment Hero mapping.
-2. **One representative month** — include weekday, Saturday, Sunday, casual/permanent and minimum-engagement cases.
-3. **One year** — verify July rule/rate boundaries and employee classification changes.
-4. **Full historical range** — only after reconciliation.
+## Recommended rollout
 
-Example:
+### 1. One employee / one pay period
+Verify classification, employment type, roster mapping, timesheet mapping, pay categories and expected calculation evidence.
+
+### 2. One representative month
+Include casual/permanent employees and, where available, weekday, Saturday, Sunday, public holiday, minimum engagement, overtime and sleepover cases.
+
+### 3. Cross a rule boundary
+Test at least one pay period around a July annual rate change and, for sleepovers, the June 2026 rule change.
+
+### 4. Twelve months
+Review exception patterns and missing mappings.
+
+### 5. Full date range
+Only after the smaller samples reconcile.
+
+## Running a multi-year audit
 
 ```bash
 databricks bundle run historical_audit -- \
@@ -18,17 +30,20 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-The connector automatically chunks timesheet retrieval by month to make a multi-year pull manageable.
+The Employment Hero connector chunks large timesheet and roster requests month-by-month while preserving one `audit_run_id` for the final run.
 
-## Review order
+## Rate coverage
 
-1. `REQUIRES_REVIEW`
-2. `UNDERPAID`
-3. `OVERPAID`
-4. `COMPLIANT`
+- SACS: automated packs from July 2022.
+- Home Care employee — disability care: automated packs from July 2024.
+- Unsupported historical classification families are `REQUIRES_REVIEW` rather than silently mapped to the wrong wage table.
 
-Never use a numerical variance for remediation where the same pay period still has a material review flag.
+## Overtime evidence
 
-## Re-runs
+Historical full-time overtime is materially stronger when roster history is available. AuditHero pulls Employment Hero rostered shifts and matches them to timesheets. Where a full-time timesheet cannot be uniquely tied to a roster, overtime remains a review finding.
 
-Runs are append-only. Correct a mapping/rule, re-run the same window, and retain the old `audit_run_id` as evidence of what changed.
+PT/casual >38-hour weekly and >76-hour fortnightly thresholds are detected. Where precise allocation across weekend/public-holiday/shiftwork entitlements is ambiguous, AuditHero flags the affected period instead of applying overlapping multipliers mechanically.
+
+## Re-running an audit
+
+Audit runs are append-only. Re-running the same window produces a new `audit_run_id`; the dashboard's latest views select the newest successful run for that audit window.

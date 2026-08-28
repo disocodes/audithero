@@ -1,61 +1,46 @@
-# AuditHero — SCHADS payroll auditing on Databricks
+# AuditHero — SCHADS payroll compliance on Databricks
 
-AuditHero audits Employment Hero timesheets/payroll against effective-dated **SCHADS Award (MA000100)** rules using Databricks. It supports both **ongoing monthly payroll assurance** and **multi-year historical audits**.
+AuditHero is an effective-dated payroll audit platform for **SCHADS / MA000100**. It uses Employment Hero as the operational payroll/time source and Databricks for ingestion, award-rule calculation, historical reconciliation, monthly workflow orchestration and AI/BI reporting.
 
-## What this repository gives you
+It supports two operating modes:
 
-- Employment Hero HR API connector for employees, historical employment type, historical pay/classification details and date-range timesheets.
-- Employment Hero Payroll API connector for pay runs and earnings lines when your tenant exposes it.
-- Effective-dated SCHADS rule packs as JSON rather than hard-coded notebook logic.
-- SACS rate packs for 1 July 2022, 2023, 2024, 2025 and 2026.
-- Historical allowance packs and condition packs.
-- A separate 1 June 2026 condition version for the SCHADS sleepover changes.
-- Deterministic expected-pay calculation with calculation evidence.
-- Actual-vs-expected reconciliation by **employee + pay period**.
-- `COMPLIANT`, `UNDERPAID`, `OVERPAID`, `REQUIRES_REVIEW`, and entitlement-only outcomes.
-- Databricks Declarative Automation Bundle jobs for setup, historical auditing, connection testing and monthly auditing.
-- A Databricks AI/BI dashboard resource — Power BI is not required.
-- Regression tests and GitHub Actions.
+1. **Historical audit** — pull Employment Hero data programmatically for a specified date range and recalculate historical entitlements using the rule/rate version applicable to the pay period.
+2. **Monthly payroll assurance** — pull recent timesheets, rosters and draft/final payroll, calculate expected entitlements, compare actual pay, refresh the Databricks dashboard and send the dashboard snapshot to Accounts.
 
-## Architecture
+## Current architecture
 
 ```text
-Employment Hero HR API             Employment Hero Payroll API
- employees                           pay runs / earnings lines
- employment histories
- pay-detail/classification history
- date-range timesheets
-          \                           /
-           +------ Databricks -------+
-                  Silver Delta
-                       |
-              SCHADS JSON library
-                       |
-                Entitlement engine
-                       |
-              gold.audit_detail
-                       |
-            pay-period reconciliation
-                       |
-       gold.pay_period_reconciliation
-                       |
-             Databricks AI/BI
-                       |
-              Payroll / Accounts
+Employment Hero HR API
+  employees + histories + pay details
+  timesheets + rostered shifts
+             |
+Employment Hero Payroll API
+  pay runs + earnings lines
+             |
+             v
+Databricks / Unity Catalog
+  silver normalized evidence
+             |
+Effective-dated SCHADS JSON library
+  rates + conditions + allowances
+             |
+Entitlement engines
+  ordinary/weekend/PH/shiftwork
+  roster/daily overtime
+  supplemental entitlements
+             |
+  gold.audit_detail
+  gold.audit_event_adjustments
+  gold.pay_period_reconciliation
+             |
+Databricks AI/BI dashboard
+             |
+Monthly dashboard snapshot -> Accounts
 ```
 
-## Start here
-
-Read **[QUICKSTART.md](QUICKSTART.md)**. The intended sequence is:
-
-1. deploy the bundle;
-2. configure Employment Hero secrets;
-3. map classifications, pay categories and work locations;
-4. run a one-month validation sample;
-5. run your multi-year historical audit;
-6. unpause the monthly job only after validation.
-
 ## Rule library
+
+Award logic is source-controlled data, not one enormous notebook:
 
 ```text
 rules/MA000100/
@@ -64,8 +49,11 @@ rules/MA000100/
     2022-07-01_sacs.json
     2023-07-01_sacs.json
     2024-07-01_sacs.json
+    2024-07-01_home_care_disability.json
     2025-07-01_sacs.json
+    2025-07-01_home_care_disability.json
     2026-07-01_sacs.json
+    2026-07-01_home_care_disability.json
   conditions/
     2022-07-01.json
     ...
@@ -77,26 +65,90 @@ rules/MA000100/
     2026-07-01.json
 ```
 
-A July wage change does **not** require rewriting a notebook. Add a JSON rate pack and tests, update the manifest, then rerun setup.
+The rule selector uses the **pay-period start** when available, because Award variations can apply from the first full pay period starting on or after the operative date.
 
-## Historical date-range audits
+## Automated coverage
 
-The HR connector uses Employment Hero's documented wildcard employee ID `-` for all-employee timesheet retrieval and chunks large history requests by month. Classification and employment type are independently effective-dated using the employee's Pay Details and Employment History APIs.
+The engine currently covers:
 
-## Important safety behavior
+- effective-dated SACS rates from July 2022;
+- Home Care employee — disability care rates from July 2024;
+- historical employment type and classification history;
+- casual loading;
+- Saturday, Sunday and public-holiday ordinary penalties;
+- afternoon/night shift loadings;
+- minimum engagement;
+- state-wide public holidays plus controlled overrides;
+- Employment Hero roster matching;
+- full-time overtime outside a uniquely matched roster;
+- PT/casual daily overtime where allocation is unambiguous;
+- 38-hour weekly and 76-hour fortnightly overtime threshold detection;
+- sleepover allowance and the June 2026 sleepover rule boundary;
+- on-call allowance;
+- recall to workplace;
+- active work during sleepover;
+- remote work minimums;
+- controlled broken-shift allowance facts;
+- higher duties;
+- controlled 24-hour-care calculations;
+- actual-versus-expected pay-period reconciliation.
 
-AuditHero **fails closed**. Missing classification mapping, unknown historical employment type, missing work location, incomplete sleepover facts, unmapped pay categories, complex overtime overlap and other ambiguous conditions become `REQUIRES_REVIEW` rather than a guessed compliance result.
+Complex or incomplete situations become `REQUIRES_REVIEW` rather than being guessed.
 
-## Current automated coverage
+## Quick deployment
 
-The supplied wage-rate packs automate the **SACS classification family** from July 2022 onward. The engine handles common casual loading, weekend/public-holiday penalties, weekday shift loadings, minimum engagement, cross-midnight shifts, simple daily overtime, sleepover allowance, state-wide public holidays, and pay-period reconciliation.
+Read **[QUICKSTART.md](QUICKSTART.md)** first.
 
-Home Care/Aged Care/other SCHADS wage families can be added as additional canonical rate packs without changing the versioning architecture. Until verified packs are loaded, those employees should remain review items.
+```bash
+git clone https://github.com/disocodes/audithero.git
+cd audithero
 
-## Sources
+databricks auth login --host https://<workspace>
+export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
+# Optional: Accounts workspace user/email; defaults to the deployer.
+export DATABRICKS_BUNDLE_VAR_accounts_email="payroll@your-company.example"
 
-The rule files include their source URLs. Primary sources include the Fair Work Commission consolidated Award, Fair Work Ombudsman pay guides, Fair Work's 2026 sleepover guidance, Employment Hero API documentation, Employment Hero Payroll API documentation and Databricks bundle documentation.
+./scripts/deploy.sh
+./scripts/configure_secrets.sh
+```
 
-## Disclaimer
+Then complete the tenant mappings in `config/`, test the Employment Hero connection, and validate one month before running a multi-year audit.
 
-This is a compliance-engineering system, not legal advice. Have payroll/industrial-relations specialists validate Award coverage, classification mappings, source data and interpretation before remediation or recovery decisions.
+## Monthly Accounts workflow
+
+The monthly job is deployed **PAUSED intentionally**. When enabled it:
+
+```text
+Pull recent Employment Hero evidence
+        -> run SCHADS entitlement audit
+        -> reconcile actual payroll
+        -> refresh AI/BI dashboard
+        -> email dashboard snapshot to Accounts
+```
+
+The default cadence is 09:00 on the 25th in `Australia/Perth` with a 45-day lookback. Change the cron to align with your payroll cycle.
+
+## Supplemental evidence
+
+Some facts are not safely inferable from a normal timesheet. Controlled items such as recall, active sleepover work and broken-shift evidence can be supplied through:
+
+`/Volumes/<catalog>/bronze/landing/supplemental_events.csv`
+
+See **[docs/SUPPLEMENTAL_EVENTS.md](docs/SUPPLEMENTAL_EVENTS.md)**.
+
+## Historic audit example
+
+```bash
+databricks bundle run historical_audit -- \
+  --start_date=2023-07-01 \
+  --end_date=2026-06-30 \
+  --actual_pay_source=PAYROLL_API
+```
+
+For SACS employees, the repository contains effective-dated wage rates throughout that window. Home Care disability automated wage packs currently begin July 2024; earlier unsupported rate families fail closed.
+
+## Validation principle
+
+Do not remediate wages from an unvalidated first run. Verify Award coverage, employee classification history, employment type, work-group mapping, pay-category mapping and representative manual calculations before acting on historical totals.
+
+This repository is a compliance-engineering solution, not legal advice.

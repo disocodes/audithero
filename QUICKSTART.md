@@ -1,30 +1,31 @@
-# Quickstart
+# AuditHero quickstart
 
 ## 1. Prerequisites
 
 - Databricks workspace with Unity Catalog
-- Databricks CLI 0.283.0+
-- a Databricks SQL warehouse
-- Employment Hero OAuth application / HR API access
-- optional Employment Hero Payroll API key for actual paid earnings
+- Databricks CLI 0.283.0 or newer
+- Databricks SQL warehouse
+- Employment Hero HR API access / OAuth application
+- optional Employment Hero Payroll API key for actual-pay reconciliation
 
 ```bash
 databricks auth login --host https://<workspace>
 export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
+# Defaults to the deployer if omitted.
+export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
+```
+
+## 2. Deploy the Databricks resources
+
+```bash
 ./scripts/deploy.sh
 ```
 
-## 2. Configure Employment Hero OAuth
+This creates the Unity Catalog objects, effective-dated reference tables, jobs and AI/BI dashboard. The monthly schedule remains PAUSED.
 
-Use `tools/eh_oauth_pkce.py`. Employment Hero has announced PKCE as mandatory from 14 September 2026, so use the PKCE helper now rather than building a legacy flow.
+## 3. Configure Employment Hero OAuth and secrets
 
-```bash
-python tools/eh_oauth_pkce.py --client-id ID --client-secret SECRET --redirect-uri https://approved/callback
-```
-
-Complete the browser authorisation, then exchange the code using the printed verifier. Store only the refresh token in Databricks Secrets.
-
-## 3. Configure secrets
+Use `tools/eh_oauth_pkce.py` for the initial OAuth flow, then:
 
 ```bash
 ./scripts/configure_secrets.sh
@@ -46,7 +47,7 @@ EH_PAYROLL_API_KEY
 EH_PAYROLL_BUSINESS_ID
 ```
 
-## 4. Activate mappings
+## 4. Activate tenant mappings
 
 ```bash
 cp config/classification_mapping.example.json config/classification_mapping.json
@@ -56,15 +57,15 @@ cp config/employee_overrides.example.json config/employee_overrides.json
 cp config/pay_category_mapping.example.json config/pay_category_mapping.json
 ```
 
-Edit them using values from your Employment Hero tenant.
+Complete the mappings with values from your tenant.
 
-## 5. Test connection
+## 5. Test the API
 
 ```bash
 databricks bundle run connection_test
 ```
 
-## 6. Run one validation month
+## 6. Validate one month
 
 ```bash
 databricks bundle run historical_audit -- \
@@ -73,9 +74,19 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-Reconcile representative cases manually before going back multiple years.
+Review `REQUIRES_REVIEW` first. Manually reconcile representative ordinary, weekend, overtime, public-holiday and sleepover cases.
 
-## 7. Three-year historical audit
+## 7. Optional supplemental facts
+
+For facts not represented by ordinary timesheets, copy the example header into the Unity Catalog Volume:
+
+```text
+/Volumes/schads_payroll/bronze/landing/supplemental_events.csv
+```
+
+See `docs/SUPPLEMENTAL_EVENTS.md`.
+
+## 8. Run historical audit
 
 ```bash
 databricks bundle run historical_audit -- \
@@ -84,6 +95,8 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-## 8. Monthly payroll
+## 9. Enable monthly payroll workflow
 
-The monthly job is deployed **PAUSED**. After validation, open **Workflows → AuditHero - Monthly Payroll Audit**, review the schedule and unpause it. The default is 09:00 on the 25th in Australia/Perth and uses a 45-day lookback.
+Open **Workflows → AuditHero - Monthly Payroll Audit**. Verify the 45-day lookback and dashboard subscriber, then unpause the schedule.
+
+After every successful monthly audit, the job refreshes the AuditHero AI/BI dashboard and emails a dashboard snapshot to `${var.accounts_email}` as configured at deployment.
