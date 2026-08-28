@@ -28,6 +28,17 @@ def test_broken_shift_inference_and_allowance():
     assert any('BROKEN_SHIFT_ALLOWANCE' in x for x in d.calculation_evidence)
 
 
+def test_sleepover_span_is_not_ordinary_worked_hours():
+    ts=[{'timesheet_id':'S','employee_id':'E1','start_datetime':'2026-08-03 22:00','end_datetime':'2026-08-04 06:00','break_units':0,'work_group':'DISABILITY_SERVICES','location_state':'WA','pay_period_start':'2026-08-03','pay_period_end':'2026-08-16','is_sleepover':True}]
+    e,h,c,t,hol=base_frames(ts)
+    d=calculate_entitlements(e,h,c,t,hol,LIB)
+    row=d.iloc[0]
+    assert row.worked_hours==0
+    assert row.sleepover_span_hours==8
+    assert 'SLEEPOVER_SPAN' in row.calculation_evidence
+    assert 'ORDINARY_OR_PENALTY' not in row.calculation_evidence
+
+
 def test_sleepover_grouping_and_minimum_before_after():
     ts=[
       {'timesheet_id':'A','employee_id':'E1','start_datetime':'2026-08-03 18:00','end_datetime':'2026-08-03 20:00','break_units':0,'work_group':'DISABILITY_SERVICES','location_state':'WA','pay_period_start':'2026-08-03','pay_period_end':'2026-08-16','is_sleepover':False},
