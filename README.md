@@ -48,6 +48,7 @@ rules/MA000100/
   rates/
     2022-07-01_sacs.json
     2023-07-01_sacs.json
+    2023-07-01_home_care_disability.json
     2024-07-01_sacs.json
     2024-07-01_home_care_disability.json
     2025-07-01_sacs.json
@@ -72,7 +73,7 @@ The rule selector uses the **pay-period start** when available, because Award va
 The engine currently covers:
 
 - effective-dated SACS rates from July 2022;
-- Home Care employee — disability care rates from July 2024;
+- Home Care employee — disability care rates from July 2023;
 - historical employment type and classification history;
 - casual loading;
 - Saturday, Sunday and public-holiday ordinary penalties;
@@ -145,7 +146,7 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-For SACS employees, the repository contains effective-dated wage rates throughout that window. Home Care disability automated wage packs currently begin July 2024; earlier unsupported rate families fail closed.
+For SACS and Home Care disability employees, the repository now contains effective-dated wage rates throughout that three-year window. Other unsupported SCHADS wage families fail closed until verified packs are added.
 
 ## Validation principle
 
