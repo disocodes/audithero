@@ -26,6 +26,38 @@ def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
+def _assign_manual_pay_periods(timesheets: pd.DataFrame, pay_runs: pd.DataFrame):
+    """Fill missing pay-period dates from a canonical manual pay-runs table.
+
+    If multiple pay runs overlap the same shift date, the period remains unassigned
+    so the core engine can flag the historical Award-version ambiguity.
+    """
+    if timesheets.empty or pay_runs is None or pay_runs.empty:
+        return timesheets
+    required={"pay_period_start","pay_period_end"}
+    if not required.issubset(pay_runs.columns):
+        return timesheets
+    out=timesheets.copy()
+    if "pay_period_start" not in out.columns: out["pay_period_start"]=None
+    if "pay_period_end" not in out.columns: out["pay_period_end"]=None
+    if "pay_run_id" not in out.columns: out["pay_run_id"]=None
+    runs=pay_runs.copy()
+    runs["_s"]=pd.to_datetime(runs["pay_period_start"],errors="coerce")
+    runs["_e"]=pd.to_datetime(runs["pay_period_end"],errors="coerce")
+    for idx,row in out.iterrows():
+        if pd.notna(row.get("pay_period_start")) and str(row.get("pay_period_start")).strip():
+            continue
+        shift=pd.to_datetime(row.get("start_datetime"),errors="coerce")
+        if pd.isna(shift): continue
+        hits=runs[(runs["_s"].dt.date<=shift.date())&(runs["_e"].dt.date>=shift.date())]
+        if len(hits)==1:
+            r=hits.iloc[0]
+            out.at[idx,"pay_period_start"]=r["pay_period_start"]
+            out.at[idx,"pay_period_end"]=r["pay_period_end"]
+            if "pay_run_id" in r: out.at[idx,"pay_run_id"]=r.get("pay_run_id")
+    return out
+
+
 def run_manual_audit(input_root, config_root, start_date, end_date, rule_library, variance_tolerance=0.05):
     """Run AuditHero from canonical CSV/XLSX inputs with no Employment Hero credentials."""
     frames=load_file_source(input_root,start_date,end_date)
@@ -33,7 +65,7 @@ def run_manual_audit(input_root, config_root, start_date, end_date, rule_library
     employees=frames["employees"].copy()
     pay_details=frames["pay_details"].copy()
     employment_history=frames["employment_history"].copy()
-    timesheets=frames["timesheets"].copy()
+    timesheets=_assign_manual_pay_periods(frames["timesheets"].copy(),frames["pay_runs"].copy())
     rosters=frames["rostered_shifts"].copy()
     payroll=frames["payroll_earnings"].copy()
 
