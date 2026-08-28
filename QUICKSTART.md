@@ -14,13 +14,21 @@ export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
 export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
 ```
 
-## 2. Deploy
+## 2. Deploy and self-test
 
 ```bash
 ./scripts/deploy.sh
 ```
 
-This creates the catalog, rule tables, jobs and AI/BI dashboard. The monthly schedule remains PAUSED.
+Deployment now performs three things automatically:
+
+1. validates and deploys the Databricks bundle;
+2. creates/updates the AuditHero catalog, rule tables, jobs and AI/BI dashboard;
+3. runs **AuditHero - Self Test** inside Databricks.
+
+The self-test checks representative historical rates, Saturday casual pay, sleepover allowance-only treatment, location-specific public holidays, broken-shift grouping and period-overtime repricing. A failed self-test stops deployment.
+
+The monthly schedule remains PAUSED.
 
 ## 3. Configure Employment Hero
 
@@ -40,6 +48,20 @@ cp config/work_type_mapping.example.json config/work_type_mapping.json
 cp config/work_location_state_mapping.example.json config/work_location_state_mapping.json
 cp config/employee_overrides.example.json config/employee_overrides.json
 cp config/pay_category_mapping.example.json config/pay_category_mapping.json
+cp config/public_holiday_overrides.example.csv config/public_holiday_overrides.csv
+```
+
+For each Employment Hero work location, configure at least `state`. If a location can have local public holidays, also set `holiday_location_key`.
+
+Example:
+
+```json
+{
+  "employment-hero-location-id": {
+    "state": "WA",
+    "holiday_location_key": "KUNUNURRA"
+  }
+}
 ```
 
 ## 5. Test connectivity
@@ -54,7 +76,7 @@ databricks bundle run connection_test
 databricks bundle run audit_readiness
 ```
 
-The readiness job inspects your real Employment Hero classification, pay-category, work-type and work-location metadata and writes `ops.readiness_findings`. Resolve `MAPPING_REQUIRED` items before relying on a historical remediation total.
+The readiness job inspects your real Employment Hero classification, pay-category, work-type and work-location metadata and writes `ops.readiness_findings`. Resolve `MAPPING_REQUIRED` items before relying on a historical remediation total. Review `MAPPING_RECOMMENDED` location items where local public-holiday handling may matter.
 
 ## 7. Validate one month
 
@@ -65,7 +87,7 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-Review `REQUIRES_REVIEW` first and manually reconcile representative cases.
+Review `REQUIRES_REVIEW` first and manually reconcile representative cases, including at least one weekend shift, one casual shift, one overtime example and—if used in your organisation—one sleepover/broken-shift example.
 
 ## 8. Optional supplemental facts
 
@@ -87,3 +109,15 @@ SACS and Home Care disability rate packs cover this complete window.
 ## 10. Enable monthly payroll workflow
 
 Open **Workflows → AuditHero - Monthly Payroll Audit**, verify the lookback and Accounts subscriber, then unpause the schedule. Each successful run refreshes and emails the AI/BI dashboard snapshot.
+
+Recommended payroll sequence:
+
+```text
+Timesheets approved
+  -> draft pay run available
+  -> AuditHero monthly audit
+  -> review REQUIRES_REVIEW
+  -> correct confirmed payroll issues
+  -> rerun AuditHero
+  -> finalise payroll
+```
