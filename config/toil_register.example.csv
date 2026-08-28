@@ -1,0 +1,2 @@
+agreement_id,employee_id,overtime_datetime,overtime_hours,written_agreement,agreement_date,time_off_hours,time_off_date,payment_requested_date,payment_date,payment_pay_period_start,payment_pay_period_end,employment_end_date,classification_code,employment_type,work_group,state,holiday_location_key,evidence_reference
+toil-001,employee-uuid,2026-08-01T18:00:00,2,true,2026-08-01,2,2026-08-20,,,,,,SACS-L2-P3,PART_TIME,SACS_NON_DISABILITY,WA,,TOIL-AGREEMENT-REF

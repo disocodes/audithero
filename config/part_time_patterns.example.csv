@@ -1,0 +1,2 @@
+employee_id,effective_from,effective_to,weekday,start_time,end_time,guaranteed_hours,agreement_reference
+employee-uuid,2025-07-01,2099-12-31,Monday,08:00,16:00,7.5,EMPLOYMENT-AGREEMENT-REF

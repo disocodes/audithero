@@ -1,0 +1,2 @@
+event_id,employee_id,timesheet_id,mode,scheduled_break_start,actual_break_start,deducted_break_minutes,paid_meal_minutes,evidence_reference
+meal-001,employee-uuid,timesheet-uuid,WORKED_THROUGH,2026-08-10T12:00:00,2026-08-10T13:00:00,30,0,TIMESHEET-NOTE-REF

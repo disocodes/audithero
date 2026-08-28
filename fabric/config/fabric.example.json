@@ -18,14 +18,6 @@
     "end_date": "2026-06-30",
     "actual_pay_source": "PAYROLL_API"
   },
-  "secret_names": {
-    "organisation_id": "EH-ORGANISATION-ID",
-    "hr_client_id": "EH-HR-CLIENT-ID",
-    "hr_client_secret": "EH-HR-CLIENT-SECRET",
-    "hr_refresh_token": "EH-HR-REFRESH-TOKEN",
-    "payroll_api_key": "EH-PAYROLL-API-KEY",
-    "payroll_business_id": "EH-PAYROLL-BUSINESS-ID"
-  },
   "deploy": {
     "run_setup": true,
     "run_self_test": true,

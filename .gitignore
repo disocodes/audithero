@@ -8,9 +8,22 @@ dist/
 build/
 .databricks/
 .DS_Store
+
+# Fabric local deployment configuration/state
+fabric/config/fabric.json
+fabric/deployment_state.json
+
+# Databricks tenant mappings and controlled payroll evidence
 config/classification_mapping.json
 config/work_type_mapping.json
 config/work_location_state_mapping.json
 config/employee_overrides.json
 config/pay_category_mapping.json
 config/public_holiday_overrides.csv
+config/supplemental_events.csv
+config/industrial_instrument_history.csv
+config/part_time_patterns.csv
+config/part_time_variations.csv
+config/overtime_rest_controls.csv
+config/meal_break_events.csv
+config/toil_register.csv
