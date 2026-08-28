@@ -7,6 +7,9 @@ TARGET="${1:-dev}"
 echo "Running repository preflight..."
 python "$ROOT/scripts/validate_repo.py"
 
+echo "Running Databricks authentication/warehouse preflight..."
+python "$ROOT/scripts/databricks_preflight.py" --target "$TARGET"
+
 echo "Validating Databricks bundle..."
 databricks bundle validate -t "$TARGET"
 
