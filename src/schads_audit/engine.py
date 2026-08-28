@@ -6,6 +6,9 @@ from .money import money,effective_hourly_rate,line_amount
 
 def _dt(v):
     x=pd.to_datetime(v,errors='coerce');return None if pd.isna(x) else x
+def _bool(v):
+    if isinstance(v,bool):return v
+    return str(v).strip().lower() in ('1','true','yes','y')
 def _emp_type(v):
     s=str(v or '').upper().replace('-','_').replace(' ','_')
     if 'CASUAL' in s:return 'CASUAL'
@@ -26,8 +29,7 @@ def _split(start,end,break_minutes=0):
     return out
 def _day_type(d,state,holidays,location_key=None):
     if holidays is not None and not holidays.empty:
-        h=holidays.copy();h['_d']=pd.to_datetime(h.holiday_date,errors='coerce').dt.date
-        q=h[(h['_d']==d)&(h.state.astype(str).str.upper()==str(state).upper())]
+        h=holidays.copy();h['_d']=pd.to_datetime(h.holiday_date,errors='coerce').dt.date;q=h[(h['_d']==d)&(h.state.astype(str).str.upper()==str(state).upper())]
         if not q.empty:
             if 'holiday_location_key' not in q.columns:return 'PUBLIC_HOLIDAY'
             def applies(v):
@@ -87,26 +89,29 @@ def calculate_entitlements(employees,employment_history,classifications,timeshee
         rate,pack=lib.rate(code,reference) if code else (None,None);conditions=lib.conditions(reference)
         if not rate:flags.append('RATE_PACK_OR_CLASSIFICATION_MISSING')
         if not conditions:flags.append('CONDITION_PACK_MISSING')
-        base=float(rate['base_hourly_rate']) if rate else None;state=ts.get('location_state') or emp.get('state');work_group=ts.get('work_group') or emp.get('work_group') or 'DISABILITY_SERVICES';holiday_location_key=ts.get('holiday_location_key')
+        base=float(rate['base_hourly_rate']) if rate else None;state=ts.get('location_state') or emp.get('state');work_group=ts.get('work_group') or emp.get('work_group') or 'DISABILITY_SERVICES';holiday_location_key=ts.get('holiday_location_key');is_sleepover=_bool(ts.get('is_sleepover'))
         if not state:flags.append('STATE_MISSING_PUBLIC_HOLIDAY_CHECK_INCOMPLETE')
         break_minutes=float(ts.get('unpaid_break_minutes') or 0)
         if not break_minutes and ts.get('break_units') not in (None,''):
             try:break_minutes=float(ts.get('break_units') or 0)*60
             except Exception:break_minutes=0
-        segs=_split(start,end,break_minutes);worked=sum(s['hours'] for s in segs);stype=_shift_type(start,end);expected=Decimal('0');evidence=[]
+        segs=_split(start,end,break_minutes);span_hours=sum(s['hours'] for s in segs);worked=0.0 if is_sleepover else span_hours;stype=_shift_type(start,end);expected=Decimal('0');evidence=[]
         if base is not None and conditions and emp_type in ('FULL_TIME','PART_TIME','CASUAL'):
-            for seg in segs:
-                dt=_day_type(seg['date'],state,holidays,holiday_location_key);mult=_mult(conditions,emp_type,dt,stype);er=effective_hourly_rate(base,mult);amt=line_amount(seg['hours'],er);expected+=amt;evidence.append({'component':'ORDINARY_OR_PENALTY','date':str(seg['date']),'hours':round(seg['hours'],4),'day_type':dt,'shift_type':stype,'base_rate':base,'multiplier':mult,'effective_hourly_rate':float(er),'amount':float(amt),'rate_pack_id':pack['rate_pack_id'],'holiday_location_key':holiday_location_key})
-            mh,clause=_minimum(conditions,work_group,emp_type)
-            if mh and worked<mh:
-                dt=_day_type(segs[0]['date'],state,holidays,holiday_location_key);mult=_mult(conditions,emp_type,dt,stype);er=effective_hourly_rate(base,mult);extra=mh-worked;amt=line_amount(extra,er);expected+=amt;evidence.append({'component':'MINIMUM_ENGAGEMENT_TOPUP','hours':extra,'amount':float(amt),'clause':clause})
-            if bool(ts.get('is_sleepover')):
+            if not is_sleepover:
+                for seg in segs:
+                    dt=_day_type(seg['date'],state,holidays,holiday_location_key);mult=_mult(conditions,emp_type,dt,stype);er=effective_hourly_rate(base,mult);amt=line_amount(seg['hours'],er);expected+=amt;evidence.append({'component':'ORDINARY_OR_PENALTY','date':str(seg['date']),'hours':round(seg['hours'],4),'day_type':dt,'shift_type':stype,'base_rate':base,'multiplier':mult,'effective_hourly_rate':float(er),'amount':float(amt),'rate_pack_id':pack['rate_pack_id'],'holiday_location_key':holiday_location_key})
+                mh,clause=_minimum(conditions,work_group,emp_type)
+                if mh and worked<mh:
+                    dt=_day_type(segs[0]['date'],state,holidays,holiday_location_key);mult=_mult(conditions,emp_type,dt,stype);er=effective_hourly_rate(base,mult);extra=mh-worked;amt=line_amount(extra,er);expected+=amt;evidence.append({'component':'MINIMUM_ENGAGEMENT_TOPUP','hours':extra,'amount':float(amt),'clause':clause})
+            else:
+                evidence.append({'component':'SLEEPOVER_SPAN','span_hours':round(span_hours,4),'ordinary_hours_paid':0.0,'clause':'25.7'})
                 a,ap=lib.allowance('sleepover',reference)
-                if a:expected+=money(a['amount']);evidence.append({'component':'SLEEPOVER_ALLOWANCE','amount':float(money(a['amount'])),'allowance_pack_id':ap['allowance_pack_id']})
+                if a:expected+=money(a['amount']);evidence.append({'component':'SLEEPOVER_ALLOWANCE','amount':float(money(a['amount'])),'allowance_pack_id':ap['allowance_pack_id'],'clause':'25.7'})
+                else:flags.append('SLEEPOVER_ALLOWANCE_MISSING')
                 if float(ts.get('sleepover_active_minutes') or 0)>0:flags.append('SLEEPOVER_ACTIVE_WORK_NEEDS_SEPARATE_RECORD')
                 if conditions['sleepover'].get('surrounding_work_is_one_shift') and not ts.get('sleepover_group_id'):flags.append('SLEEPOVER_2026_CONTINUOUS_SHIFT_GROUPING_MISSING')
-            if worked>float(conditions['meal_break']['review_if_shift_gt_hours_and_no_break']) and break_minutes==0:flags.append('MEAL_BREAK_REVIEW')
-        rows.append({'timesheet_id':ts.get('timesheet_id'),'employee_id':eid,'employee_name':emp.get('employee_name'),'employment_type':emp_type,'classification_code':code,'work_group':work_group,'state':state,'holiday_location_key':holiday_location_key,'pay_period_start':pp_start,'pay_period_end':_dt(ts.get('pay_period_end')),'award_reference_date':reference,'shift_start':start,'shift_end':end,'worked_hours':round(worked,4),'base_hourly_rate':base,'expected_amount':float(money(expected)) if base is not None and conditions else None,'entitlement_status':'REQUIRES_REVIEW' if flags else 'CALCULATED','review_flags':'; '.join(sorted(set(flags))),'calculation_evidence':json.dumps(evidence,default=str,separators=(',',':'))})
+            if not is_sleepover and worked>float(conditions['meal_break']['review_if_shift_gt_hours_and_no_break']) and break_minutes==0:flags.append('MEAL_BREAK_REVIEW')
+        rows.append({'timesheet_id':ts.get('timesheet_id'),'employee_id':eid,'employee_name':emp.get('employee_name'),'employment_type':emp_type,'classification_code':code,'work_group':work_group,'state':state,'holiday_location_key':holiday_location_key,'pay_period_start':pp_start,'pay_period_end':_dt(ts.get('pay_period_end')),'award_reference_date':reference,'shift_start':start,'shift_end':end,'worked_hours':round(worked,4),'sleepover_span_hours':round(span_hours,4) if is_sleepover else 0.0,'base_hourly_rate':base,'expected_amount':float(money(expected)) if base is not None and conditions else None,'entitlement_status':'REQUIRES_REVIEW' if flags else 'CALCULATED','review_flags':'; '.join(sorted(set(flags))),'calculation_evidence':json.dumps(evidence,default=str,separators=(',',':'))})
     return pd.DataFrame(rows)
 
 def reconcile_pay_periods(entitlements,payroll_lines,mapping,tolerance=.05):
