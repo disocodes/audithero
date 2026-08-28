@@ -1,0 +1,2 @@
+employee_id,timesheet_id,shift_start,employer_instructed_resume,evidence_reference
+employee-uuid,timesheet-uuid,2026-08-10T06:00:00,false,ROSTER-OR-MANAGER-EVIDENCE
