@@ -11,41 +11,26 @@
 ```bash
 databricks auth login --host https://<workspace>
 export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
-# Defaults to the deployer if omitted.
 export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
 ```
 
-## 2. Deploy the Databricks resources
+## 2. Deploy
 
 ```bash
 ./scripts/deploy.sh
 ```
 
-This creates the Unity Catalog objects, effective-dated reference tables, jobs and AI/BI dashboard. The monthly schedule remains PAUSED.
+This creates the catalog, rule tables, jobs and AI/BI dashboard. The monthly schedule remains PAUSED.
 
-## 3. Configure Employment Hero OAuth and secrets
+## 3. Configure Employment Hero
 
-Use `tools/eh_oauth_pkce.py` for the initial OAuth flow, then:
+Use `tools/eh_oauth_pkce.py` for initial OAuth, then:
 
 ```bash
 ./scripts/configure_secrets.sh
 ```
 
-Required HR secrets:
-
-```text
-EH_ORGANISATION_ID
-EH_HR_CLIENT_ID
-EH_HR_CLIENT_SECRET
-EH_HR_REFRESH_TOKEN
-```
-
-Optional actual-pay secrets:
-
-```text
-EH_PAYROLL_API_KEY
-EH_PAYROLL_BUSINESS_ID
-```
+Required: `EH_ORGANISATION_ID`, `EH_HR_CLIENT_ID`, `EH_HR_CLIENT_SECRET`, `EH_HR_REFRESH_TOKEN`. Optional actual-pay reconciliation uses `EH_PAYROLL_API_KEY` and `EH_PAYROLL_BUSINESS_ID`.
 
 ## 4. Activate tenant mappings
 
@@ -57,15 +42,21 @@ cp config/employee_overrides.example.json config/employee_overrides.json
 cp config/pay_category_mapping.example.json config/pay_category_mapping.json
 ```
 
-Complete the mappings with values from your tenant.
-
-## 5. Test the API
+## 5. Test connectivity
 
 ```bash
 databricks bundle run connection_test
 ```
 
-## 6. Validate one month
+## 6. Run readiness analysis
+
+```bash
+databricks bundle run audit_readiness
+```
+
+The readiness job inspects your real Employment Hero classification, pay-category, work-type and work-location metadata and writes `ops.readiness_findings`. Resolve `MAPPING_REQUIRED` items before relying on a historical remediation total.
+
+## 7. Validate one month
 
 ```bash
 databricks bundle run historical_audit -- \
@@ -74,19 +65,15 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-Review `REQUIRES_REVIEW` first. Manually reconcile representative ordinary, weekend, overtime, public-holiday and sleepover cases.
+Review `REQUIRES_REVIEW` first and manually reconcile representative cases.
 
-## 7. Optional supplemental facts
+## 8. Optional supplemental facts
 
-For facts not represented by ordinary timesheets, copy the example header into the Unity Catalog Volume:
+For on-call, recall, active sleepover work and other facts not represented by ordinary timesheets, load `config/supplemental_events.example.csv` as:
 
-```text
-/Volumes/schads_payroll/bronze/landing/supplemental_events.csv
-```
+`/Volumes/schads_payroll/bronze/landing/supplemental_events.csv`
 
-See `docs/SUPPLEMENTAL_EVENTS.md`.
-
-## 8. Run historical audit
+## 9. Run three-year audit
 
 ```bash
 databricks bundle run historical_audit -- \
@@ -95,8 +82,8 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-## 9. Enable monthly payroll workflow
+SACS and Home Care disability rate packs cover this complete window.
 
-Open **Workflows → AuditHero - Monthly Payroll Audit**. Verify the 45-day lookback and dashboard subscriber, then unpause the schedule.
+## 10. Enable monthly payroll workflow
 
-After every successful monthly audit, the job refreshes the AuditHero AI/BI dashboard and emails a dashboard snapshot to `${var.accounts_email}` as configured at deployment.
+Open **Workflows → AuditHero - Monthly Payroll Audit**, verify the lookback and Accounts subscriber, then unpause the schedule. Each successful run refreshes and emails the AI/BI dashboard snapshot.

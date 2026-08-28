@@ -23,6 +23,16 @@ resources:
             base_parameters:
               secret_scope: "${var.secret_scope}"
 
+    audit_readiness:
+      name: "AuditHero - Audit Readiness"
+      tasks:
+        - task_key: readiness
+          notebook_task:
+            notebook_path: ../notebooks/02b_audit_readiness.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              secret_scope: "${var.secret_scope}"
+
     historical_audit:
       name: "AuditHero - Historical SCHADS Audit"
       parameters:
