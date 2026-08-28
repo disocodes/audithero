@@ -46,7 +46,6 @@ def _minimum(c,work_group,emp_type):
     return 0,None
 
 def assign_pay_periods(timesheets,pay_runs):
-    """Attach pay-period dates from Payroll API pay runs. Ambiguous overlapping schedules stay unassigned."""
     df=timesheets.copy();df['pay_period_start']=None;df['pay_period_end']=None;df['pay_run_id']=None
     if not pay_runs:return df
     def first(r,*keys):
@@ -62,8 +61,7 @@ def assign_pay_periods(timesheets,pay_runs):
         hits=[p for p in periods if p[0].date()<=s.date()<=p[1].date()]
         if len(hits)==1:
             ps,pe,rid=hits[0];df.at[idx,'pay_period_start']=ps;df.at[idx,'pay_period_end']=pe;df.at[idx,'pay_run_id']=rid
-        elif len(hits)>1:
-            df.at[idx,'pay_period_mapping_status']='AMBIGUOUS_PAY_SCHEDULE'
+        elif len(hits)>1:df.at[idx,'pay_period_mapping_status']='AMBIGUOUS_PAY_SCHEDULE'
     return df
 
 def calculate_entitlements(employees,employment_history,classifications,timesheets,holidays,lib):
@@ -87,7 +85,6 @@ def calculate_entitlements(employees,employment_history,classifications,timeshee
         if not state:flags.append('STATE_MISSING_PUBLIC_HOLIDAY_CHECK_INCOMPLETE')
         break_minutes=float(ts.get('unpaid_break_minutes') or 0)
         if not break_minutes and ts.get('break_units') not in (None,''):
-            # EH break_units may be expressed in hours; tenant validation is still required.
             try:break_minutes=float(ts.get('break_units') or 0)*60
             except Exception:break_minutes=0
         segs=_split(start,end,break_minutes);worked=sum(s['hours'] for s in segs);stype=_shift_type(start,end);expected=Decimal('0');evidence=[]
@@ -97,7 +94,6 @@ def calculate_entitlements(employees,employment_history,classifications,timeshee
             mh,clause=_minimum(conditions,work_group,emp_type)
             if mh and worked<mh:
                 dt=_day_type(segs[0]['date'],state,holidays);mult=_mult(conditions,emp_type,dt,stype);er=effective_hourly_rate(base,mult);extra=mh-worked;amt=line_amount(extra,er);expected+=amt;evidence.append({'component':'MINIMUM_ENGAGEMENT_TOPUP','hours':extra,'amount':float(amt),'clause':clause})
-            if worked>10:flags.append('DAILY_OVERTIME_REVIEW')
             if bool(ts.get('is_sleepover')):
                 a,ap=lib.allowance('sleepover',reference)
                 if a:expected+=money(a['amount']);evidence.append({'component':'SLEEPOVER_ALLOWANCE','amount':float(money(a['amount'])),'allowance_pack_id':ap['allowance_pack_id']})

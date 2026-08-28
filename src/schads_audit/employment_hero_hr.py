@@ -3,6 +3,7 @@ import time,requests
 from datetime import datetime
 from .dates import month_chunks
 
+
 class EmploymentHeroHRClient:
     def __init__(self,client_id,client_secret,refresh_token,base_url='https://api.employmenthero.com/api/v1',token_url='https://oauth.employmenthero.com/oauth2/token',timeout=60,min_interval=.62):
         self.client_id=client_id;self.client_secret=client_secret;self.refresh_token=refresh_token;self.base_url=base_url.rstrip('/');self.token_url=token_url;self.timeout=timeout;self.min_interval=min_interval;self._access_token=None;self._last_request=0.0
@@ -50,6 +51,12 @@ class EmploymentHeroHRClient:
     def timesheets_chunked(self,org,start,end):
         out=[]
         for s,e in month_chunks(start,end):out.extend(self.timesheets(org,s,e,'-'))
+        return out
+    def rostered_shifts(self,org,start,end):
+        return self.paged(f'organisations/{org}/rostered_shifts',{'from_date':str(start)[:10],'to_date':str(end)[:10],'exclude_shifts_overlapping_from_date':'false'})
+    def rostered_shifts_chunked(self,org,start,end):
+        out=[]
+        for s,e in month_chunks(start,end):out.extend(self.rostered_shifts(org,s,e))
         return out
     def awards_and_classifications(self,org):return self.paged(f'organisations/{org}/awards_and_classifications')
     def pay_categories(self,org):return self.paged(f'organisations/{org}/pay_categories')

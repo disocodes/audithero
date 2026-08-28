@@ -1,0 +1,1 @@
+event_id,employee_id,event_type,start_datetime,end_datetime,pay_period_start,pay_period_end,employment_type,classification_code,higher_classification_code,work_group,state,hours,on_call,training_or_meeting,unpaid_breaks,two_breaks_agreed,span_hours,period_minimums_verified,shift_hours,consecutive_working_days
