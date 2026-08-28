@@ -15,6 +15,14 @@ def load_json(name):
     p=root/name
     return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
 
+def csv_has_rows(name):
+    p=root/name
+    if not p.exists(): return False
+    try:
+        return not pd.read_csv(p).empty
+    except (pd.errors.EmptyDataError, Exception):
+        return False
+
 def secret(name):
     return notebookutils.credentials.getSecret(cfg.key_vault_url, name)
 
@@ -26,8 +34,14 @@ def add(kind,key,label,status,detail=''):
     findings.append({'finding_type':kind,'source_key':str(key or ''),'source_label':str(label or ''),'status':status,'detail':detail})
 
 employees=client.employees(org)
+has_part_time=False
 for emp in employees:
     eid=str(emp.get('id') or '')
+    current_type=str(first(emp,'employment_type','employmentType',default='') or '').upper()
+    if 'PART' in current_type: has_part_time=True
+    for hist in client.employment_histories(org,eid):
+        if 'PART' in str(first(hist,'employment_type','employmentType',default='') or '').upper():
+            has_part_time=True
     for row in client.pay_details(org,eid):
         label=first(row,'classification','classification_name','classificationName');rid=first(row,'id','Id');resolved=None
         for k in (str(rid or ''),str(label or '')):
@@ -40,19 +54,36 @@ for row in client.pay_categories(org):
 for row in client.work_types(org):
     rid=first(row,'id','Id');label=first(row,'name','display_name','displayName');mapped=any(k in work_map for k in (str(rid or ''),str(label or '')));add('WORK_TYPE',rid,label,'READY' if mapped else 'MAPPING_RECOMMENDED','Needed for work-group and sleepover automation')
 for row in client.work_locations(org):
-    rid=first(row,'id','Id');label=first(row,'name','display_name','displayName');v=loc_map.get(str(rid or ''));mapped=v is not None;detail='State and optional local holiday key available' if mapped else 'State is required for public-holiday auditing';add('WORK_LOCATION',rid,label,'READY' if mapped else 'MAPPING_REQUIRED',detail)
+    rid=first(row,'id','Id');label=first(row,'name','display_name','displayName');v=loc_map.get(str(rid or ''));mapped=isinstance(v,dict) and bool(v.get('state'))
+    if not mapped:
+        add('WORK_LOCATION',rid,label,'MAPPING_REQUIRED','State is required for public-holiday auditing')
+    else:
+        key=v.get('holiday_location_key');detail=f"state={v.get('state')}"+(f"; holiday_location_key={key}" if key else '; no local holiday key configured')
+        add('WORK_LOCATION',rid,label,'READY' if key else 'MAPPING_RECOMMENDED',detail)
 
-required_registers={
- 'industrial_instrument_history.csv':'Historical Award/EA/IFA coverage register',
- 'part_time_patterns.csv':'Effective-dated written part-time pattern register',
- 'overtime_rest_controls.csv':'Evidence register for instructed return before 10-hour rest where applicable',
- 'meal_break_events.csv':'Controlled worked-through/client-meal events where applicable',
- 'toil_register.csv':'Written TOIL agreements where used',
-}
-for filename,detail in required_registers.items():
-    p=root/filename
-    status='READY' if p.exists() and p.stat().st_size>20 else 'REGISTER_REQUIRED'
-    add('CONTROL_REGISTER',filename,filename,status,detail)
+# Instrument history is a genuine historical-audit gate: classification alone does not prove Award coverage.
+add('CONTROL_REGISTER','industrial_instrument_history.csv','industrial_instrument_history.csv',
+    'READY' if csv_has_rows('industrial_instrument_history.csv') else 'REGISTER_REQUIRED',
+    'Record effective-dated Award / enterprise agreement / IFA coverage for the historical population.')
+
+if has_part_time:
+    add('CONTROL_REGISTER','part_time_patterns.csv','part_time_patterns.csv',
+        'READY' if csv_has_rows('part_time_patterns.csv') else 'REGISTER_REQUIRED',
+        'Part-time employment exists; load effective-dated written guaranteed-hours patterns.')
+else:
+    add('CONTROL_REGISTER','part_time_patterns.csv','part_time_patterns.csv',
+        'READY' if csv_has_rows('part_time_patterns.csv') else 'NOT_APPLICABLE',
+        'No part-time employment was found in Employment Hero history.')
+
+for filename,detail in {
+    'overtime_rest_controls.csv':'Populate when an employee is directed to resume before the required post-overtime rest period.',
+    'meal_break_events.csv':'Populate worked-through/client-meal exceptions when applicable.',
+    'toil_register.csv':'Populate written TOIL agreements when TOIL is used.',
+    'supplemental_events.csv':'Populate recall, on-call, remote work, active sleepover work or other controlled events when applicable.',
+}.items():
+    add('CONTROL_REGISTER',filename,filename,
+        'READY' if csv_has_rows(filename) else 'REGISTER_REVIEW',
+        detail+' An empty register is acceptable only after confirming the event type was not applicable in the audit window.')
 
 out=pd.DataFrame(findings).drop_duplicates(['finding_type','source_key','source_label'])
 out['checked_at']=pd.Timestamp.utcnow()
@@ -65,5 +96,5 @@ if len(blocking):
     print(f'\n{len(blocking)} blocking readiness findings. Resolve these before relying on historical remediation totals.')
     notebookutils.notebook.exit('review_required')
 else:
-    print('\nRequired mappings/registers are present. Validate one pay period next.')
+    print('\nBlocking mappings/registers are present. Review REGISTER_REVIEW and MAPPING_RECOMMENDED items, then validate one known pay period.')
     notebookutils.notebook.exit('success')
