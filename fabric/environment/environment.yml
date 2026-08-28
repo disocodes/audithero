@@ -2,5 +2,6 @@ dependencies:
   - pip:
       - requests>=2.32,<3
       - holidays>=0.75
+      - openpyxl>=3.1,<4
       - semantic-link-labs>=0.15,<1
       - jsonschema>=4,<5
