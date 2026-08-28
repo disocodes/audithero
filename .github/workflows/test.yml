@@ -7,13 +7,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install validation dependencies
         run: pip install -e ".[dev]" build
-      - name: Run release gate
+      - name: Run shared release gate
         run: python scripts/validate_repo.py --with-pytest --build-wheel
+      - name: Build and verify Fabric wheel with embedded SCHADS rules
+        if: matrix.python-version == '3.13'
+        run: python fabric/scripts/build_fabric_wheel.py --output-dir dist/fabric-validation
