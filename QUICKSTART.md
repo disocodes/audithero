@@ -1,21 +1,52 @@
 # AuditHero quickstart
 
-Choose **Microsoft Fabric** or **Databricks**. Both run the same SCHADS engine.
+Choose **Microsoft Fabric** or **Databricks**. Both run the same SCHADS calculation engine and effective-dated rule library.
 
 ## Microsoft Fabric
 
-Prerequisites: Fabric workspace/capacity, Azure CLI or `FABRIC_ACCESS_TOKEN`, Azure Key Vault and Employment Hero API credentials.
+Prerequisites: Fabric workspace/capacity, Azure CLI or `FABRIC_ACCESS_TOKEN`, an Azure Key Vault and Employment Hero API credentials.
+
+### 1. Configure the deployment
 
 ```bash
 cp fabric/config/fabric.example.json fabric/config/fabric.json
-# set workspace_id and key_vault_url
+# edit workspace_id, workspace_name and key_vault_url
 az login
+```
+
+### 2. Put Employment Hero credentials in Key Vault
+
+Linux/macOS/WSL:
+
+```bash
+./fabric/scripts/configure_key_vault.sh
+python fabric/scripts/preflight.py --check-secrets
+```
+
+Windows PowerShell:
+
+```powershell
+.\fabric\scripts\configure_key_vault.ps1
+python fabric\scripts\preflight.py --check-secrets
+```
+
+The helper stores the canonical Employment Hero secret names in Key Vault without writing the values into Git or `fabric.json`. The Fabric notebook execution identity must also have Key Vault secret-read permission.
+
+### 3. Deploy
+
+```bash
 ./fabric/scripts/deploy.sh
 ```
 
-The installer creates the Lakehouse, Runtime 2.0 Environment, custom wheel, notebooks, historical/monthly pipelines, disabled monthly schedule, stable `gold.current_*` Direct Lake snapshots, semantic model and Power BI report.
+or on Windows:
 
-Add Key Vault secrets per `fabric/docs/KEY_VAULT.md`, then run connection/readiness checks and validate one known payroll period before enabling the schedule. Fabric setup creates empty controlled-register files in the Lakehouse for you; populate the registers that apply to your historical population.
+```powershell
+.\fabric\scripts\deploy.ps1
+```
+
+The deployment entrypoint first runs the repository release validator and Fabric workspace/configuration preflight. It then creates/updates the schema-enabled Lakehouse, Runtime 2.0 Environment, pinned AuditHero wheel/runtime dependencies, parameterized notebooks, historical/monthly pipelines, disabled monthly schedule, stable `gold.current_*` Direct Lake snapshots, semantic model and Power BI report. Setup and Fabric-native regression self-tests run automatically unless disabled explicitly in `fabric.json`.
+
+Fabric setup also creates empty controlled-register files in the Lakehouse. Populate the registers that apply to the historical population, run the Employment Hero connection/readiness notebooks, and validate one known pay period before using a multi-year remediation total or enabling the schedule.
 
 Full instructions: `fabric/docs/DEPLOYMENT.md`.
 
@@ -30,6 +61,8 @@ export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
 ./scripts/deploy.sh
 ./scripts/configure_secrets.sh
 ```
+
+The deployment script runs the same repository release validator before `databricks bundle validate`, deploys the bundle, and executes the Databricks-native self-test.
 
 Create tenant mappings and controlled registers from the version-controlled examples:
 
@@ -49,7 +82,7 @@ cp config/supplemental_events.example.csv config/supplemental_events.csv
 cp config/toil_register.example.csv config/toil_register.csv
 ```
 
-Replace example rows with your controlled evidence. For a historical remediation audit, `industrial_instrument_history.csv` is a release gate because an employee classification by itself does not establish Award coverage. Part-time pattern history is also required where part-time employment exists. Optional event registers may remain empty only after confirming the event type was not applicable in the audit window.
+Replace example rows with controlled evidence. For a historical remediation audit, `industrial_instrument_history.csv` is a release gate because an employee classification by itself does not establish Award coverage. Part-time pattern history is also required where part-time employment exists. Optional event registers may remain empty only after confirming the event type was not applicable in the audit window.
 
 Then:
 
@@ -63,7 +96,7 @@ databricks bundle run historical_audit -- \
   --actual_pay_source=PAYROLL_API
 ```
 
-After manual validation, run your full period, for example:
+After manual validation, run the full period, for example:
 
 ```bash
 databricks bundle run historical_audit -- \
@@ -73,6 +106,17 @@ databricks bundle run historical_audit -- \
 ```
 
 Finally unpause the monthly job only after the validation run reconciles.
+
+## Local release validation
+
+For a development/release checkout:
+
+```bash
+pip install -e ".[dev]" build
+python scripts/validate_repo.py --with-pytest --build-wheel
+```
+
+This compiles all Python, parses JSON/YAML, validates the SCHADS manifest/packs, checks Fabric/Databricks stage parity and safety defaults, runs pytest and builds the wheel.
 
 ## Common release gate
 
