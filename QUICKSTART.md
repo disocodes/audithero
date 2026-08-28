@@ -54,42 +54,86 @@ Full instructions: `fabric/docs/DEPLOYMENT.md`.
 
 Prerequisites: Databricks workspace with Unity Catalog, CLI 0.283.0+, SQL warehouse and Employment Hero API access.
 
+### 1. Deploy the application
+
+Linux/macOS/WSL:
+
 ```bash
 databricks auth login --host https://<workspace>
 export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
 export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
 ./scripts/deploy.sh
+```
+
+Windows PowerShell:
+
+```powershell
+databricks auth login --host https://<workspace>
+$env:DATABRICKS_BUNDLE_VAR_sql_warehouse_id = "<warehouse-id>"
+$env:DATABRICKS_BUNDLE_VAR_accounts_email = "accounts-user@your-company.example"
+.\scripts\deploy.ps1
+```
+
+The deployment script first creates **safe active tenant config files** where missing: JSON mappings are `{}` and CSV registers contain headers only. It never copies example/sample rows into active evidence. These active files are gitignored but explicitly included by the Databricks bundle sync configuration. The script then runs repository + Databricks preflights, bundle validation/deployment, workspace setup and the Databricks-native self-test.
+
+### 2. Configure Employment Hero secrets
+
+Linux/macOS/WSL:
+
+```bash
 ./scripts/configure_secrets.sh
 ```
 
-The deployment script runs the same repository release validator before `databricks bundle validate`, deploys the bundle, and executes the Databricks-native self-test.
+Windows PowerShell:
 
-Create tenant mappings and controlled registers from the version-controlled examples:
-
-```bash
-cp config/classification_mapping.example.json config/classification_mapping.json
-cp config/work_type_mapping.example.json config/work_type_mapping.json
-cp config/work_location_state_mapping.example.json config/work_location_state_mapping.json
-cp config/employee_overrides.example.json config/employee_overrides.json
-cp config/pay_category_mapping.example.json config/pay_category_mapping.json
-cp config/public_holiday_overrides.example.csv config/public_holiday_overrides.csv
-cp config/industrial_instrument_history.example.csv config/industrial_instrument_history.csv
-cp config/part_time_patterns.example.csv config/part_time_patterns.csv
-cp config/part_time_variations.example.csv config/part_time_variations.csv
-cp config/overtime_rest_controls.example.csv config/overtime_rest_controls.csv
-cp config/meal_break_events.example.csv config/meal_break_events.csv
-cp config/supplemental_events.example.csv config/supplemental_events.csv
-cp config/toil_register.example.csv config/toil_register.csv
+```powershell
+.\scripts\configure_secrets.ps1
 ```
 
-Replace example rows with controlled evidence. For a historical remediation audit, `industrial_instrument_history.csv` is a release gate because an employee classification by itself does not establish Award coverage. Part-time pattern history is also required where part-time employment exists. Optional event registers may remain empty only after confirming the event type was not applicable in the audit window.
-
-Then:
+### 3. Discover the tenant and run readiness
 
 ```bash
 databricks bundle run connection_test
 databricks bundle run audit_readiness
+```
 
+Readiness identifies missing classification/pay-category/location mappings and controlled evidence. It now verifies **employee-level register coverage**: a sample row or unrelated employee cannot satisfy the industrial-instrument or part-time-pattern release gate.
+
+Use the `config/*.example.*` files only as **schema/examples** while editing the already-created active files. Do not copy their sample rows wholesale.
+
+For historical remediation:
+
+- `industrial_instrument_history.csv` must have controlled evidence for every employee in the population;
+- `part_time_patterns.csv` must cover every employee who is or was part-time;
+- optional event registers may remain empty only after confirming that event type was not applicable in the audit window.
+
+### 4. Sync tenant configuration
+
+After editing the local gitignored `config/*.json` and controlled CSV files:
+
+Linux/macOS/WSL:
+
+```bash
+./scripts/sync_config.sh dev
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\sync_config.ps1 -Target dev
+```
+
+Then rerun:
+
+```bash
+databricks bundle run audit_readiness
+```
+
+Repeat edit → sync → readiness until blocking findings are resolved.
+
+### 5. Validate one known period
+
+```bash
 databricks bundle run historical_audit -- \
   --start_date=2026-07-01 \
   --end_date=2026-07-31 \
