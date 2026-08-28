@@ -5,9 +5,9 @@ import json,uuid,pandas as pd
 from .employment_hero_hr import EmploymentHeroHRClient
 from .employment_hero_payroll import EmploymentHeroPayrollClient
 from .normalize import normalize_employees,normalize_pay_details,normalize_employment_history,normalize_timesheets,normalize_payroll_earnings,apply_classification_mapping,apply_employee_overrides
-from .public_holidays import australian_public_holidays
+from .public_holidays import australian_public_holidays,normalise_public_holiday_overrides
 from .engine import assign_pay_periods,calculate_entitlements,reconcile_pay_periods
-from .roster_overtime import normalize_rosters,attach_rosters,apply_rostered_and_daily_overtime,flag_period_overtime
+from .roster_overtime import normalize_rosters,attach_rosters,apply_rostered_and_daily_overtime,allocate_period_overtime,flag_period_overtime
 from .broken_sleepover import group_broken_shifts,apply_broken_shift_rules,group_sleepovers,apply_sleepover_group_rules
 from .supplemental import calculate_supplemental_events,merge_event_adjustments_into_entitlements
 from .databricks_io import write_df
@@ -65,10 +65,10 @@ def run_databricks_audit(spark,dbutils,config,lib,start_date,end_date,mapping_di
                 pc=EmploymentHeroPayrollClient(key,bid,config.payroll_base_url);pay_runs,raw=pc.pull_earnings(start_date,end_date);payroll=normalize_payroll_earnings(raw);timesheets=assign_pay_periods(timesheets,pay_runs)
             else:source='NONE'
         holidays=pd.DataFrame(australian_public_holidays(start_date,end_date));override=mapping_dir/'public_holiday_overrides.csv'
-        if override.exists():holidays=pd.concat([holidays,pd.read_csv(override)],ignore_index=True).drop_duplicates(['state','holiday_date','holiday_name'])
+        if override.exists():holidays=pd.concat([holidays,normalise_public_holiday_overrides(pd.read_csv(override))],ignore_index=True).drop_duplicates(['state','holiday_date','holiday_name','holiday_location_key'])
         detail=calculate_entitlements(employees,emp_hist,pay_details,timesheets,holidays,lib);detail=apply_broken_shift_rules(detail,timesheets,lib);detail=apply_sleepover_group_rules(detail,timesheets,lib);detail,cross=_mark_cross_midnight_for_review(detail)
         if not detail.empty:
-            safe=detail.loc[~cross].copy();safe_ts=timesheets[timesheets['timesheet_id'].astype(str).isin(safe['timesheet_id'].astype(str))];safe=apply_rostered_and_daily_overtime(safe,safe_ts,holidays,lib);detail=pd.concat([safe,detail.loc[cross]],ignore_index=True,sort=False);detail=flag_period_overtime(detail)
+            safe=detail.loc[~cross].copy();safe_ts=timesheets[timesheets['timesheet_id'].astype(str).isin(safe['timesheet_id'].astype(str))];safe=apply_rostered_and_daily_overtime(safe,safe_ts,holidays,lib);safe=allocate_period_overtime(safe,holidays,lib);detail=pd.concat([safe,detail.loc[cross]],ignore_index=True,sort=False);detail=flag_period_overtime(detail)
         events=_load_supplemental_events(spark,config.catalog);event_adjustments=calculate_supplemental_events(events,employees,pay_details,holidays,lib);recon_input=merge_event_adjustments_into_entitlements(detail,event_adjustments);recon=reconcile_pay_periods(recon_input,payroll,load_json(mapping_dir/'pay_category_mapping.json',{}),config.variance_tolerance)
         finished=datetime.now(timezone.utc)
         for df in (detail,event_adjustments,recon):
