@@ -45,8 +45,35 @@ resources:
               catalog: "${var.catalog}"
               secret_scope: "${var.secret_scope}"
 
+    manual_file_audit:
+      name: "AuditHero - Audit Uploaded CSV Excel"
+      parameters:
+        - name: input_root
+          default: ""
+        - name: start_date
+          default: "2023-07-01"
+        - name: end_date
+          default: "2026-06-30"
+      tasks:
+        - task_key: audit_uploaded_files
+          notebook_task:
+            notebook_path: ../notebooks/03b_manual_file_audit.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              input_root: "{{job.parameters.input_root}}"
+              start_date: "{{job.parameters.start_date}}"
+              end_date: "{{job.parameters.end_date}}"
+          max_retries: 1
+          min_retry_interval_millis: 30000
+        - task_key: refresh_dashboard
+          depends_on:
+            - task_key: audit_uploaded_files
+          dashboard_task:
+            dashboard_id: ${resources.dashboards.payroll_compliance.id}
+            warehouse_id: ${var.sql_warehouse_id}
+
     historical_audit:
-      name: "AuditHero - Historical SCHADS Audit"
+      name: "AuditHero - Historical SCHADS Audit (Employment Hero API)"
       parameters:
         - name: start_date
           default: "2023-07-01"
@@ -74,7 +101,7 @@ resources:
             warehouse_id: ${var.sql_warehouse_id}
 
     monthly_audit:
-      name: "AuditHero - Monthly Payroll Audit"
+      name: "AuditHero - Monthly Payroll Audit (Employment Hero API)"
       tasks:
         - task_key: audit
           notebook_task:
