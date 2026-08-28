@@ -13,6 +13,11 @@ resources:
             - task_key: setup
           notebook_task:
             notebook_path: ../notebooks/01_validate_rules.py
+        - task_key: self_test
+          depends_on:
+            - task_key: validate_rules
+          notebook_task:
+            notebook_path: ../notebooks/01b_self_test.py
 
     self_test:
       name: "AuditHero - Self Test"
@@ -60,6 +65,13 @@ resources:
               end_date: "{{job.parameters.end_date}}"
               actual_pay_source: "{{job.parameters.actual_pay_source}}"
           max_retries: 1
+          min_retry_interval_millis: 30000
+        - task_key: refresh_dashboard
+          depends_on:
+            - task_key: audit
+          dashboard_task:
+            dashboard_id: ${resources.dashboards.payroll_compliance.id}
+            warehouse_id: ${var.sql_warehouse_id}
 
     monthly_audit:
       name: "AuditHero - Monthly Payroll Audit"
@@ -71,7 +83,9 @@ resources:
               catalog: "${var.catalog}"
               secret_scope: "${var.secret_scope}"
               lookback_days: "45"
+              actual_pay_source: "PAYROLL_API"
           max_retries: 1
+          min_retry_interval_millis: 30000
         - task_key: refresh_and_send_dashboard
           depends_on:
             - task_key: audit
