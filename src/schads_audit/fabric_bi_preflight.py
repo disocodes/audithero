@@ -23,6 +23,18 @@ def validate_fabric_bi_runtime() -> dict[str, str]:
             f"found {installed}. Republish the pinned Fabric Environment."
         )
 
+    # Explicitly initialize the Analysis Services bridge before the notebook imports
+    # Microsoft.AnalysisServices.Tabular. This avoids depending on import side effects.
+    import sempy.fabric as fabric
+
+    try:
+        fabric._client._utils._init_analysis_services()
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not initialize the Fabric Analysis Services/TOM runtime. "
+            "Verify that the notebook is running in the published AuditHero Environment."
+        ) from exc
+
     from sempy_labs.directlake import (
         check_fallback_reason,
         generate_direct_lake_semantic_model,
@@ -84,5 +96,6 @@ def validate_fabric_bi_runtime() -> dict[str, str]:
 
     return {
         "semantic_link_labs": installed,
+        "analysis_services": "initialized",
         "status": "compatible",
     }
