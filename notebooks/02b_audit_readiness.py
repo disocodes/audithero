@@ -7,6 +7,7 @@ from schads_audit.config import AuditConfig
 from schads_audit.employment_hero_hr import EmploymentHeroHRClient
 from schads_audit.normalize import infer_schads_classification,first
 from schads_audit.databricks_io import write_df
+from schads_audit.readiness import read_register,employee_register_coverage,coverage_detail
 
 dbutils.widgets.text('catalog','schads_payroll');dbutils.widgets.text('secret_scope','audithero')
 catalog=dbutils.widgets.get('catalog');scope=dbutils.widgets.get('secret_scope');cfg=AuditConfig(catalog=catalog,secret_scope=scope)
@@ -17,11 +18,8 @@ def load(name):
     p=ROOT/'config'/name
     return json.loads(p.read_text()) if p.exists() else {}
 
-def csv_has_rows(name):
-    p=ROOT/'config'/name
-    if not p.exists(): return False
-    try: return not pd.read_csv(p).empty
-    except (pd.errors.EmptyDataError, Exception): return False
+def reg(name):
+    return read_register(ROOT/'config'/name)
 
 cls_map=load('classification_mapping.json');pay_map=load('pay_category_mapping.json');work_map=load('work_type_mapping.json');loc_map=load('work_location_state_mapping.json')
 findings=[]
@@ -29,12 +27,15 @@ def add(kind,key,label,status,detail=''):
     findings.append({'finding_type':kind,'source_key':str(key or ''),'source_label':str(label or ''),'status':status,'detail':detail})
 
 employees=client.employees(org);employee_ids=[str(x.get('id')) for x in employees if x.get('id')]
-has_part_time=False
+part_time_employee_ids=set()
 for emp in employees:
-    if 'PART' in str(first(emp,'employment_type','employmentType',default='') or '').upper(): has_part_time=True
+    eid=str(emp.get('id') or '')
+    if 'PART' in str(first(emp,'employment_type','employmentType',default='') or '').upper():
+        part_time_employee_ids.add(eid)
 for eid in employee_ids:
     for hist in client.employment_histories(org,eid):
-        if 'PART' in str(first(hist,'employment_type','employmentType',default='') or '').upper(): has_part_time=True
+        if 'PART' in str(first(hist,'employment_type','employmentType',default='') or '').upper():
+            part_time_employee_ids.add(eid)
     for pdrow in client.pay_details(org,eid):
         label=first(pdrow,'classification','classification_name','classificationName');pid=first(pdrow,'id','Id');mapped=None
         for k in (str(pid or ''),str(label or '')):
@@ -55,25 +56,28 @@ for row in client.work_locations(org):
         key=cfgrow.get('holiday_location_key');detail=f"state={cfgrow.get('state')}"+(f"; holiday_location_key={key}" if key else '; no local holiday key configured')
         add('WORK_LOCATION',rid,label,'READY' if key else 'MAPPING_RECOMMENDED',detail)
 
+instrument_coverage=employee_register_coverage(reg('industrial_instrument_history.csv'),employee_ids)
 add('CONTROL_REGISTER','industrial_instrument_history.csv','industrial_instrument_history.csv',
-    'READY' if csv_has_rows('industrial_instrument_history.csv') else 'REGISTER_REQUIRED',
-    'Record effective-dated Award / enterprise agreement / IFA coverage for the historical population.')
-if has_part_time:
+    'READY' if instrument_coverage['covered'] else 'REGISTER_REQUIRED',
+    coverage_detail(instrument_coverage,'industrial-instrument history')+' Effective-date continuity is tested again at shift level.')
+
+if part_time_employee_ids:
+    pattern_coverage=employee_register_coverage(reg('part_time_patterns.csv'),part_time_employee_ids)
     add('CONTROL_REGISTER','part_time_patterns.csv','part_time_patterns.csv',
-        'READY' if csv_has_rows('part_time_patterns.csv') else 'REGISTER_REQUIRED',
-        'Part-time employment exists; load effective-dated written guaranteed-hours patterns.')
+        'READY' if pattern_coverage['covered'] else 'REGISTER_REQUIRED',
+        coverage_detail(pattern_coverage,'written part-time pattern')+' Effective-date applicability is tested again during the audit.')
 else:
-    add('CONTROL_REGISTER','part_time_patterns.csv','part_time_patterns.csv',
-        'READY' if csv_has_rows('part_time_patterns.csv') else 'NOT_APPLICABLE',
-        'No part-time employment was found in Employment Hero history.')
+    add('CONTROL_REGISTER','part_time_patterns.csv','part_time_patterns.csv','NOT_APPLICABLE','No part-time employment was found in Employment Hero history.')
+
 for filename,detail in {
     'overtime_rest_controls.csv':'Populate when an employee is directed to resume before the required post-overtime rest period.',
     'meal_break_events.csv':'Populate worked-through/client-meal exceptions when applicable.',
     'toil_register.csv':'Populate written TOIL agreements when TOIL is used.',
     'supplemental_events.csv':'Populate recall, on-call, remote work, active sleepover work or other controlled events when applicable.',
 }.items():
+    frame=reg(filename)
     add('CONTROL_REGISTER',filename,filename,
-        'READY' if csv_has_rows(filename) else 'REGISTER_REVIEW',
+        'READY' if not frame.empty else 'REGISTER_REVIEW',
         detail+' An empty register is acceptable only after confirming the event type was not applicable in the audit window.')
 
 out=pd.DataFrame(findings).drop_duplicates(['finding_type','source_key','source_label']);out['checked_at']=pd.Timestamp.utcnow();write_df(spark,out,f'{catalog}.ops.readiness_findings','overwrite');display(out.sort_values(['status','finding_type','source_label']))
@@ -82,4 +86,4 @@ print('\nAUDIT READINESS SUMMARY');print(out.status.value_counts().to_string())
 if len(blocking):
     print(f'\nNEXT: resolve {len(blocking)} blocking mappings/registers before relying on remediation totals.')
 else:
-    print('\nBlocking mappings/registers are present. Review REGISTER_REVIEW and MAPPING_RECOMMENDED items, then run a one-month validation audit.')
+    print('\nBlocking mappings/registers have employee-level coverage. Review REGISTER_REVIEW and MAPPING_RECOMMENDED items, then run a one-month validation audit.')
