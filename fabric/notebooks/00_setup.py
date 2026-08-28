@@ -9,9 +9,11 @@ from schads_audit.fabric_io import (
     overwrite_rule_tables,
     create_views,
 )
+from schads_audit.fabric_bi_io import ensure_current_tables
 
 create_lakehouse_objects(spark)
 ensure_output_tables(spark)
+ensure_current_tables(spark)
 lib = bundled_rule_library()
 errors = lib.validate()
 if errors:
@@ -69,5 +71,6 @@ manifest = {
 
 print("AuditHero Fabric Lakehouse initialized")
 print(f"Loaded {len(lib.rate_packs)} rate packs, {len(lib.condition_packs)} condition packs, {len(lib.allowance_packs)} allowance packs")
+print("Direct Lake snapshot tables are ready under gold.current_*")
 print(f"Control files: {CONFIG}")
 notebookutils.notebook.exit("success")
