@@ -16,13 +16,25 @@ client=EmploymentHeroHRClient(secret('EH_HR_CLIENT_ID'),secret('EH_HR_CLIENT_SEC
 def load(name):
     p=ROOT/'config'/name
     return json.loads(p.read_text()) if p.exists() else {}
+
+def csv_has_rows(name):
+    p=ROOT/'config'/name
+    if not p.exists(): return False
+    try: return not pd.read_csv(p).empty
+    except (pd.errors.EmptyDataError, Exception): return False
+
 cls_map=load('classification_mapping.json');pay_map=load('pay_category_mapping.json');work_map=load('work_type_mapping.json');loc_map=load('work_location_state_mapping.json')
 findings=[]
 def add(kind,key,label,status,detail=''):
     findings.append({'finding_type':kind,'source_key':str(key or ''),'source_label':str(label or ''),'status':status,'detail':detail})
 
 employees=client.employees(org);employee_ids=[str(x.get('id')) for x in employees if x.get('id')]
+has_part_time=False
+for emp in employees:
+    if 'PART' in str(first(emp,'employment_type','employmentType',default='') or '').upper(): has_part_time=True
 for eid in employee_ids:
+    for hist in client.employment_histories(org,eid):
+        if 'PART' in str(first(hist,'employment_type','employmentType',default='') or '').upper(): has_part_time=True
     for pdrow in client.pay_details(org,eid):
         label=first(pdrow,'classification','classification_name','classificationName');pid=first(pdrow,'id','Id');mapped=None
         for k in (str(pid or ''),str(label or '')):
@@ -40,11 +52,34 @@ for row in client.work_locations(org):
     if not mapped:
         add('WORK_LOCATION',rid,label,'MAPPING_REQUIRED','State is required for public-holiday auditing')
     else:
-        key=cfgrow.get('holiday_location_key')
-        detail=f"state={cfgrow.get('state')}"+(f"; holiday_location_key={key}" if key else '; no local holiday key configured')
+        key=cfgrow.get('holiday_location_key');detail=f"state={cfgrow.get('state')}"+(f"; holiday_location_key={key}" if key else '; no local holiday key configured')
         add('WORK_LOCATION',rid,label,'READY' if key else 'MAPPING_RECOMMENDED',detail)
 
+add('CONTROL_REGISTER','industrial_instrument_history.csv','industrial_instrument_history.csv',
+    'READY' if csv_has_rows('industrial_instrument_history.csv') else 'REGISTER_REQUIRED',
+    'Record effective-dated Award / enterprise agreement / IFA coverage for the historical population.')
+if has_part_time:
+    add('CONTROL_REGISTER','part_time_patterns.csv','part_time_patterns.csv',
+        'READY' if csv_has_rows('part_time_patterns.csv') else 'REGISTER_REQUIRED',
+        'Part-time employment exists; load effective-dated written guaranteed-hours patterns.')
+else:
+    add('CONTROL_REGISTER','part_time_patterns.csv','part_time_patterns.csv',
+        'READY' if csv_has_rows('part_time_patterns.csv') else 'NOT_APPLICABLE',
+        'No part-time employment was found in Employment Hero history.')
+for filename,detail in {
+    'overtime_rest_controls.csv':'Populate when an employee is directed to resume before the required post-overtime rest period.',
+    'meal_break_events.csv':'Populate worked-through/client-meal exceptions when applicable.',
+    'toil_register.csv':'Populate written TOIL agreements when TOIL is used.',
+    'supplemental_events.csv':'Populate recall, on-call, remote work, active sleepover work or other controlled events when applicable.',
+}.items():
+    add('CONTROL_REGISTER',filename,filename,
+        'READY' if csv_has_rows(filename) else 'REGISTER_REVIEW',
+        detail+' An empty register is acceptable only after confirming the event type was not applicable in the audit window.')
+
 out=pd.DataFrame(findings).drop_duplicates(['finding_type','source_key','source_label']);out['checked_at']=pd.Timestamp.utcnow();write_df(spark,out,f'{catalog}.ops.readiness_findings','overwrite');display(out.sort_values(['status','finding_type','source_label']))
-critical=out[out.status=='MAPPING_REQUIRED'];print('\nAUDIT READINESS SUMMARY');print(out.status.value_counts().to_string())
-if len(critical):print(f'\nNEXT: resolve {len(critical)} required mappings before a remediation audit. See config/*.example files.')
-else:print('\n✓ Required mappings are present. Review MAPPING_RECOMMENDED items, then run a one-month validation audit.')
+blocking=out[out.status.isin(['MAPPING_REQUIRED','REGISTER_REQUIRED'])]
+print('\nAUDIT READINESS SUMMARY');print(out.status.value_counts().to_string())
+if len(blocking):
+    print(f'\nNEXT: resolve {len(blocking)} blocking mappings/registers before relying on remediation totals.')
+else:
+    print('\nBlocking mappings/registers are present. Review REGISTER_REVIEW and MAPPING_RECOMMENDED items, then run a one-month validation audit.')
