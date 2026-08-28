@@ -1,0 +1,36 @@
+{
+  "workspace_id": "00000000-0000-0000-0000-000000000000",
+  "workspace_name": "AuditHero Payroll Compliance",
+  "lakehouse_name": "AuditHero_Lakehouse",
+  "environment_name": "AuditHero_Environment",
+  "semantic_model_name": "AuditHero - SCHADS Payroll Compliance",
+  "report_name": "AuditHero - SCHADS Payroll Compliance",
+  "key_vault_url": "https://your-key-vault.vault.azure.net/",
+  "monthly_schedule": {
+    "enabled": false,
+    "day_of_month": 25,
+    "time": "09:00",
+    "windows_timezone": "W. Australia Standard Time",
+    "lookback_days": 45
+  },
+  "historical_defaults": {
+    "start_date": "2023-07-01",
+    "end_date": "2026-06-30",
+    "actual_pay_source": "PAYROLL_API"
+  },
+  "secret_names": {
+    "organisation_id": "EH-ORGANISATION-ID",
+    "hr_client_id": "EH-HR-CLIENT-ID",
+    "hr_client_secret": "EH-HR-CLIENT-SECRET",
+    "hr_refresh_token": "EH-HR-REFRESH-TOKEN",
+    "payroll_api_key": "EH-PAYROLL-API-KEY",
+    "payroll_business_id": "EH-PAYROLL-BUSINESS-ID"
+  },
+  "deploy": {
+    "run_setup": true,
+    "run_self_test": true,
+    "build_semantic_model": true,
+    "build_report": true,
+    "create_pipelines": true
+  }
+}
