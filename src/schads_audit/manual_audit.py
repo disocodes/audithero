@@ -32,15 +32,35 @@ def _control(frames, name, root):
 
 
 def _pay_category_mapping(frames, root):
+    """Return pay-category treatments from either supported workbook layout.
+
+    The original AuditHero canonical workbook uses:
+      pay_category_id, pay_category, audit_treatment
+
+    The generic source-mapping converter may produce the neutral form:
+      source_key, source_label, treatment
+
+    Supporting both keeps existing workbooks backward compatible while allowing
+    non-Employment-Hero payroll exports to use the same reconciliation engine.
+    """
     df=frames.get("pay_category_mapping")
-    if df is None or df.empty: return _json(Path(root)/"pay_category_mapping.json")
+    if df is None or df.empty:
+        return _json(Path(root)/"pay_category_mapping.json")
     mapping={}
     for _,r in df.iterrows():
-        treatment=str(r.get("audit_treatment") or "").strip().upper()
-        if not treatment: continue
+        treatment=str(r.get("audit_treatment") or r.get("treatment") or "").strip().upper()
+        if not treatment:
+            continue
         value={"audit_treatment":treatment}
-        for key in (r.get("pay_category_id"),r.get("pay_category")):
-            if pd.notna(key) and str(key).strip(): mapping[str(key).strip()]=value
+        keys=(
+            r.get("pay_category_id"),
+            r.get("pay_category"),
+            r.get("source_key"),
+            r.get("source_label"),
+        )
+        for key in keys:
+            if pd.notna(key) and str(key).strip():
+                mapping[str(key).strip()]=value
     return mapping
 
 
