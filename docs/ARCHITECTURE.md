@@ -1,15 +1,57 @@
-# Architecture
+# AuditHero architecture
 
-AuditHero uses a simple Unity Catalog layout:
+AuditHero separates source-system conversion, canonical payroll evidence, Award calculation and reporting so each layer can be reviewed independently.
 
-| Schema | Purpose |
-|---|---|
-| `bronze` | landing area / future immutable API payload archive |
-| `silver` | canonical employee, history, timesheet, payroll and holiday records |
-| `ref` | effective-dated SCHADS rates, conditions, allowances and source evidence |
-| `gold` | shift entitlement evidence and employee/pay-period reconciliation |
-| `ops` | audit run history |
+```text
+Payroll / HR / Timekeeping exports       Optional Employment Hero API
+              |                                      |
+              v                                      v
+     Source Mapping + Conversion              API normalization
+              \                                      /
+               \                                    /
+                v                                  v
+                 Canonical AuditHero datasets
+                           |
+                    File/API Readiness
+                           |
+                           v
+                 Shared SCHADS audit engine
+                           |
+             Effective-dated MA000100 rules
+                           |
+          +----------------+----------------+
+          |                |                |
+     audit detail     event/TOIL       reconciliation
+          |                |                |
+          +----------------+----------------+
+                           |
+                  latest successful data
+                           |
+               +-----------+-----------+
+               |                       |
+          Power BI/Fabric        Databricks AI/BI
+```
 
-The **shift** is the entitlement-calculation grain. The **employee + pay period** is the primary under/over-payment reconciliation grain. This avoids assuming that Employment Hero exposes a perfect one-to-one relationship between a timesheet and every payroll earning line.
+## Source mapping layer
 
-Every audit carries an `audit_run_id`. Historical re-runs are append-only; the BI views select the latest successful run for a matching audit window.
+This layer knows how your source system names fields. It converts arbitrary CSV/Excel exports to canonical AuditHero datasets and records `mapping_used.json` plus a conversion report. It does not contain SCHADS formulas.
+
+## Canonical evidence layer
+
+The canonical model provides stable employee, employment history, classification/pay details, timesheet, roster, payroll and evidence-register structures. This allows source systems to change without changing the Award engine.
+
+## Shared calculation layer
+
+Both Fabric and Databricks call the same Python modules and effective-dated rule packs. Platform notebooks orchestrate work but do not maintain separate payroll formulas.
+
+## Storage/output layer
+
+Fabric uses Lakehouse/Delta-style tables and Databricks uses Unity Catalog/Delta. Both persist detailed evidence and pay-period reconciliation rather than only a dashboard total.
+
+## Reporting layer
+
+Fabric materializes latest-successful `gold.current_*` tables for Direct Lake/Power BI. Databricks exposes latest-successful views/tables to AI/BI. Failed runs should not replace the last successful operator-facing snapshot.
+
+## Fail-closed principle
+
+When an automated allocation would require guessing a material fact, AuditHero records a review finding/status. This is deliberate: explainable uncertainty is safer than silently producing a precise but unsupported remediation figure.
