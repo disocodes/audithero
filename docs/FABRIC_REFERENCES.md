@@ -1,3 +1,0 @@
-# Fabric implementation references
-
-The Fabric deployer targets current GA Fabric REST contracts for schema-enabled Lakehouse creation, Notebook FabricGitSource definitions, Environment definitions/custom wheels and `staging/publish?beta=false`, Data Pipeline `pipeline-content.json` definitions with `TridentNotebook` activities, and Core Job Scheduler item schedules. BI uses Direct Lake semantic-model/report APIs through Semantic Link Labs.
