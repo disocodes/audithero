@@ -37,3 +37,11 @@ def test_fabric_build_bi_names_each_external_api_stage():
         "STEP 5 — Check Direct Lake fallback state",
     ):
         assert stage in text
+
+
+def test_fabric_build_bi_uses_semantic_link_tom_wrapper_for_measures():
+    text = BUILD_BI.read_text(encoding="utf-8")
+    assert "import Microsoft.AnalysisServices.Tabular" not in text
+    assert "tom.add_measure(" in text
+    assert "TOM.Measure()" not in text
+    assert "inspect.signature(tom.add_measure)" in text
