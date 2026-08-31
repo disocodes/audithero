@@ -18,6 +18,10 @@
 
 delete_audit_data = False
 confirmation = ""
+lakehouse_name = "AuditHero_Lakehouse"
+environment_name = "AuditHero_Environment"
+semantic_model_name = "AuditHero - SCHADS Payroll Compliance"
+report_name = "AuditHero - SCHADS Payroll Compliance"
 
 # To permanently remove the AuditHero Lakehouse and its data, use:
 # delete_audit_data = True
@@ -25,6 +29,7 @@ confirmation = ""
 
 # CELL ********************
 
+import time
 import requests
 
 
@@ -66,10 +71,21 @@ def get_items():
     return items
 
 
+def wait_until_absent(item_id: str, timeout_seconds: int = 300):
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if not any(i.get("id") == item_id for i in get_items()):
+            return
+        time.sleep(3)
+    raise TimeoutError(f"Timed out waiting for Fabric item deletion: {item_id}")
+
+
 def delete_item(item):
     r = session.delete(f"{API}/workspaces/{workspace_id}/items/{item['id']}", timeout=120)
     if r.status_code not in (200, 202, 204, 404):
         raise RuntimeError(f"Could not delete {item.get('displayName')}: {r.status_code} {r.text}")
+    if r.status_code != 404:
+        wait_until_absent(item["id"])
     print(f"Removed: {item.get('type')} — {item.get('displayName')}")
 
 
@@ -89,8 +105,9 @@ managed_names = {
     "AuditHero - Historical Audit Pipeline",
     "AuditHero - Monthly Payroll Pipeline",
     "AuditHero - Uploaded Files Audit Pipeline",
-    "AuditHero - SCHADS Payroll Compliance",
-    "AuditHero_Environment",
+    semantic_model_name,
+    report_name,
+    environment_name,
 }
 
 items = get_items()
@@ -105,7 +122,7 @@ priority = {
     "Lakehouse": 90,
 }
 
-targets = [i for i in items if i.get("displayName") in managed_names]
+targets = [i for i in items if i.get("displayName") in managed_names and not (i.get("type") == "Lakehouse")]
 targets.sort(key=lambda i: priority.get(i.get("type"), 60))
 
 for item in targets:
@@ -117,13 +134,13 @@ for item in targets:
 # it permanently removes payroll source files, audit evidence and Delta tables.
 if delete_audit_data:
     items = get_items()
-    lakehouse = next((i for i in items if i.get("type") == "Lakehouse" and i.get("displayName") == "AuditHero_Lakehouse"), None)
+    lakehouse = next((i for i in items if i.get("type") == "Lakehouse" and i.get("displayName") == lakehouse_name), None)
     if lakehouse:
         delete_item(lakehouse)
     else:
-        print("AuditHero_Lakehouse was not found.")
+        print(f"{lakehouse_name} was not found.")
 else:
-    print("Preserved: Lakehouse — AuditHero_Lakehouse")
+    print(f"Preserved: Lakehouse — {lakehouse_name}")
 
 print("\nAuditHero uninstall completed.")
 if not delete_audit_data:
