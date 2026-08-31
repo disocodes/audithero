@@ -27,7 +27,6 @@ stage = "bootstrap"
 try:
     stage = "import Semantic Link / AuditHero BI dependencies"
     import sempy.fabric as fabric
-    import Microsoft.AnalysisServices.Tabular as TOM
 
     from sempy_labs.directlake import (
         generate_direct_lake_semantic_model,
@@ -112,25 +111,34 @@ try:
         },
     }
 
+    # Do not import Microsoft.AnalysisServices.Tabular directly in the notebook.
+    # Semantic Link initializes the TOM runtime when connect_semantic_model opens;
+    # its TOMWrapper.add_measure helper then creates new .NET measure objects safely.
     with connect_semantic_model(
         dataset=semantic_model_name,
         workspace=workspace_name,
         readonly=False,
     ) as tom:
+        print(f"TOM add_measure signature: {inspect.signature(tom.add_measure)}")
         for table_name, measures in MEASURES.items():
             table = tom.model.Tables[table_name]
             existing = {measure.Name: measure for measure in table.Measures}
             for name, (expression, format_string, description) in measures.items():
                 if name in existing:
                     measure = existing[name]
+                    measure.Expression = expression
+                    measure.FormatString = format_string
+                    measure.Description = description
+                    measure.DisplayFolder = "AuditHero KPIs"
                 else:
-                    measure = TOM.Measure()
-                    measure.Name = name
-                    table.Measures.Add(measure)
-                measure.Expression = expression
-                measure.FormatString = format_string
-                measure.Description = description
-                measure.DisplayFolder = "AuditHero KPIs"
+                    tom.add_measure(
+                        table_name=table_name,
+                        measure_name=name,
+                        expression=expression,
+                        format_string=format_string,
+                        description=description,
+                        display_folder="AuditHero KPIs",
+                    )
 
     stage = "STEP 4 — Create or update the Power BI report"
     print(stage)
