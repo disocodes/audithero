@@ -14,10 +14,10 @@ SNAPSHOT_SOURCES = {
 def _ensure_snapshot_table(spark, target: str, source: str) -> None:
     """Create an empty Delta snapshot table with the source table's exact schema.
 
-    Fabric Runtime 2.0 schema-enabled Lakehouses can mis-resolve
-    ``CREATE TABLE target LIKE source`` through ``spark_catalog``.  Spark's
-    DataFrame ``saveAsTable('schema.table')`` path is supported by Fabric and
-    preserves the source schema without copying rows.
+    Fabric Runtime 2.0 schema-enabled Lakehouses can mis-resolve SQL table-schema
+    cloning through ``spark_catalog``. Spark's DataFrame
+    ``saveAsTable('schema.table')`` path is supported by Fabric and preserves the
+    source schema without copying rows.
     """
     try:
         if spark.catalog.tableExists(target):
