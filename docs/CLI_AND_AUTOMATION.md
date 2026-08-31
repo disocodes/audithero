@@ -1,12 +1,12 @@
 # Optional CLI and automation
 
-AuditHero can be installed and operated from the Microsoft Fabric or Databricks UI. The commands in this guide are optional equivalents for administrators who prefer repeatable scripted deployment, CI/CD or disaster recovery.
+AuditHero's primary installation method is the platform installer notebook. The commands in this guide are optional equivalents for administrators who prefer scripted deployment, CI/CD or disaster recovery.
 
 Normal payroll/audit operators do not need these commands.
 
 ## Microsoft Fabric automated deployment
 
-Copy the example configuration, set the Fabric workspace ID and run the platform script.
+The notebook installer is `installers/Fabric_Install_AuditHero.py`. The scripted alternative is:
 
 ### Linux/macOS
 
@@ -22,11 +22,11 @@ Copy-Item fabric/config/fabric.example.json fabric/config/fabric.json
 .\fabric\scripts\deploy.ps1
 ```
 
-The automated Fabric installer creates/updates the core workspace items, canonical uploaded-file path, source-mapping pipelines and **AuditHero - Convert Mapped Files and Run Audit**. Key Vault configuration may remain blank when Employment Hero API mode is not used.
+The automated Fabric deployer creates/updates the core workspace items, canonical uploaded-file path, source-mapping pipelines and **AuditHero - Convert Mapped Files and Run Audit**. Key Vault configuration may remain blank when Employment Hero API mode is not used.
 
 ## Databricks automated bundle deployment
 
-UI bundle deployment is the normal installation option. The scripted equivalent is available on both major administration environments.
+The notebook installer is `installers/Databricks_Install_AuditHero.py`. The Databricks bundle remains available for scripted deployments.
 
 ### Linux/macOS
 
@@ -48,9 +48,9 @@ The Databricks deployment validates the bundle, deploys the jobs/dashboard, runs
 
 Only run `scripts/configure_secrets.sh` or `scripts/configure_secrets.ps1` if optional Employment Hero API mode is being enabled.
 
-## Source mapping after scripted deployment
+## Source mapping after installation
 
-Scripted deployment does not change the normal payroll-operator workflow. After installation, users still work in the platform UI:
+Regardless of whether AuditHero was installed by notebook or script, normal payroll users work in the platform UI:
 
 1. upload raw exports;
 2. build/review `source_mapping.xlsx`;
@@ -59,7 +59,7 @@ Scripted deployment does not change the normal payroll-operator workflow. After 
 
 ## Preflight
 
-`scripts/preflight.py` performs repository/config structural checks before an automated deployment. It checks items such as Python/JSON/YAML structure, rule-manifest references and required cross-platform deployment entrypoints.
+`scripts/preflight.py` performs repository/config structural checks before an automated deployment. It checks items such as Python/JSON/YAML structure, rule-manifest references, installer notebooks and required cross-platform deployment entrypoints.
 
 Preflight does not replace:
 
@@ -78,4 +78,4 @@ Use the same controlled order for automated promotion:
 6. obtain the required approval; and
 7. promote to production.
 
-Do not automatically enable recurring payroll schedules merely because an infrastructure deployment succeeded.
+Do not automatically enable recurring payroll schedules merely because infrastructure deployment succeeded.
