@@ -9,10 +9,10 @@
 
 # AuditHero — Uninstall
 #
-# Import this notebook into the Fabric workspace that contains AuditHero and run
-# all cells. By default the Lakehouse is preserved so payroll/audit evidence is
-# not destroyed accidentally. Set delete_audit_data=True and enter the exact
-# confirmation phrase to remove the AuditHero Lakehouse and its data as well.
+# Run this notebook from the installed AuditHero administration notebooks. By
+# default the Lakehouse is preserved so payroll/audit evidence is not destroyed
+# accidentally. Set delete_audit_data=True and enter the exact confirmation phrase
+# to remove the AuditHero Lakehouse and its data as well.
 
 # CELL ********************
 
@@ -42,6 +42,7 @@ def _context_value(name: str):
 
 workspace_id = _context_value("currentWorkspaceId")
 workspace_name = _context_value("currentWorkspaceName")
+current_notebook_id = _context_value("currentNotebookId")
 if not workspace_id:
     raise RuntimeError("Fabric workspace ID could not be detected from this notebook session.")
 if delete_audit_data and confirmation != "DELETE AUDITHERO DATA":
@@ -90,6 +91,8 @@ def delete_item(item):
 
 
 managed_names = {
+    "AuditHero - Install or Upgrade",
+    "AuditHero - Uninstall",
     "AuditHero - Setup",
     "AuditHero - Self Test",
     "AuditHero - Employment Hero Connection",
@@ -112,7 +115,8 @@ managed_names = {
 
 items = get_items()
 
-# Delete dependent items first: pipelines/reports/models, then notebooks/environment.
+# Delete dependent items first. The currently running uninstaller is deferred to
+# the final operation so its own session can finish the rest of the cleanup.
 priority = {
     "DataPipeline": 10,
     "Report": 20,
@@ -122,7 +126,12 @@ priority = {
     "Lakehouse": 90,
 }
 
-targets = [i for i in items if i.get("displayName") in managed_names and not (i.get("type") == "Lakehouse")]
+targets = [
+    i for i in items
+    if i.get("displayName") in managed_names
+    and i.get("type") != "Lakehouse"
+    and i.get("id") != current_notebook_id
+]
 targets.sort(key=lambda i: priority.get(i.get("type"), 60))
 
 for item in targets:
@@ -145,4 +154,11 @@ else:
 print("\nAuditHero uninstall completed.")
 if not delete_audit_data:
     print("The AuditHero Lakehouse and its payroll/audit data remain in the workspace.")
-    print("Run this notebook again with the explicit full-delete confirmation if permanent data removal is required.")
+    print("Run the installer again later if AuditHero needs to be reinstalled against the preserved data.")
+
+# Delete the running uninstaller last. Do not poll after this request because its
+# workspace item is the notebook executing the current session.
+if current_notebook_id:
+    cleanup = session.delete(f"{API}/workspaces/{workspace_id}/items/{current_notebook_id}", timeout=120)
+    if cleanup.status_code not in (200, 202, 204, 404):
+        print(f"The running uninstaller notebook could not remove itself automatically: {cleanup.status_code}")
