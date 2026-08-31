@@ -14,5 +14,6 @@ python (Join-Path $Root "fabric\scripts\deploy_file_source.py") --config $Config
 python (Join-Path $Root "fabric\scripts\deploy_source_mapping.py") --config $Config
 Write-Host ""
 Write-Host "AuditHero Fabric deployment complete."
-Write-Host "Normal UI workflow: upload raw exports -> Build Source Mapping Workbook -> edit/upload source_mapping.xlsx -> Convert Source Files -> Uploaded Files Audit Pipeline -> Power BI."
+Write-Host "Normal UI workflow: upload raw exports -> Build Source Mapping Workbook -> approve source_mapping.xlsx -> Convert Mapped Files and Run Audit -> Power BI."
+Write-Host "Use Convert Source Files when you only want to test conversion/readiness."
 Write-Host "Employment Hero API credentials are optional."
