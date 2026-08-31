@@ -3,12 +3,21 @@ on:
   push:
     branches: [main]
   pull_request:
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.11"}
-      - run: pip install -e ".[dev]"
-      - run: pytest -q
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install development and build dependencies
+        run: python -m pip install -e ".[dev]" build
+      - name: Cross-platform repository preflight
+        run: python scripts/preflight.py --platform all
+      - name: Unit and platform parity tests
+        run: pytest -q
+      - name: Build distributable wheel
+        run: python -m build --wheel
