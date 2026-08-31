@@ -1,12 +1,27 @@
 # AuditHero on Microsoft Fabric
 
-AuditHero is installed and operated from the **Microsoft Fabric UI**.
+AuditHero is installed, upgraded, operated and removed from the **Microsoft Fabric UI**.
 
-## Install or upgrade
+## First installation
 
-Download/import `installers/Fabric_Install_AuditHero.py` into the target Fabric workspace and choose **Run all**.
+Import `installers/Fabric_Install_AuditHero.py` into the target Fabric workspace and choose **Run all**.
 
-The installer creates or updates the AuditHero Lakehouse, Environment, notebooks, pipelines, schedule, Direct Lake model and Power BI report and runs Setup/Self Test automatically.
+The installer creates or updates:
+
+- `AuditHero_Lakehouse`;
+- `AuditHero_Environment`;
+- AuditHero notebooks;
+- Data Factory pipelines;
+- the monthly schedule in its configured disabled/enabled state;
+- the Direct Lake semantic model; and
+- the AuditHero Power BI report.
+
+It then runs Setup and Self Test automatically and installs two permanent administration notebooks:
+
+- **AuditHero - Install or Upgrade**
+- **AuditHero - Uninstall**
+
+After the first installation, use those installed notebooks for upgrades and removal. You do not need to import the bootstrap again unless you are reinstalling after removal.
 
 See [Install AuditHero in Microsoft Fabric](../docs/INSTALL_FABRIC_UI.md).
 
@@ -26,13 +41,20 @@ If the exports already use AuditHero canonical format, upload them under `Files/
 
 Employment Hero API connectivity is optional.
 
+## Upgrade
+
+Open **AuditHero - Install or Upgrade**, select the approved `release_ref` if required and choose **Run all**. The notebook updates the existing AuditHero application and reruns Setup and Self Test.
+
 ## Uninstall
 
-Import `installers/Fabric_Uninstall_AuditHero.py` and run it. Application resources are removed while the Lakehouse is preserved by default. Permanent data removal requires the explicit full-delete confirmation in the notebook.
+Open **AuditHero - Uninstall** and choose **Run all**.
+
+The normal uninstall removes AuditHero application resources while preserving `AuditHero_Lakehouse` and its payroll/audit data. Permanent data removal requires the explicit confirmation phrase `DELETE AUDITHERO DATA` inside the uninstaller notebook.
 
 ## Main documentation
 
 - [Quick start](../QUICKSTART.md)
+- [Install, upgrade and remove](../docs/INSTALL_FABRIC_UI.md)
 - [Import and field mapping](../docs/IMPORT_AND_FIELD_MAPPING.md)
 - [Audit data requirements](../docs/AUDIT_DATA_REQUIREMENTS.md)
 - [Running audits](../docs/RUNNING_AUDITS.md)
