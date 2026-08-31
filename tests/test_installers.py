@@ -145,6 +145,18 @@ def test_fabric_spark_sql_helpers_name_failing_operations_and_avoid_shortcuts():
     assert "GROUP BY ALL" not in io
 
 
+def test_fabric_bi_snapshot_tables_clone_schema_without_create_table_like():
+    bi_io = (ROOT / "src" / "schads_audit" / "fabric_bi_io.py").read_text(
+        encoding="utf-8"
+    )
+    assert "CREATE TABLE IF NOT EXISTS" not in bi_io
+    assert " LIKE " not in bi_io
+    assert "spark.catalog.tableExists(target)" in bi_io
+    assert "spark.table(source)" in bi_io
+    assert ".limit(0)" in bi_io
+    assert ".saveAsTable(target)" in bi_io
+
+
 def test_fabric_notebook_updates_do_not_request_platform_metadata_without_platform_file():
     deployer = (ROOT / "fabric" / "scripts" / "deploy_fabric.py").read_text(
         encoding="utf-8"
