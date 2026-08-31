@@ -1,8 +1,15 @@
 # AuditHero architecture
 
-AuditHero separates source-system conversion, canonical payroll evidence, Award calculation and reporting so each layer can be reviewed independently.
+AuditHero separates installation, source-system conversion, canonical payroll evidence, Award calculation and reporting so each layer can be operated and reviewed independently.
 
 ```text
+One-time platform installer notebook
+              |
+              v
+Fabric workspace or Databricks workspace
+              |
+              +--------------------------------------+
+              |                                      |
 Payroll / HR / Timekeeping exports       Optional Employment Hero API
               |                                      |
               v                                      v
@@ -32,9 +39,15 @@ Payroll / HR / Timekeeping exports       Optional Employment Hero API
           Power BI/Fabric        Databricks AI/BI
 ```
 
+## Installation layer
+
+Each platform has an installer notebook that is run from the platform UI. It creates or updates the AuditHero application resources and runs Setup/Self Test.
+
+The matching uninstaller removes AuditHero-managed application resources. Payroll/audit storage is preserved by default and requires an explicit confirmation before permanent deletion.
+
 ## Source mapping layer
 
-This layer knows how your source system names fields. It converts arbitrary CSV/Excel exports to canonical AuditHero datasets and records `mapping_used.json` plus a conversion report. It does not contain SCHADS formulas.
+This layer knows how the source system names fields. It converts arbitrary CSV/Excel exports to canonical AuditHero datasets and records `mapping_used.json` plus a conversion report. It does not contain SCHADS formulas.
 
 ## Canonical evidence layer
 
@@ -46,7 +59,7 @@ Both Fabric and Databricks call the same Python modules and effective-dated rule
 
 ## Storage/output layer
 
-Fabric uses Lakehouse/Delta-style tables and Databricks uses Unity Catalog/Delta. Both persist detailed evidence and pay-period reconciliation rather than only a dashboard total.
+Fabric uses a Lakehouse and Databricks uses Unity Catalog/Delta. Both persist detailed evidence and pay-period reconciliation rather than only a dashboard total.
 
 ## Reporting layer
 
@@ -54,4 +67,4 @@ Fabric materializes latest-successful `gold.current_*` tables for Direct Lake/Po
 
 ## Fail-closed principle
 
-When an automated allocation would require guessing a material fact, AuditHero records a review finding/status. This is deliberate: explainable uncertainty is safer than silently producing a precise but unsupported remediation figure.
+When an automated allocation would require guessing a material fact, AuditHero records a review finding/status. This keeps unresolved evidence separate from confirmed remediation figures.
