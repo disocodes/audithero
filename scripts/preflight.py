@@ -73,7 +73,7 @@ def check_rules(errors):
 def check_required_files(errors,platform):
     common=["README.md","QUICKSTART.md","pyproject.toml","src/schads_audit/engine.py","src/schads_audit/rules.py","src/schads_audit/file_source.py","src/schads_audit/manual_audit.py","tools/build_input_workbook.py","tests/test_platform_parity.py"]
     fabric=["fabric/config/fabric.example.json","fabric/scripts/deploy.sh","fabric/scripts/deploy.ps1","fabric/scripts/deploy_fabric.py","fabric/notebooks/00_setup.py","fabric/notebooks/01_self_test.py","fabric/notebooks/04_historical_audit.py","fabric/notebooks/04b_manual_file_audit.py","fabric/notebooks/05_monthly_audit.py","fabric/notebooks/06_build_bi.py","fabric/docs/DEPLOYMENT.md"]
-    databricks=["databricks.yml","resources/jobs.yml","resources/dashboard.yml","scripts/deploy.sh","notebooks/00_setup.py","notebooks/01b_self_test.py","notebooks/03_historical_audit.py","notebooks/03b_manual_file_audit.py","notebooks/04_monthly_payroll_audit.py"]
+    databricks=["databricks.yml","resources/jobs.yml","resources/dashboard.yml","scripts/deploy.sh","scripts/deploy.ps1","scripts/configure_secrets.sh","scripts/configure_secrets.ps1","notebooks/00_setup.py","notebooks/01b_self_test.py","notebooks/03_historical_audit.py","notebooks/03b_manual_file_audit.py","notebooks/04_monthly_payroll_audit.py"]
     selected=common+(fabric if platform in ("fabric","all") else [])+(databricks if platform in ("databricks","all") else [])
     for rel in selected:
         if not (ROOT/rel).exists(): fail(f"Missing required file: {rel}",errors)
