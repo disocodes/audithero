@@ -105,6 +105,17 @@ def test_fabric_runtime_verifies_and_repairs_published_custom_wheel():
     assert "ensure_audithero_wheel(environment_id)" in runtime
 
 
+def test_fabric_runtime_prints_compact_failure_summary_before_traceback():
+    runtime = (ROOT / "fabric" / "scripts" / "run_fabric_initialization.py").read_text(
+        encoding="utf-8"
+    )
+    assert "AUDITHERO FAILURE SUMMARY" in runtime
+    assert "AUDITHERO FAILURE JSON" in runtime
+    assert "_print_failure_summary" in runtime
+    assert "stage=" in runtime
+    assert "exception=" in runtime
+
+
 def test_fabric_setup_returns_structured_failure_details():
     setup = (ROOT / "fabric" / "notebooks" / "00_setup.py").read_text(
         encoding="utf-8"
