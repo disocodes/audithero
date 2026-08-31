@@ -25,6 +25,11 @@ def test_fabric_deployer_is_valid_python_source():
     ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def test_fabric_runtime_initializer_is_valid_python_source():
+    path = ROOT / "fabric" / "scripts" / "run_fabric_initialization.py"
+    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
 def test_installers_default_to_preserving_optional_credentials_and_schedules():
     fabric = source("fabric_install")
     assert 'key_vault_url = ""' in fabric
@@ -61,6 +66,41 @@ def test_fabric_installer_surfaces_child_deployer_errors():
     assert "stderr=subprocess.STDOUT" in fabric
     assert "AuditHero installer step" in fabric
     assert "CalledProcessError" in fabric
+
+
+def test_fabric_installer_separates_resource_deployment_from_spark_initialization():
+    fabric = source("fabric_install")
+    assert "run_fabric_initialization.py" in fabric
+    assert 'command.append("--skip-run")' in fabric
+    assert "deploy_fabric.py" in fabric
+
+    runtime = (ROOT / "fabric" / "scripts" / "run_fabric_initialization.py").read_text(
+        encoding="utf-8"
+    )
+    assert "/jobs/execute/instances?jobType=RunNotebook" in runtime
+    assert "exitValue" in runtime
+    assert "AUDITHERO_ERROR:" in runtime
+    assert "defaultLakehouse" in runtime
+    assert "attachedEnvironment" in runtime
+
+
+def test_fabric_setup_returns_structured_failure_details():
+    setup = (ROOT / "fabric" / "notebooks" / "00_setup.py").read_text(
+        encoding="utf-8"
+    )
+    assert "AUDITHERO_ERROR:" in setup
+    assert '"stage": stage' in setup
+    assert '"exception_type"' in setup
+    assert "traceback.format_exc" in setup
+
+
+def test_fabric_spark_sql_helpers_name_failing_operations_and_avoid_shortcuts():
+    io = (ROOT / "src" / "schads_audit" / "fabric_io.py").read_text(
+        encoding="utf-8"
+    )
+    assert "Fabric Spark SQL failed while" in io
+    assert "QUALIFY ROW_NUMBER" not in io
+    assert "GROUP BY ALL" not in io
 
 
 def test_fabric_notebook_updates_do_not_request_platform_metadata_without_platform_file():
