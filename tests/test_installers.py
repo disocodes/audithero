@@ -20,6 +20,11 @@ def test_all_installers_are_valid_python_sources():
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def test_fabric_deployer_is_valid_python_source():
+    path = ROOT / "fabric" / "scripts" / "deploy_fabric.py"
+    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
 def test_installers_default_to_preserving_optional_credentials_and_schedules():
     fabric = source("fabric_install")
     assert 'key_vault_url = ""' in fabric
@@ -73,6 +78,28 @@ def test_fabric_pipeline_schedule_uses_workload_specific_execute_endpoint():
     assert "/dataPipelines/{pipeline_id}" in deployer
     assert '"/jobs/execute/schedules"' in deployer
     assert "/jobs/DefaultJob/schedules" not in deployer
+
+
+def test_fabric_waits_for_environment_publish_before_notebook_runs():
+    deployer = (ROOT / "fabric" / "scripts" / "deploy_fabric.py").read_text(
+        encoding="utf-8"
+    )
+    assert "wait_environment_publish" in deployer
+    assert "publishDetails" in deployer
+    assert 'state == "success"' in deployer
+    assert "/staging/publish?beta=false" in deployer
+
+
+def test_fabric_notebook_runs_use_explicit_compute_bindings_and_diagnostics():
+    deployer = (ROOT / "fabric" / "scripts" / "deploy_fabric.py").read_text(
+        encoding="utf-8"
+    )
+    assert "/jobs/execute/instances?beta=false" in deployer
+    assert "defaultLakehouse" in deployer
+    assert "attachedEnvironment" in deployer
+    assert "executionSnapshotUrl" in deployer
+    assert "driverLogUrl" in deployer
+    assert "sparkJobDetailsUrl" in deployer
 
 
 def test_uninstallers_require_explicit_confirmation_for_data_deletion():
