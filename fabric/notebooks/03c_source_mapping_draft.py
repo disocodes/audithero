@@ -25,22 +25,50 @@ except ModuleNotFoundError as exc:
         ) from exc
     raise
 
+
+def _normalize_fabric_lakehouse_path(value: str) -> str:
+    """Translate legacy Fabric notebook mount paths to the current default mount."""
+    text = str(value or "").strip()
+    for legacy, current in (
+        ("/lakehouse/Files", "/lakehouse/default/Files"),
+        ("/lakehouse/Tables", "/lakehouse/default/Tables"),
+    ):
+        if text == legacy or text.startswith(legacy + "/"):
+            normalized = current + text[len(legacy):]
+            print(f"Normalized legacy Fabric Lakehouse path: {text} -> {normalized}")
+            return normalized
+    return text
+
+
 # Parameters supplied by the Fabric pipeline. They are deliberately ordinary
 # strings so an operator can also run this notebook directly from the Fabric UI.
 # source_root: folder containing the original exports.
 # draft_path: where the editable mapping workbook will be written.
 # overwrite: whether an existing draft may be replaced.
+source_root = _normalize_fabric_lakehouse_path(source_root)
+draft_path = _normalize_fabric_lakehouse_path(draft_path)
 
 print("STEP 1 — Inspect raw source files")
+source_dir = Path(source_root)
+if not source_dir.exists():
+    # This is the normal first-run state. Create the operator upload location so
+    # the next action is obvious in the Lakehouse Files UI rather than failing on
+    # a missing directory.
+    source_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Created AuditHero raw-import folder: {source_root}")
+
 inventory = scan_source_items(source_root)
 if inventory.empty:
     raise ValueError(
-        f"No CSV/XLSX files were found under {source_root}. Upload exports to the Lakehouse Files area and run this notebook again."
+        f"No CSV/XLSX files were found under {source_root}. "
+        "Upload the payroll/HR/timekeeping exports to this Lakehouse Files folder "
+        "and run this notebook again."
     )
 display(inventory[["file", "sheet", "item_name", "sample_rows", "columns"]])
 
 print("STEP 2 — Suggest canonical dataset and field matches")
 draft_file = Path(draft_path)
+draft_file.parent.mkdir(parents=True, exist_ok=True)
 if draft_file.exists() and str(overwrite).lower() not in {"true", "1", "yes"}:
     raise FileExistsError(
         f"{draft_path} already exists. Set overwrite=true only if you intentionally want to replace the current draft."
