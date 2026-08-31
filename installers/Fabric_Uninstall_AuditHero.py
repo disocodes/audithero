@@ -30,14 +30,51 @@ report_name = "AuditHero - SCHADS Payroll Compliance"
 # CELL ********************
 
 import time
+import uuid
 import requests
 
 
-def _context_value(name: str):
+def _runtime_context():
     ctx = notebookutils.runtime.context
     if isinstance(ctx, dict):
-        return ctx.get(name)
-    return getattr(ctx, name, None)
+        return ctx
+    if callable(ctx):
+        try:
+            resolved = ctx()
+            if resolved is not None:
+                return resolved
+        except Exception:
+            pass
+    return ctx
+
+
+def _context_value(name: str):
+    ctx = _runtime_context()
+    value = None
+    if isinstance(ctx, dict):
+        value = ctx.get(name)
+    else:
+        try:
+            value = ctx[name]
+        except Exception:
+            getter = getattr(ctx, "get", None)
+            if callable(getter):
+                try:
+                    value = getter(name)
+                except Exception:
+                    value = None
+        if value is None:
+            member = getattr(ctx, name, None)
+            if callable(member):
+                try:
+                    value = member()
+                except Exception:
+                    value = None
+    if value is None:
+        return None
+    if type(value).__module__.startswith("py4j") or type(value).__name__ == "JavaMember":
+        raise RuntimeError(f"Fabric runtime returned an unresolved Py4J object for {name}.")
+    return str(value).strip()
 
 
 workspace_id = _context_value("currentWorkspaceId")
@@ -45,16 +82,20 @@ workspace_name = _context_value("currentWorkspaceName")
 current_notebook_id = _context_value("currentNotebookId")
 if not workspace_id:
     raise RuntimeError("Fabric workspace ID could not be detected from this notebook session.")
+try:
+    workspace_id = str(uuid.UUID(workspace_id))
+except ValueError as exc:
+    raise RuntimeError(f"Fabric returned an invalid workspace ID: {workspace_id!r}") from exc
 if delete_audit_data and confirmation != "DELETE AUDITHERO DATA":
     raise ValueError("Full data deletion requires confirmation = 'DELETE AUDITHERO DATA'.")
 
-print(f"Removing AuditHero-managed items from: {workspace_name} ({workspace_id})")
+print(f"Removing AuditHero-managed items from: {workspace_name or 'current workspace'} ({workspace_id})")
 print("Lakehouse data deletion:", "YES" if delete_audit_data else "NO — data will be preserved")
 
 # CELL ********************
 
 API = "https://api.fabric.microsoft.com/v1"
-token = notebookutils.credentials.getToken("pbi")
+token = str(notebookutils.credentials.getToken("pbi"))
 session = requests.Session()
 session.headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
 
