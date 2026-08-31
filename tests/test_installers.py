@@ -58,6 +58,14 @@ def test_fabric_installer_surfaces_child_deployer_errors():
     assert "CalledProcessError" in fabric
 
 
+def test_fabric_notebook_updates_do_not_request_platform_metadata_without_platform_file():
+    deployer = (ROOT / "fabric" / "scripts" / "deploy_fabric.py").read_text(
+        encoding="utf-8"
+    )
+    assert "updateDefinition?updateMetadata=true" not in deployer
+    assert "notebook-content.py" in deployer
+
+
 def test_uninstallers_require_explicit_confirmation_for_data_deletion():
     for name in ("fabric_uninstall", "databricks_uninstall"):
         text = source(name)
