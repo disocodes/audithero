@@ -12,7 +12,8 @@
     "mapping_path": "/lakehouse/default/Files/import/source_mapping.xlsx",
     "output_root": "/lakehouse/default/Files/input",
     "draft_pipeline_name": "AuditHero - Build Source Mapping Workbook",
-    "conversion_pipeline_name": "AuditHero - Convert Source Files"
+    "conversion_pipeline_name": "AuditHero - Convert Source Files",
+    "mapped_audit_pipeline_name": "AuditHero - Convert Mapped Files and Run Audit"
   },
   "manual_file_source": {
     "enabled": true,
