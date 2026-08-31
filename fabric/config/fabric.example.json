@@ -6,6 +6,14 @@
   "semantic_model_name": "AuditHero - SCHADS Payroll Compliance",
   "report_name": "AuditHero - SCHADS Payroll Compliance",
   "key_vault_url": "",
+  "source_mapping": {
+    "source_root": "/lakehouse/default/Files/import/raw",
+    "draft_path": "/lakehouse/default/Files/import/source_mapping_draft.xlsx",
+    "mapping_path": "/lakehouse/default/Files/import/source_mapping.xlsx",
+    "output_root": "/lakehouse/default/Files/input",
+    "draft_pipeline_name": "AuditHero - Build Source Mapping Workbook",
+    "conversion_pipeline_name": "AuditHero - Convert Source Files"
+  },
   "manual_file_source": {
     "enabled": true,
     "input_root": "/lakehouse/default/Files/input",

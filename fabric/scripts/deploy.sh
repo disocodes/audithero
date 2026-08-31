@@ -18,16 +18,24 @@ python "$ROOT/scripts/preflight.py" --platform fabric --fabric-config "$CONFIG"
 echo "Deploying AuditHero core to Microsoft Fabric..."
 python "$ROOT/fabric/scripts/deploy_fabric.py" --config "$CONFIG"
 
-echo "Deploying credential-free CSV/XLSX audit path..."
+echo "Deploying canonical CSV/XLSX audit path..."
 python "$ROOT/fabric/scripts/deploy_file_source.py" --config "$CONFIG"
+
+echo "Deploying source inspection, field mapping and conversion pipelines..."
+python "$ROOT/fabric/scripts/deploy_source_mapping.py" --config "$CONFIG"
 
 cat <<'EOF'
 
 AuditHero Fabric deployment complete.
 
-You can now choose either:
-  A) Upload audithero_input.xlsx / canonical CSV files to Lakehouse Files/input and run
-     "AuditHero - Uploaded Files Audit Pipeline" (no Employment Hero credentials required), or
-  B) Configure Azure Key Vault and use the Employment Hero API pipelines.
+Normal operator path in Fabric:
+  1. Upload your original payroll/HR/timekeeping exports to Lakehouse Files/import/raw.
+  2. Run "AuditHero - Build Source Mapping Workbook".
+  3. Review the generated Excel mapping, upload the approved version as source_mapping.xlsx.
+  4. Run "AuditHero - Convert Source Files".
+  5. Run "AuditHero - Uploaded Files Audit Pipeline" for the required audit period.
+  6. Review the Power BI report.
 
+If your files already use the AuditHero canonical workbook/CSV format, skip steps 2-4.
+Employment Hero API connectivity is optional.
 EOF

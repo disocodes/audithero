@@ -1,10 +1,10 @@
-# Fabric documentation
+# Databricks documentation
 
-AuditHero's user documentation is centralized in the repository-level `docs/` folder so there is one set of instructions for the shared audit engine and a clear platform-specific installation guide.
+AuditHero documentation is maintained in the repository-level `docs/` folder so Fabric and Databricks users follow the same audit/data guidance.
 
 Start with:
 
-- [Fabric UI installation](../../docs/INSTALL_FABRIC_UI.md)
+- [Databricks UI installation](../../docs/INSTALL_DATABRICKS_UI.md)
 - [Quick start](../../QUICKSTART.md)
 - [Import and field mapping](../../docs/IMPORT_AND_FIELD_MAPPING.md)
 - [Running audits](../../docs/RUNNING_AUDITS.md)

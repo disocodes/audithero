@@ -1,10 +1,26 @@
-# Parameters supplied by Fabric pipeline/deployer:
-# key_vault_url
+# AuditHero — Employment Hero Connection Test (Optional API)
+#
+# PURPOSE
+# -------
+# Confirm that optional Employment Hero HR API credentials stored in Azure Key
+# Vault can authenticate and read the basic tenant metadata needed by API mode.
+# This notebook does not change Employment Hero data and does not calculate pay.
+# Uploaded-file audits do not require this notebook.
+#
+# PARAMETER: key_vault_url — Azure Key Vault URL containing the canonical AuditHero
+# Employment Hero secret names.
+
 from schads_audit.fabric_config import FabricAuditConfig
 from schads_audit.employment_hero_hr import EmploymentHeroHRClient
 
+print("STEP 1 — Resolve API credentials from Azure Key Vault")
 cfg = FabricAuditConfig(key_vault_url=key_vault_url)
-secret = lambda name: notebookutils.credentials.getSecret(cfg.key_vault_url, name)
+
+
+def secret(name):
+    # notebookutils keeps secret values out of normal notebook output.
+    return notebookutils.credentials.getSecret(cfg.key_vault_url, name)
+
 client = EmploymentHeroHRClient(
     secret(cfg.hr_client_id_secret),
     secret(cfg.hr_client_secret_secret),
@@ -12,19 +28,22 @@ client = EmploymentHeroHRClient(
     cfg.hr_base_url,
     cfg.hr_token_url,
 )
-org = secret(cfg.organisation_secret)
-orgs = client.organisations()
-employees = client.employees(org)
-awards = client.awards_and_classifications(org)
-pay_categories = client.pay_categories(org)
-work_types = client.work_types(org)
-work_locations = client.work_locations(org)
+organisation_id = secret(cfg.organisation_secret)
 
-print(f"Employment Hero HR API authenticated")
-print(f"Organisations visible: {len(orgs)}")
+print("STEP 2 — Perform read-only metadata checks")
+organisations = client.organisations()
+employees = client.employees(organisation_id)
+awards = client.awards_and_classifications(organisation_id)
+pay_categories = client.pay_categories(organisation_id)
+work_types = client.work_types(organisation_id)
+work_locations = client.work_locations(organisation_id)
+
+print("Employment Hero HR API authenticated")
+print(f"Organisations visible: {len(organisations)}")
 print(f"Employees: {len(employees)}")
 print(f"Award/classification metadata: {len(awards)}")
 print(f"Pay categories: {len(pay_categories)}")
 print(f"Work types: {len(work_types)}")
 print(f"Work locations: {len(work_locations)}")
+print("NEXT: run 'AuditHero - API Audit Readiness' only if API mode will be used.")
 notebookutils.notebook.exit("success")

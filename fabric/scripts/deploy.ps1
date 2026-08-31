@@ -11,5 +11,8 @@ python -m pip install --quiet "requests>=2.32" "build>=1.2" "pyyaml>=6.0" "openp
 python (Join-Path $Root "scripts\preflight.py") --platform fabric --fabric-config $Config
 python (Join-Path $Root "fabric\scripts\deploy_fabric.py") --config $Config
 python (Join-Path $Root "fabric\scripts\deploy_file_source.py") --config $Config
+python (Join-Path $Root "fabric\scripts\deploy_source_mapping.py") --config $Config
 Write-Host ""
-Write-Host "AuditHero Fabric deployment complete. Upload audithero_input.xlsx/CSV files to Lakehouse Files/input for credential-free auditing, or configure Key Vault for API mode."
+Write-Host "AuditHero Fabric deployment complete."
+Write-Host "Normal UI workflow: upload raw exports -> Build Source Mapping Workbook -> edit/upload source_mapping.xlsx -> Convert Source Files -> Uploaded Files Audit Pipeline -> Power BI."
+Write-Host "Employment Hero API credentials are optional."

@@ -26,24 +26,59 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/01b_self_test.py
 
-    connection_test:
-      name: "AuditHero - Employment Hero Connection Test"
+    source_mapping_draft:
+      name: "AuditHero - Build Source Mapping Workbook"
+      parameters:
+        - name: source_root
+          default: ""
+        - name: draft_path
+          default: ""
+        - name: overwrite
+          default: "false"
       tasks:
-        - task_key: test
+        - task_key: inspect_and_suggest
           notebook_task:
-            notebook_path: ../notebooks/02_test_employment_hero.py
-            base_parameters:
-              secret_scope: "${var.secret_scope}"
-
-    audit_readiness:
-      name: "AuditHero - API Audit Readiness"
-      tasks:
-        - task_key: readiness
-          notebook_task:
-            notebook_path: ../notebooks/02b_audit_readiness.py
+            notebook_path: ../notebooks/02d_source_mapping_draft.py
             base_parameters:
               catalog: "${var.catalog}"
-              secret_scope: "${var.secret_scope}"
+              source_root: "{{job.parameters.source_root}}"
+              draft_path: "{{job.parameters.draft_path}}"
+              overwrite: "{{job.parameters.overwrite}}"
+
+    source_file_convert:
+      name: "AuditHero - Convert Source Files"
+      parameters:
+        - name: source_root
+          default: ""
+        - name: mapping_path
+          default: ""
+        - name: output_root
+          default: ""
+        - name: strict
+          default: "true"
+      tasks:
+        - task_key: convert_and_validate
+          notebook_task:
+            notebook_path: ../notebooks/02e_convert_source_files.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              source_root: "{{job.parameters.source_root}}"
+              mapping_path: "{{job.parameters.mapping_path}}"
+              output_root: "{{job.parameters.output_root}}"
+              strict: "{{job.parameters.strict}}"
+
+    file_readiness:
+      name: "AuditHero - File Readiness"
+      parameters:
+        - name: input_root
+          default: ""
+      tasks:
+        - task_key: validate_uploaded_files
+          notebook_task:
+            notebook_path: ../notebooks/02c_file_readiness.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              input_root: "{{job.parameters.input_root}}"
 
     manual_file_audit:
       name: "AuditHero - Audit Uploaded CSV Excel"
@@ -80,8 +115,27 @@ resources:
             dashboard_id: ${resources.dashboards.payroll_compliance.id}
             warehouse_id: ${var.sql_warehouse_id}
 
+    connection_test:
+      name: "AuditHero - Employment Hero Connection Test (Optional API)"
+      tasks:
+        - task_key: test
+          notebook_task:
+            notebook_path: ../notebooks/02_test_employment_hero.py
+            base_parameters:
+              secret_scope: "${var.secret_scope}"
+
+    audit_readiness:
+      name: "AuditHero - API Audit Readiness (Optional API)"
+      tasks:
+        - task_key: readiness
+          notebook_task:
+            notebook_path: ../notebooks/02b_audit_readiness.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              secret_scope: "${var.secret_scope}"
+
     historical_audit:
-      name: "AuditHero - Historical SCHADS Audit (Employment Hero API)"
+      name: "AuditHero - Historical SCHADS Audit (Optional API)"
       parameters:
         - name: start_date
           default: "2023-07-01"
@@ -109,7 +163,7 @@ resources:
             warehouse_id: ${var.sql_warehouse_id}
 
     monthly_audit:
-      name: "AuditHero - Monthly Payroll Audit (Employment Hero API)"
+      name: "AuditHero - Monthly Payroll Audit (Optional API)"
       tasks:
         - task_key: audit
           notebook_task:
