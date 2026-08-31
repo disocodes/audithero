@@ -142,6 +142,7 @@ print(f"Release downloaded to temporary working area: {repo_root.name}")
 # workspace resources are changed.
 required_release_files = [
     repo_root / "fabric" / "scripts" / "deploy_fabric.py",
+    repo_root / "fabric" / "scripts" / "run_fabric_initialization.py",
     repo_root / "fabric" / "scripts" / "deploy_file_source.py",
     repo_root / "fabric" / "scripts" / "deploy_source_mapping.py",
     repo_root / "fabric" / "scripts" / "deploy_admin_notebooks.py",
@@ -216,8 +217,13 @@ subprocess.check_call([
     "requests>=2.32", "build>=1.2", "pyyaml>=6.0", "openpyxl>=3.1"
 ])
 
+# Deployment and Spark initialization are deliberately separate. deploy_fabric.py
+# is run with --skip-run so it only creates/updates resources and writes state.
+# run_fabric_initialization.py then executes Setup/Self Test/BI and inspects each
+# notebook exitValue for exact runtime diagnostics.
 steps = [
     repo_root / "fabric" / "scripts" / "deploy_fabric.py",
+    repo_root / "fabric" / "scripts" / "run_fabric_initialization.py",
     repo_root / "fabric" / "scripts" / "deploy_file_source.py",
     repo_root / "fabric" / "scripts" / "deploy_source_mapping.py",
     repo_root / "fabric" / "scripts" / "deploy_admin_notebooks.py",
@@ -227,12 +233,14 @@ steps = [
 def _run_deployment_step(step: Path) -> None:
     """Run one deployer while preserving the real Fabric error in notebook output."""
     command = [sys.executable, "-u", str(step), "--config", str(config_path)]
+    if step.name == "deploy_fabric.py":
+        command.append("--skip-run")
     print(f"Running {step.name} ...", flush=True)
 
     # Fabric notebook cells can otherwise surface only CalledProcessError from
     # subprocess.check_call. Stream the child output live and keep a bounded
-    # tail so the underlying REST/API error is repeated in the raised exception.
-    tail = deque(maxlen=80)
+    # tail so the underlying REST/API/runtime error is repeated in the exception.
+    tail = deque(maxlen=120)
     process = subprocess.Popen(
         command,
         cwd=repo_root,
