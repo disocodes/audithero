@@ -1,6 +1,6 @@
 # Install AuditHero in Microsoft Fabric
 
-AuditHero can be installed from the **Microsoft Fabric user interface** with a single installer notebook. You do not need to create the Lakehouse, Environment, pipelines, semantic model or report manually.
+AuditHero can be installed from the **Microsoft Fabric user interface** with a single bootstrap notebook. You do not need to create the Lakehouse, Environment, pipelines, semantic model or report manually.
 
 ## What the installer creates
 
@@ -8,6 +8,8 @@ The installer creates or updates the AuditHero application in the current Fabric
 
 - `AuditHero_Lakehouse` with schemas enabled;
 - `AuditHero_Environment` with the AuditHero package and required libraries;
+- **AuditHero - Install or Upgrade** for future upgrades;
+- **AuditHero - Uninstall** for removal;
 - Setup and Self Test notebooks;
 - CSV/Excel source-mapping and conversion notebooks;
 - uploaded-file audit notebooks;
@@ -29,13 +31,15 @@ You need:
 
 The installer detects the current workspace ID and workspace name automatically.
 
-## Install AuditHero
+## First installation
 
-### 1. Download the installer notebook
+### 1. Download the bootstrap notebook
 
 From the AuditHero repository, download:
 
 `installers/Fabric_Install_AuditHero.py`
+
+You need this external bootstrap only for the first installation. AuditHero installs its own managed Install/Upgrade notebook into the workspace for future use.
 
 ### 2. Import it into Fabric
 
@@ -68,12 +72,15 @@ The notebook then:
 2. downloads the selected AuditHero release;
 3. creates or updates the schema-enabled Lakehouse;
 4. builds and publishes the AuditHero Fabric Environment;
-5. installs the AuditHero notebooks;
-6. creates the Data Factory pipelines;
-7. creates the monthly schedule in the configured disabled/enabled state;
-8. runs AuditHero Setup;
-9. runs AuditHero Self Test; and
-10. creates or refreshes the Direct Lake model and Power BI report.
+5. installs the AuditHero operational notebooks;
+6. installs **AuditHero - Install or Upgrade** and **AuditHero - Uninstall**;
+7. creates the Data Factory pipelines;
+8. creates the monthly schedule in the configured disabled/enabled state;
+9. runs AuditHero Setup;
+10. runs AuditHero Self Test; and
+11. creates or refreshes the Direct Lake model and Power BI report.
+
+After a successful first installation, the temporary bootstrap notebook attempts to remove itself because the managed administration notebooks are already installed.
 
 Do not use production payroll data if the installer reports that Setup or Self Test failed.
 
@@ -91,28 +98,30 @@ If the source files already use AuditHero canonical columns, run **AuditHero - U
 
 ## Upgrade AuditHero
 
-Open the installer notebook, change `release_ref` to the approved version if required, and choose **Run all** again.
+Open **AuditHero - Install or Upgrade** in the Fabric workspace. Change `release_ref` to the approved version if required and choose **Run all**.
 
-The installer is designed to update existing AuditHero items rather than require a separate manual upgrade process. After an upgrade, run a known payroll period before relying on the new version for production decisions.
+The installer updates the existing AuditHero application and reruns Setup and Self Test. Validate one known payroll period before relying on an upgraded version for production decisions.
 
 ## Uninstall AuditHero
 
-Download and import:
+Open **AuditHero - Uninstall** in the Fabric workspace and choose **Run all**.
 
-`installers/Fabric_Uninstall_AuditHero.py`
-
-Run the notebook to remove AuditHero-managed pipelines, reporting objects, notebooks and Environment.
+A normal uninstall removes AuditHero-managed pipelines, reporting objects, operational notebooks, Environment and administration notebooks. The running uninstaller removes itself as its last application-cleanup step.
 
 The Lakehouse and payroll/audit data are preserved by default.
 
-To permanently remove the AuditHero Lakehouse and all data, the uninstaller requires both:
+To permanently remove the AuditHero Lakehouse and all data, set both values before running the uninstaller:
 
 ```python
 delete_audit_data = True
 confirmation = "DELETE AUDITHERO DATA"
 ```
 
-This extra confirmation is intentional because Lakehouse deletion removes payroll source files, audit evidence and tables.
+This extra confirmation prevents an ordinary application uninstall from deleting payroll source files, audit evidence and tables.
+
+## Reinstall against preserved data
+
+If AuditHero was uninstalled without deleting the Lakehouse, import the bootstrap installer again. The installer can recreate the application resources against the preserved AuditHero storage.
 
 ## Optional Employment Hero API
 
