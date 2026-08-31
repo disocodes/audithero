@@ -415,9 +415,12 @@ class FabricClient:
         timezone_id: str,
         enabled: bool,
     ):
+        # Data Pipelines use the workload-specific execute scheduler endpoint.
+        # The generic item scheduler can reject DataPipeline + DefaultJob with
+        # InvalidJobType even though older examples used that route.
         path = (
-            f"/workspaces/{self.workspace_id}/items/{pipeline_id}"
-            "/jobs/DefaultJob/schedules"
+            f"/workspaces/{self.workspace_id}/dataPipelines/{pipeline_id}"
+            "/jobs/execute/schedules"
         )
         existing = self.request("GET", path).get("value", [])
         now = datetime.now(timezone.utc) + timedelta(minutes=5)
