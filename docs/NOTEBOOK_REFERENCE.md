@@ -1,41 +1,55 @@
 # AuditHero notebook reference
 
-AuditHero notebooks are the platform-facing orchestration layer. The reusable payroll calculation logic lives in the shared `schads_audit` Python package so Microsoft Fabric and Databricks do not maintain separate SCHADS formulas.
+AuditHero notebooks are the platform-facing user and administration layer. The reusable payroll calculation logic lives in the shared `schads_audit` Python package so Microsoft Fabric and Databricks use the same SCHADS formulas and effective-dated rule packs.
 
-Every operator/admin notebook contains plain-language Markdown/comments before its major code sections. This reference explains what each notebook is for and what the main code blocks are doing.
+Every operator and administration notebook includes plain-language explanations before its major code sections. This reference explains when each notebook is used and what its main sections do.
 
-## Installation notebooks
+## Installation and administration notebooks
 
-These notebooks are intended to be run directly from the platform UI.
+### First-install bootstrap notebooks
+
+These are imported only when AuditHero is first installed, or when it is being reinstalled after removal.
 
 | Notebook | Platform | What it does |
 |---|---|---|
-| `installers/Fabric_Install_AuditHero.py` | Microsoft Fabric | Detects the current workspace, downloads the selected AuditHero release, creates/updates Fabric items, runs Setup/Self Test and builds the BI layer. |
-| `installers/Fabric_Uninstall_AuditHero.py` | Microsoft Fabric | Removes AuditHero-managed application items. Lakehouse data is preserved unless the explicit full-delete confirmation is entered. |
-| `installers/Databricks_Install_AuditHero.py` | Databricks | Uses notebook authentication to install AuditHero workspace files/notebooks, create/update Jobs and AI/BI, then run Setup/Self Test. |
-| `installers/Databricks_Uninstall_AuditHero.py` | Databricks | Removes AuditHero jobs/dashboard/code and any SQL warehouse created by the installer. The catalog is preserved unless full deletion is explicitly confirmed. |
+| `installers/Fabric_Install_AuditHero.py` | Microsoft Fabric | Detects the current Fabric workspace, downloads the selected release, creates/updates the AuditHero application, runs Setup/Self Test and builds the reporting layer. |
+| `installers/Databricks_Install_AuditHero.py` | Databricks | Uses the current notebook session to install AuditHero workspace files, create/update Jobs and AI/BI resources, then run Setup/Self Test. |
 
-The installer notebooks are the normal first-install and upgrade path. The command-line deployers remain optional administrator automation.
+After successful installation, each bootstrap installs permanent administration notebooks inside the platform.
+
+### Installed administration notebooks
+
+**Microsoft Fabric**
+
+- **AuditHero - Install or Upgrade** — reruns the installer against the current workspace and selected `release_ref`.
+- **AuditHero - Uninstall** — removes AuditHero application resources while preserving the Lakehouse/data unless full deletion is explicitly confirmed.
+
+**Databricks**
+
+- `/Shared/AuditHero/admin/AuditHero - Install or Upgrade` — updates the installed application and reruns Setup/Self Test.
+- `/Shared/AuditHero/admin/AuditHero - Uninstall` — removes AuditHero Jobs/dashboard/code and installer-created resources while preserving the catalog/data unless full deletion is explicitly confirmed.
+
+Normal upgrades and removal should use these installed administration notebooks. Command-line deployment remains an optional administrator automation method.
 
 ## Databricks notebooks
 
 | Notebook | What it does |
 |---|---|
 | `00_setup.py` | Creates/updates Unity Catalog schemas, output/reference tables and views. The installer runs this automatically. |
-| `01_validate_rules.py` | Loads the effective-dated SCHADS rule manifest and checks that referenced rule packs are valid. |
-| `01b_self_test.py` | Runs representative calculations inside the installed Databricks runtime to detect broken rule/package deployments. |
+| `01_validate_rules.py` | Loads the effective-dated SCHADS rule manifest and checks that referenced rule packs are usable. |
+| `01b_self_test.py` | Runs representative calculations inside the installed Databricks runtime to verify the package/rule deployment. |
 | `02_test_employment_hero.py` | Optional API connectivity test. It does not calculate payroll. |
 | `02b_audit_readiness.py` | Optional API-mode readiness scan for classifications, pay categories, locations and controlled evidence. |
-| `02c_file_readiness.py` | Checks canonical uploaded files/evidence before an audit. |
+| `02c_file_readiness.py` | Checks canonical uploaded files and evidence before an audit. |
 | `02d_source_mapping_draft.py` | Scans arbitrary CSV/Excel exports and creates an editable source-mapping workbook. |
 | `02e_convert_source_files.py` | Applies the approved mapping, writes canonical files and runs File Readiness. |
 | `03_historical_audit.py` | Optional Employment Hero API historical audit. |
 | `03b_manual_file_audit.py` | Main file-based audit notebook. Reads canonical inputs and writes audit outputs. |
 | `04_monthly_payroll_audit.py` | Optional scheduled API-based rolling/monthly audit. |
-| `05_rule_analytics.py` | Displays the installed effective-dated rule coverage/reference information. |
-| `_common.py` | Small shared bootstrap used by the Databricks notebooks to locate the installed package consistently. |
+| `05_rule_analytics.py` | Displays installed effective-dated rule coverage/reference information. |
+| `_common.py` | Shared bootstrap used by Databricks notebooks to locate the installed AuditHero package consistently. |
 
-## Fabric notebooks
+## Microsoft Fabric notebooks
 
 | Notebook | What it does |
 |---|---|
@@ -49,28 +63,23 @@ The installer notebooks are the normal first-install and upgrade path. The comma
 | `04_historical_audit.py` | Optional API historical audit. |
 | `04b_manual_file_audit.py` | Main uploaded-file audit. |
 | `05_monthly_audit.py` | Optional scheduled API audit. |
-| `06_build_bi.py` | Creates/updates BI-facing snapshot tables, Direct Lake semantic model and Power BI report structures. |
+| `06_build_bi.py` | Creates/updates BI-facing snapshots, Direct Lake semantic model and Power BI report. |
 
-## How the notebooks are organised
+## How to read an AuditHero notebook
 
-Most AuditHero notebooks follow the same pattern.
+Most AuditHero notebooks follow the same structure.
 
-### 1. A plain-language introduction
+### 1. Purpose and next action
 
-The first section explains:
+The opening section explains when to run the notebook, what it changes, what it does not change and what the user should do next.
 
-- when to run the notebook;
-- what it does;
-- what it does **not** do; and
-- what the operator should run next.
+### 2. Settings and parameters
 
-### 2. Parameters/widgets
+Installer notebooks expose a small group of installation settings such as `release_ref`, catalog/Lakehouse names and optional API settings. Audit notebooks expose run settings such as source folders and audit dates.
 
-Databricks notebooks use job/notebook parameters and Fabric notebooks use parameter cells/pipeline parameters. These expose values such as source folders, mapping workbook path, audit dates, catalog or optional API settings.
+Changing a path or date changes the run scope. It does not change SCHADS calculation formulas.
 
-Changing these parameters changes the input/run scope; it does not change SCHADS formulas.
-
-### 3. Imports from `schads_audit`
+### 3. Shared AuditHero functions
 
 Code such as:
 
@@ -78,50 +87,50 @@ Code such as:
 from schads_audit.source_mapping import convert_source_files
 ```
 
-calls a reusable function from the shared AuditHero package.
+uses the shared source-conversion function.
 
-Similarly:
+Code such as:
 
 ```python
 from schads_audit.manual_audit import run_manual_audit
 ```
 
-passes prepared canonical input data to the shared file-based audit orchestration.
+runs the shared file-based audit orchestration against prepared canonical inputs.
 
-### 4. Input checks before calculation
+The notebook explains the purpose of these calls before executing them; the Award formulas are not duplicated in the notebook.
 
-Calls such as `assess_file_readiness(...)` stop the workflow early when the evidence is incomplete or incorrectly mapped. The conversion notebook does not continue to payroll auditing when blocking required fields remain unresolved.
+### 4. Validation before calculation
+
+Readiness calls stop the workflow when required fields or evidence are incomplete. This prevents the audit from silently guessing missing data merely because the notebook itself can execute.
 
 ### 5. One controlled operation
 
-Each notebook is intended to perform one understandable operation:
+The main notebook types perform these operations:
 
-- **Install/Upgrade** → create/update the complete platform application;
-- **Uninstall** → remove application resources, preserving data unless full deletion is confirmed;
-- **Setup** → create/update platform data structures;
-- **Self Test** → validate installation/calculation examples;
-- **Mapping Draft** → inspect source schemas and suggest mappings;
-- **Convert Source Files** → transform raw exports to canonical datasets;
-- **Readiness** → report blocking evidence/data issues;
-- **Audit** → execute the entitlement/reconciliation engine; or
-- **Build BI** → publish successful results to the reporting layer.
+- **Install/Upgrade** — create or update the complete platform application;
+- **Uninstall** — remove application resources, preserving data unless full deletion is confirmed;
+- **Setup** — create/update platform data structures;
+- **Self Test** — run representative installation/calculation checks;
+- **Mapping Draft** — inspect source schemas and suggest field matches;
+- **Convert Source Files** — transform raw exports to canonical datasets;
+- **Readiness** — report blocking evidence/data issues;
+- **Audit** — execute entitlement and pay reconciliation; and
+- **Build BI** — publish successful results to the reporting layer.
 
-### 6. Platform writes
+### 6. Writes and reporting
 
-Functions such as `write_df(...)` convert results to platform Delta tables. These are storage operations; they do not independently recalculate Award entitlements.
+Storage helper functions write normalized evidence and calculated outputs into the platform tables. Reporting only uses the latest successful audit result; a failed or partial rerun should not replace the last successful user-facing result.
 
-The Fabric audit path also publishes the latest successful snapshot so a failed/partial run does not replace the current reporting dataset.
+### 7. Status and next step
 
-### 7. Display and next action
+The final section normally displays completion status, important findings and the next operator action.
 
-The last sections normally show a status summary and the next operator action.
-
-## Source-mapping notebook flow
+## Source-mapping workflow
 
 ```text
 Build Source Mapping Workbook
       ↓
-operator reviews source_mapping.xlsx
+review source_mapping.xlsx
       ↓
 Convert Source Files
       ↓
@@ -130,10 +139,8 @@ File Readiness
 Audit Uploaded Files
 ```
 
-The platform combined job/pipeline **AuditHero - Convert Mapped Files and Run Audit** chains conversion, audit and dashboard refresh after the mapping has been approved.
+The combined **AuditHero - Convert Mapped Files and Run Audit** job/pipeline performs conversion, readiness, audit and report refresh after the mapping has been approved.
 
-## Why the Award calculation code is not repeated in notebooks
+## Calculation evidence
 
-Fabric and Databricks both call the same shared package and effective-dated rule packs. This avoids maintaining separate overtime, sleepover, public-holiday or minimum-engagement formulas by platform.
-
-For calculation evidence, see [SCHADS rules and evidence](SCHADS_RULES_AND_EVIDENCE.md) and the `calculation_evidence` fields produced by the audit.
+For the Award/rule basis of calculated results, see [SCHADS rules and evidence](SCHADS_RULES_AND_EVIDENCE.md) and the `calculation_evidence` fields written by the audit.
