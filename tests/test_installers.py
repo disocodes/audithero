@@ -68,6 +68,15 @@ def test_fabric_installer_surfaces_child_deployer_errors():
     assert "CalledProcessError" in fabric
 
 
+def test_fabric_installer_isolates_bootstrap_dependencies_from_managed_runtime():
+    fabric = source("fabric_install")
+    assert "bootstrap_deps" in fabric
+    assert '"--ignore-installed"' in fabric
+    assert '"--target"' in fabric
+    assert 'child_env["PYTHONPATH"]' in fabric
+    assert "env=child_env" in fabric
+
+
 def test_fabric_installer_separates_resource_deployment_from_spark_initialization():
     fabric = source("fabric_install")
     assert "run_fabric_initialization.py" in fabric
