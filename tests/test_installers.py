@@ -93,6 +93,18 @@ def test_fabric_installer_separates_resource_deployment_from_spark_initializatio
     assert "attachedEnvironment" in runtime
 
 
+def test_fabric_runtime_verifies_and_repairs_published_custom_wheel():
+    runtime = (ROOT / "fabric" / "scripts" / "run_fabric_initialization.py").read_text(
+        encoding="utf-8"
+    )
+    assert "/libraries?beta=false" in runtime
+    assert "/staging/libraries/{quote(wheel_path.name, safe='')}" in runtime
+    assert '"Content-Type": "application/octet-stream"' in runtime
+    assert "/staging/publish?beta=false" in runtime
+    assert "Published custom library verified" in runtime
+    assert "ensure_audithero_wheel(environment_id)" in runtime
+
+
 def test_fabric_setup_returns_structured_failure_details():
     setup = (ROOT / "fabric" / "notebooks" / "00_setup.py").read_text(
         encoding="utf-8"
