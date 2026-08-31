@@ -212,10 +212,30 @@ config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 # use this token to create AuditHero-managed items in the current workspace.
 os.environ["FABRIC_ACCESS_TOKEN"] = str(notebookutils.credentials.getToken("pbi"))
 
+# Never install bootstrap packages into Fabric's managed notebook environment.
+# Fabric preinstalls ML/runtime packages with tightly controlled versions; a
+# normal `pip install` here can upgrade shared dependencies such as packaging,
+# PyJWT or filelock and create conflicts with mlflow/nni. Install the few
+# deployment-only packages into an isolated temporary target instead and expose
+# them only to AuditHero child processes through PYTHONPATH.
+bootstrap_deps = work_dir / "bootstrap_deps"
+bootstrap_deps.mkdir(parents=True, exist_ok=True)
 subprocess.check_call([
-    sys.executable, "-m", "pip", "install", "--quiet",
-    "requests>=2.32", "build>=1.2", "pyyaml>=6.0", "openpyxl>=3.1"
+    sys.executable,
+    "-m",
+    "pip",
+    "install",
+    "--quiet",
+    "--disable-pip-version-check",
+    "--ignore-installed",
+    "--target",
+    str(bootstrap_deps),
+    "requests>=2.32,<3",
+    "build>=1.2,<2",
+    "pyyaml>=6,<7",
+    "openpyxl>=3.1,<4",
 ])
+print("AuditHero bootstrap dependencies installed in an isolated temporary directory.")
 
 # Deployment and Spark initialization are deliberately separate. deploy_fabric.py
 # is run with --skip-run so it only creates/updates resources and writes state.
@@ -237,6 +257,13 @@ def _run_deployment_step(step: Path) -> None:
         command.append("--skip-run")
     print(f"Running {step.name} ...", flush=True)
 
+    # Keep deployment-only Python packages isolated from Fabric's managed runtime.
+    child_env = os.environ.copy()
+    existing_pythonpath = child_env.get("PYTHONPATH", "")
+    child_env["PYTHONPATH"] = str(bootstrap_deps) + (
+        os.pathsep + existing_pythonpath if existing_pythonpath else ""
+    )
+
     # Fabric notebook cells can otherwise surface only CalledProcessError from
     # subprocess.check_call. Stream the child output live and keep a bounded
     # tail so the underlying REST/API/runtime error is repeated in the exception.
@@ -244,6 +271,7 @@ def _run_deployment_step(step: Path) -> None:
     process = subprocess.Popen(
         command,
         cwd=repo_root,
+        env=child_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
