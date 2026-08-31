@@ -87,7 +87,7 @@ if not job_ids:
         query = {"limit": 100}
         if token:
             query["page_token"] = token
-        payload = call("GET", "/api/2.1/jobs/list", query=query) or {}
+        payload = call("GET", "/api/2.2/jobs/list", query=query) or {}
         for job in payload.get("jobs", []) or []:
             if job.get("settings", {}).get("name") in managed_job_names:
                 job_ids.add(job["job_id"])
@@ -96,12 +96,12 @@ if not job_ids:
             break
 
 for job_id in sorted(job_ids):
-    call("POST", "/api/2.1/jobs/delete", {"job_id": job_id})
+    call("POST", "/api/2.2/jobs/delete", {"job_id": job_id})
     print(f"Removed job: {job_id}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Remove the AuditHero AI/BI dashboard
+# MAGIC ## Unpublish and remove the AuditHero AI/BI dashboard
 
 # COMMAND ----------
 dashboard_id = state.get("dashboard_id")
@@ -122,6 +122,12 @@ if not dashboard_id:
             break
 
 if dashboard_id:
+    try:
+        call("DELETE", f"/api/2.0/lakeview/dashboards/{dashboard_id}/published")
+        print(f"Unpublished AI/BI dashboard: {dashboard_id}")
+    except Exception:
+        # The dashboard may already be unpublished; continue with draft removal.
+        pass
     call("DELETE", f"/api/2.0/lakeview/dashboards/{dashboard_id}")
     print(f"Removed AI/BI dashboard: {dashboard_id}")
 
