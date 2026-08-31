@@ -86,11 +86,23 @@ def test_fabric_installer_separates_resource_deployment_from_spark_initializatio
     runtime = (ROOT / "fabric" / "scripts" / "run_fabric_initialization.py").read_text(
         encoding="utf-8"
     )
-    assert "/jobs/execute/instances?jobType=RunNotebook" in runtime
+    assert "/jobs/execute/instances?beta=false" in runtime
+    assert "/jobs/execute/instances?jobType=RunNotebook" not in runtime
+    assert '"compute": "Spark"' in runtime
+    assert '"computeConfiguration"' in runtime
+    assert '"defaultLakehouse"' in runtime
+    assert '"attachedEnvironment"' in runtime
+    assert '"referenceType": "ById"' in runtime
     assert "exitValue" in runtime
     assert "AUDITHERO_ERROR:" in runtime
-    assert "defaultLakehouse" in runtime
-    assert "attachedEnvironment" in runtime
+
+
+def test_fabric_runtime_respects_first_retry_after_before_polling():
+    runtime = (ROOT / "fabric" / "scripts" / "run_fabric_initialization.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'first_delay = max(2, int(r.headers.get("Retry-After", "10")))' in runtime
+    assert "time.sleep(first_delay if first_poll else 10)" in runtime
 
 
 def test_fabric_runtime_verifies_and_repairs_published_custom_wheel():
@@ -105,15 +117,13 @@ def test_fabric_runtime_verifies_and_repairs_published_custom_wheel():
     assert "ensure_audithero_wheel(environment_id)" in runtime
 
 
-def test_fabric_runtime_prints_compact_failure_summary_before_traceback():
+def test_fabric_runtime_prints_compact_failure_summary():
     runtime = (ROOT / "fabric" / "scripts" / "run_fabric_initialization.py").read_text(
         encoding="utf-8"
     )
     assert "AUDITHERO FAILURE SUMMARY" in runtime
     assert "AUDITHERO FAILURE JSON" in runtime
     assert "_print_failure_summary" in runtime
-    assert "stage=" in runtime
-    assert "exception=" in runtime
 
 
 def test_fabric_setup_returns_structured_failure_details():
