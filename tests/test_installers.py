@@ -136,6 +136,18 @@ def test_fabric_setup_returns_structured_failure_details():
     assert "traceback.format_exc" in setup
 
 
+def test_fabric_setup_serializes_runtime_context_safely():
+    setup = (ROOT / "fabric" / "notebooks" / "00_setup.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_runtime_context_value" in setup
+    assert 'type_name == "JavaMember"' in setup
+    assert '"lakehouse_id": _runtime_context_value("defaultLakehouseId")' in setup
+    assert '"workspace_id": _runtime_context_value("currentWorkspaceId")' in setup
+    assert 'getattr(notebookutils.runtime.context, "defaultLakehouseId", None)' not in setup
+    assert 'getattr(notebookutils.runtime.context, "currentWorkspaceId", None)' not in setup
+
+
 def test_fabric_spark_sql_helpers_name_failing_operations_and_avoid_shortcuts():
     io = (ROOT / "src" / "schads_audit" / "fabric_io.py").read_text(
         encoding="utf-8"
