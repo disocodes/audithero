@@ -54,6 +54,8 @@ def _context_value(name: str):
 
 workspace_id = _context_value("currentWorkspaceId")
 workspace_name = _context_value("currentWorkspaceName")
+current_notebook_id = _context_value("currentNotebookId")
+current_notebook_name = _context_value("currentNotebookName")
 if not workspace_id:
     raise RuntimeError("Fabric workspace ID could not be detected from this notebook session.")
 
@@ -146,6 +148,7 @@ steps = [
     repo_root / "fabric" / "scripts" / "deploy_fabric.py",
     repo_root / "fabric" / "scripts" / "deploy_file_source.py",
     repo_root / "fabric" / "scripts" / "deploy_source_mapping.py",
+    repo_root / "fabric" / "scripts" / "deploy_admin_notebooks.py",
 ]
 
 for step in steps:
@@ -160,7 +163,25 @@ print("  • AuditHero - Build Source Mapping Workbook")
 print("  • AuditHero - Convert Mapped Files and Run Audit")
 print("  • AuditHero - Uploaded Files Audit Pipeline")
 print("  • AuditHero - SCHADS Payroll Compliance (Power BI)")
+print("Administration notebooks are also installed:")
+print("  • AuditHero - Install or Upgrade")
+print("  • AuditHero - Uninstall")
 print("\nUploaded-file auditing is ready without Employment Hero credentials.")
 print("The recurring monthly schedule remains disabled unless you enabled it above.")
 
 shutil.rmtree(work_dir, ignore_errors=True)
+
+# If this was the one-time imported bootstrap copy, remove it after success. The
+# managed 'AuditHero - Install or Upgrade' notebook has already been installed.
+if current_notebook_id and current_notebook_name != "AuditHero - Install or Upgrade":
+    try:
+        token = os.environ["FABRIC_ACCESS_TOKEN"]
+        cleanup = requests.delete(
+            f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/items/{current_notebook_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=120,
+        )
+        if cleanup.status_code not in (200, 202, 204, 404):
+            print(f"Bootstrap notebook cleanup was not completed automatically: {cleanup.status_code}")
+    except Exception as exc:
+        print(f"Bootstrap notebook cleanup was not completed automatically: {exc}")
