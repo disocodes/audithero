@@ -9,9 +9,21 @@
 
 from pathlib import Path
 
-from schads_audit.mapping_workbook import load_mapping
-from schads_audit.source_mapping import convert_source_files
-from schads_audit.file_readiness import assess_file_readiness
+try:
+    from schads_audit.mapping_workbook import load_mapping
+    from schads_audit.source_mapping import convert_source_files
+    from schads_audit.file_readiness import assess_file_readiness
+except ModuleNotFoundError as exc:
+    if exc.name == "schads_audit" or str(exc.name or "").startswith("schads_audit."):
+        raise RuntimeError(
+            "AuditHero runtime package is not available in this Fabric Spark session. "
+            "This managed notebook must use the published AuditHero_Environment. "
+            "If this notebook was already open while AuditHero was installed/upgraded, "
+            "stop the current session and start a new one; Fabric environment changes "
+            "only take effect in the next session. If the Environment selector does not "
+            "show AuditHero_Environment, attach it and then start a new session."
+        ) from exc
+    raise
 
 print("STEP 1 — Load the approved source mapping")
 mapping_file = Path(mapping_path)
