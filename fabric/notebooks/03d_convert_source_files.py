@@ -25,6 +25,25 @@ except ModuleNotFoundError as exc:
         ) from exc
     raise
 
+
+def _normalize_fabric_lakehouse_path(value: str) -> str:
+    """Translate legacy Fabric notebook mount paths to the current default mount."""
+    text = str(value or "").strip()
+    for legacy, current in (
+        ("/lakehouse/Files", "/lakehouse/default/Files"),
+        ("/lakehouse/Tables", "/lakehouse/default/Tables"),
+    ):
+        if text == legacy or text.startswith(legacy + "/"):
+            normalized = current + text[len(legacy):]
+            print(f"Normalized legacy Fabric Lakehouse path: {text} -> {normalized}")
+            return normalized
+    return text
+
+
+source_root = _normalize_fabric_lakehouse_path(source_root)
+mapping_path = _normalize_fabric_lakehouse_path(mapping_path)
+output_root = _normalize_fabric_lakehouse_path(output_root)
+
 print("STEP 1 — Load the approved source mapping")
 mapping_file = Path(mapping_path)
 if not mapping_file.exists():
@@ -34,6 +53,13 @@ if not mapping_file.exists():
 mapping = load_mapping(mapping_file)
 enabled = [name for name, cfg in mapping.get("datasets", {}).items() if cfg.get("enabled")]
 print("Datasets enabled for conversion:", ", ".join(enabled) or "NONE")
+
+source_dir = Path(source_root)
+if not source_dir.exists():
+    raise FileNotFoundError(
+        f"Source folder not found: {source_root}. Upload the approved raw exports to the AuditHero Lakehouse Files import/raw folder first."
+    )
+Path(output_root).mkdir(parents=True, exist_ok=True)
 
 print("STEP 2 — Convert source fields to AuditHero fields")
 result = convert_source_files(
