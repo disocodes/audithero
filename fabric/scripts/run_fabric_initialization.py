@@ -245,6 +245,28 @@ class FabricRuntimeClient:
             return str(properties.get("exitValue"))
         return None
 
+    @staticmethod
+    def _print_failure_summary(label: str, detail: dict) -> None:
+        """Print one compact line before a long traceback can obscure the real cause."""
+        stage = detail.get("stage") or "unknown"
+        exc_type = detail.get("exception_type") or detail.get("errorCode") or "RuntimeError"
+        message = detail.get("message") or detail.get("failureReason") or detail.get("rawExitValue") or "Unknown failure"
+        if isinstance(message, (dict, list)):
+            message = json.dumps(message, separators=(",", ":"), default=str)
+        message = str(message).replace("\n", " ").strip()
+        if len(message) > 1200:
+            message = message[:1200] + "..."
+        print(
+            f"    AUDITHERO FAILURE SUMMARY | label={label} | stage={stage} "
+            f"| exception={exc_type} | message={message}",
+            flush=True,
+        )
+        print(
+            "    AUDITHERO FAILURE JSON: "
+            + json.dumps(detail, separators=(",", ":"), default=str)[:4000],
+            flush=True,
+        )
+
     def run_notebook(
         self,
         item_id: str,
@@ -321,11 +343,19 @@ class FabricRuntimeClient:
                         detail = json.loads(raw)
                     except Exception:
                         detail = {"rawExitValue": exit_value}
+                    self._print_failure_summary(label, detail)
                     raise RuntimeError(
                         f"{label} reported an AuditHero runtime error:\n"
                         + json.dumps(detail, indent=2, default=str)
                     )
                 if payload.get("failureReason"):
+                    detail = {
+                        "stage": "Fabric job completion",
+                        "failureReason": payload.get("failureReason"),
+                        "message": payload.get("failureReason"),
+                        "monitoring": self._monitoring(payload),
+                    }
+                    self._print_failure_summary(label, detail)
                     raise RuntimeError(
                         f"{label} completed with failureReason: "
                         + json.dumps(payload.get("failureReason"), default=str)
@@ -337,11 +367,14 @@ class FabricRuntimeClient:
             if normalized in {"failed", "cancelled", "canceled"}:
                 detail = {
                     "jobInstanceId": job_id,
+                    "stage": "Fabric notebook job",
                     "failureReason": payload.get("failureReason"),
+                    "message": payload.get("failureReason"),
                     "exitValue": self._exit_value(payload),
                     "monitoring": self._monitoring(payload),
                     "rootActivityId": payload.get("rootActivityId"),
                 }
+                self._print_failure_summary(label, detail)
                 raise RuntimeError(
                     f"{label} Fabric job failed:\n"
                     + json.dumps(detail, indent=2, default=str)
