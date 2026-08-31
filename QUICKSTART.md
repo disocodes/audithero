@@ -41,11 +41,22 @@ Prerequisites:
 
 **Azure Key Vault and Employment Hero credentials are optional.** They are needed only for API mode.
 
+Linux/macOS/Git Bash:
+
 ```bash
 cp fabric/config/fabric.example.json fabric/config/fabric.json
 # set workspace_id; key_vault_url may remain blank
 az login
 ./fabric/scripts/deploy.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item fabric/config/fabric.example.json fabric/config/fabric.json
+# set workspace_id; key_vault_url may remain blank
+az login
+.\fabric\scripts\deploy.ps1
 ```
 
 The installer creates:
@@ -97,11 +108,22 @@ Prerequisites:
 
 Employment Hero API access is optional.
 
+Linux/macOS/Git Bash:
+
 ```bash
 databricks auth login --host https://<workspace>
 export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
 export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
 ./scripts/deploy.sh
+```
+
+Windows PowerShell:
+
+```powershell
+databricks auth login --host https://<workspace>
+$env:DATABRICKS_BUNDLE_VAR_sql_warehouse_id = "<warehouse-id>"
+$env:DATABRICKS_BUNDLE_VAR_accounts_email = "accounts-user@your-company.example"
+.\scripts\deploy.ps1
 ```
 
 The setup creates the default input Volume path:
@@ -130,10 +152,20 @@ The job refreshes the Databricks dashboard after the audit.
 
 ### Optional Employment Hero API mode
 
-Only if you want automated extraction:
+Only if you want automated extraction.
+
+Linux/macOS/Git Bash:
 
 ```bash
 ./scripts/configure_secrets.sh
+databricks bundle run connection_test
+databricks bundle run audit_readiness
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\configure_secrets.ps1
 databricks bundle run connection_test
 databricks bundle run audit_readiness
 ```
