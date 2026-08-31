@@ -33,8 +33,6 @@ monthly_time = "09:00"
 
 # CELL ********************
 
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
