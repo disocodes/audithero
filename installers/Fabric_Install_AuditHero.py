@@ -33,6 +33,7 @@ monthly_time = "09:00"
 
 # CELL ********************
 
+from collections import deque
 import json
 import os
 from pathlib import Path
@@ -222,9 +223,44 @@ steps = [
     repo_root / "fabric" / "scripts" / "deploy_admin_notebooks.py",
 ]
 
+
+def _run_deployment_step(step: Path) -> None:
+    """Run one deployer while preserving the real Fabric error in notebook output."""
+    command = [sys.executable, "-u", str(step), "--config", str(config_path)]
+    print(f"Running {step.name} ...", flush=True)
+
+    # Fabric notebook cells can otherwise surface only CalledProcessError from
+    # subprocess.check_call. Stream the child output live and keep a bounded
+    # tail so the underlying REST/API error is repeated in the raised exception.
+    tail = deque(maxlen=80)
+    process = subprocess.Popen(
+        command,
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    if process.stdout is None:
+        raise RuntimeError(f"Unable to capture output from installer step {step.name}.")
+
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        tail.append(line.rstrip())
+
+    return_code = process.wait()
+    if return_code != 0:
+        diagnostic = "\n".join(tail)
+        raise RuntimeError(
+            f"AuditHero installer step {step.name} failed with exit code {return_code}.\n"
+            "The final output from that step is repeated below so Fabric does not "
+            "hide the underlying error:\n\n"
+            f"{diagnostic}"
+        )
+
+
 for step in steps:
-    print(f"Running {step.name} ...")
-    subprocess.check_call([sys.executable, str(step), "--config", str(config_path)], cwd=repo_root)
+    _run_deployment_step(step)
 
 # CELL ********************
 
