@@ -8,15 +8,15 @@ This guide takes a user from installation to a first uploaded-file audit. Employ
 
 Download `installers/Fabric_Install_AuditHero.py`, import it as a notebook into the target Fabric workspace, open it and choose **Run all**.
 
-The installer creates or updates the AuditHero Lakehouse, Environment, notebooks, pipelines, Direct Lake semantic model and Power BI report, then runs Setup and Self Test.
+The bootstrap creates or updates the AuditHero Lakehouse, Environment, operational notebooks, pipelines, Direct Lake semantic model and Power BI report, then runs Setup and Self Test. It also installs **AuditHero - Install or Upgrade** and **AuditHero - Uninstall** for future administration.
 
 ### Databricks
 
 In **Workspace → Import → URL**, import the public raw URL for `installers/Databricks_Install_AuditHero.py`, open it and choose **Run all**.
 
-The installer creates or updates the AuditHero workspace files, notebooks, jobs and AI/BI dashboard, then runs Setup and Self Test.
+The bootstrap creates or updates the AuditHero workspace files, operational notebooks, Jobs and published AI/BI dashboard, then runs Setup and Self Test. It also installs **AuditHero - Install or Upgrade** and **AuditHero - Uninstall** under `/Shared/AuditHero/admin`.
 
-For full installation and uninstall instructions see:
+For full installation and removal instructions see:
 
 - [Microsoft Fabric installation](docs/INSTALL_FABRIC_UI.md)
 - [Databricks installation](docs/INSTALL_DATABRICKS_UI.md)
@@ -144,8 +144,18 @@ Employment Hero API connectivity is optional. Add it later if you want direct ex
 
 See [Administration](docs/ADMINISTRATION.md).
 
-## Removing AuditHero
+## Upgrading or removing AuditHero
 
-Each platform has an uninstaller notebook. A normal uninstall preserves payroll/audit data; permanent data removal requires the explicit `DELETE AUDITHERO DATA` confirmation.
+After the first installation, use the administration notebooks installed inside AuditHero itself.
 
-See the installation guide for the platform for removal steps.
+**Fabric**
+
+- **AuditHero - Install or Upgrade**
+- **AuditHero - Uninstall**
+
+**Databricks**
+
+- `/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
+- `/Shared/AuditHero/admin/AuditHero - Uninstall`
+
+A normal uninstall preserves payroll/audit data. Permanent data removal requires the explicit `DELETE AUDITHERO DATA` confirmation.
