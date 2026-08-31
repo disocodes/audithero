@@ -21,6 +21,59 @@ import traceback
 stage = "bootstrap"
 lib = None
 
+
+def _runtime_context_value(name):
+    """Resolve one Fabric runtime-context value to a JSON-safe Python string."""
+    ctx = notebookutils.runtime.context
+    if callable(ctx):
+        try:
+            resolved = ctx()
+            if resolved is not None:
+                ctx = resolved
+        except Exception:
+            pass
+
+    value = None
+    if isinstance(ctx, dict):
+        value = ctx.get(name)
+    else:
+        try:
+            value = ctx[name]
+        except Exception:
+            getter = getattr(ctx, "get", None)
+            if callable(getter):
+                try:
+                    value = getter(name)
+                except Exception:
+                    value = None
+
+        if value is None:
+            member = getattr(ctx, name, None)
+            if callable(member):
+                try:
+                    value = member()
+                except Exception:
+                    value = None
+            else:
+                value = member
+
+    if value is None:
+        return None
+
+    module_name = type(value).__module__
+    type_name = type(value).__name__
+    if module_name.startswith("py4j") or type_name == "JavaMember":
+        # An unresolved Py4J member is not a usable context value. The manifest is
+        # support metadata only, so record null rather than fail an otherwise
+        # successful installation.
+        return None
+
+    try:
+        return str(value).strip() or None
+    except Exception:
+        return None
+
+
 try:
     stage = "import AuditHero Fabric package"
     from schads_audit.fabric_rules import bundled_rule_library
@@ -104,8 +157,8 @@ try:
     print(stage)
     manifest = {
         "platform": "Microsoft Fabric",
-        "lakehouse_id": getattr(notebookutils.runtime.context, "defaultLakehouseId", None),
-        "workspace_id": getattr(notebookutils.runtime.context, "currentWorkspaceId", None),
+        "lakehouse_id": _runtime_context_value("defaultLakehouseId"),
+        "workspace_id": _runtime_context_value("currentWorkspaceId"),
         "rule_pack_count": len(lib.rate_packs) + len(lib.condition_packs) + len(lib.allowance_packs),
     }
     (CONFIG / "deployment_manifest.json").write_text(
