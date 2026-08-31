@@ -40,26 +40,80 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 import zipfile
 
 import requests
 
 
-def _context_value(name: str):
+def _runtime_context():
+    """Return Fabric runtime context without retaining a Py4J method proxy."""
     ctx = notebookutils.runtime.context
     if isinstance(ctx, dict):
-        return ctx.get(name)
-    return getattr(ctx, name, None)
+        return ctx
+    if callable(ctx):
+        try:
+            resolved = ctx()
+            if resolved is not None:
+                return resolved
+        except Exception:
+            pass
+    return ctx
+
+
+def _context_value(name: str):
+    """Read one Fabric context value and return only a plain Python string."""
+    ctx = _runtime_context()
+    value = None
+
+    if isinstance(ctx, dict):
+        value = ctx.get(name)
+    else:
+        try:
+            value = ctx[name]
+        except Exception:
+            getter = getattr(ctx, "get", None)
+            if callable(getter):
+                try:
+                    value = getter(name)
+                except Exception:
+                    value = None
+
+        # Compatibility fallback for runtime bridge objects exposing zero-argument methods.
+        if value is None:
+            member = getattr(ctx, name, None)
+            if callable(member):
+                try:
+                    value = member()
+                except Exception:
+                    value = None
+
+    if value is None:
+        return None
+
+    module_name = type(value).__module__
+    type_name = type(value).__name__
+    if module_name.startswith("py4j") or type_name == "JavaMember":
+        raise RuntimeError(
+            f"Fabric runtime returned an unresolved Py4J object for {name}. "
+            "Start a fresh notebook session and rerun the current AuditHero installer."
+        )
+    return str(value).strip()
 
 
 workspace_id = _context_value("currentWorkspaceId")
 workspace_name = _context_value("currentWorkspaceName")
 current_notebook_id = _context_value("currentNotebookId")
 current_notebook_name = _context_value("currentNotebookName")
+
 if not workspace_id:
     raise RuntimeError("Fabric workspace ID could not be detected from this notebook session.")
+try:
+    workspace_id = str(uuid.UUID(workspace_id))
+except ValueError as exc:
+    raise RuntimeError(f"Fabric returned an invalid workspace ID: {workspace_id!r}") from exc
 
-print(f"Installing AuditHero into: {workspace_name} ({workspace_id})")
+print(f"Installing AuditHero into: {workspace_name or 'current workspace'} ({workspace_id})")
 print(f"Release: {release_ref}")
 
 # CELL ********************
@@ -83,18 +137,35 @@ if len(roots) != 1:
 repo_root = roots[0]
 print(f"Release downloaded to temporary working area: {repo_root.name}")
 
+# Required support files must be present in the selected release before any
+# workspace resources are changed.
+required_release_files = [
+    repo_root / "fabric" / "scripts" / "deploy_fabric.py",
+    repo_root / "fabric" / "scripts" / "deploy_file_source.py",
+    repo_root / "fabric" / "scripts" / "deploy_source_mapping.py",
+    repo_root / "fabric" / "scripts" / "deploy_admin_notebooks.py",
+    repo_root / "installers" / "Fabric_Install_AuditHero.py",
+    repo_root / "installers" / "Fabric_Uninstall_AuditHero.py",
+]
+missing_release_files = [str(p.relative_to(repo_root)) for p in required_release_files if not p.exists()]
+if missing_release_files:
+    raise RuntimeError(
+        "The selected AuditHero release is missing installer components: "
+        + ", ".join(missing_release_files)
+    )
+
 # CELL ********************
 
-# Build the minimal installation configuration. File-based auditing is enabled
-# by default; the API-related Key Vault setting may remain empty.
+# Build the installation configuration. File-based auditing is enabled by
+# default; the API-related Key Vault setting may remain empty.
 config = {
     "workspace_id": workspace_id,
-    "workspace_name": workspace_name or str(workspace_id),
-    "lakehouse_name": lakehouse_name,
-    "environment_name": environment_name,
-    "semantic_model_name": semantic_model_name,
-    "report_name": report_name,
-    "key_vault_url": key_vault_url,
+    "workspace_name": str(workspace_name or workspace_id),
+    "lakehouse_name": str(lakehouse_name),
+    "environment_name": str(environment_name),
+    "semantic_model_name": str(semantic_model_name),
+    "report_name": str(report_name),
+    "key_vault_url": str(key_vault_url or ""),
     "source_mapping": {
         "source_root": "/lakehouse/default/Files/import/raw",
         "draft_path": "/lakehouse/default/Files/import/source_mapping_draft.xlsx",
@@ -112,7 +183,7 @@ config = {
     "monthly_schedule": {
         "enabled": bool(monthly_schedule_enabled),
         "day_of_month": int(monthly_day_of_month),
-        "time": monthly_time,
+        "time": str(monthly_time),
         "windows_timezone": "W. Australia Standard Time",
         "lookback_days": 45
     },
@@ -136,8 +207,8 @@ config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 # CELL ********************
 
 # Fabric supplies a user-scoped token to the notebook. The deployment scripts
-# use this token to create only AuditHero-managed items in the current workspace.
-os.environ["FABRIC_ACCESS_TOKEN"] = notebookutils.credentials.getToken("pbi")
+# use this token to create AuditHero-managed items in the current workspace.
+os.environ["FABRIC_ACCESS_TOKEN"] = str(notebookutils.credentials.getToken("pbi"))
 
 subprocess.check_call([
     sys.executable, "-m", "pip", "install", "--quiet",
