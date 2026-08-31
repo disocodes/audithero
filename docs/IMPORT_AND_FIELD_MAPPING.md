@@ -89,7 +89,7 @@ Each row defines how one AuditHero target field is produced. Important columns i
 - `source_field` — direct source-column match;
 - `coalesce_fields` — semicolon-separated alternatives; first non-blank value wins;
 - `concat_fields` — semicolon-separated fields to join;
-- `concat_separator` — text inserted between joined fields;
+- `separator` — text inserted between joined fields;
 - `date_source` and `time_source` — combine separate date and time fields;
 - `constant` — fixed value used for every row;
 - `default` — value used when the mapped value is blank;
@@ -128,7 +128,7 @@ Set:
 
 `concat_fields = First Name;Last Name`
 
-and set `concat_separator` to a single space.
+and set `separator` to a single space.
 
 ### Combine a shift date and time
 
