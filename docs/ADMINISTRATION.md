@@ -1,45 +1,68 @@
 # AuditHero administration
 
-This guide covers tasks performed by platform/payroll-system administrators rather than day-to-day audit operators.
+This guide is for people who maintain an installed AuditHero environment. Day-to-day payroll and audit users should normally use the platform jobs, pipelines and reports described in the [Quick start](../QUICKSTART.md).
 
 ## Roles and access
 
 Separate responsibilities where practical:
 
-- **Platform administrator:** installation, workspace permissions, environments/jobs/pipelines and upgrades.
+- **Platform administrator:** installation, workspace permissions, upgrades and removal.
 - **Payroll data administrator:** source mappings, pay-category treatment and controlled evidence registers.
 - **Audit operator/reviewer:** runs audits and reviews findings.
 
 Payroll data is sensitive. Apply least-privilege access to Lakehouse/Volumes, output tables and dashboards.
 
-## Installation and upgrades
+## First installation
 
-Use the platform installer notebook as the normal installation and upgrade method:
+Use the bootstrap notebook for the selected platform:
 
-- Fabric: `installers/Fabric_Install_AuditHero.py`
+- Microsoft Fabric: `installers/Fabric_Install_AuditHero.py`
 - Databricks: `installers/Databricks_Install_AuditHero.py`
 
-The installer creates/updates the platform resources and runs Setup and Self Test automatically. To upgrade, change the installer `release_ref` to the approved AuditHero version and run the notebook again.
+The bootstrap creates or updates the AuditHero application and runs Setup and Self Test automatically. It also installs permanent administration notebooks inside the platform so the repository bootstrap does not need to be imported again for routine upgrades or removal.
+
+## Upgrading AuditHero
+
+After the first installation, use the administration notebook already installed in the platform.
+
+### Microsoft Fabric
+
+Open **AuditHero - Install or Upgrade** in the AuditHero workspace.
+
+### Databricks
+
+Open:
+
+`/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
+
+Set `release_ref` to the approved AuditHero version when required, then choose **Run all**. The installer updates the application and reruns Setup and Self Test.
 
 After an upgrade, validate one known payroll period before resuming production or recurring audits.
 
 ## Removing AuditHero
 
-Use the matching uninstaller notebook:
+Use the installed **AuditHero - Uninstall** notebook.
 
-- Fabric: `installers/Fabric_Uninstall_AuditHero.py`
-- Databricks: `installers/Databricks_Uninstall_AuditHero.py`
+### Microsoft Fabric
 
-Normal uninstall removes AuditHero application resources and preserves payroll/audit storage by default.
+Open **AuditHero - Uninstall** in the AuditHero workspace.
 
-Permanent data deletion requires both:
+### Databricks
+
+Open:
+
+`/Shared/AuditHero/admin/AuditHero - Uninstall`
+
+A normal uninstall removes AuditHero application resources while preserving the payroll/audit Lakehouse or catalog.
+
+Permanent data deletion requires both settings below before running the uninstaller:
 
 ```python
 delete_audit_data = True
 confirmation = "DELETE AUDITHERO DATA"
 ```
 
-Before permanent deletion, follow the organisation's payroll-record retention and backup requirements.
+Before permanent deletion, follow the organisation's payroll-record retention, approval and backup requirements.
 
 ## Source mapping governance
 
@@ -47,58 +70,64 @@ Treat `source_mapping.xlsx` as controlled configuration. It determines how sourc
 
 When a source export changes:
 
-1. upload a sample of the new layout;
-2. generate/review a new mapping draft;
-3. version the approved mapping;
-4. convert a known period;
-5. compare the conversion report; and
+1. upload a representative sample of the new layout;
+2. run **AuditHero - Build Source Mapping Workbook**;
+3. review and version the approved mapping;
+4. convert a known payroll period;
+5. review the conversion report and File Readiness findings; and
 6. manually validate representative audit results.
 
 Do not modify Award calculation code to compensate for a source-system column change.
 
 ## Rule-library updates
 
-The authoritative AuditHero rule packs are under `rules/MA000100/`.
+The AuditHero rule packs are stored under `rules/MA000100/` in the installed release.
 
-When a new approved rate/condition version is added:
+When an approved rate or condition version is introduced:
 
-1. add a new effective-dated pack rather than editing historical values in place;
-2. retain source publisher/reference metadata;
-3. validate the manifest;
-4. add/update regression cases;
-5. install the version in a non-production workspace where required;
-6. run Self Test and a known payroll period; and
-7. promote only after review.
+1. install the approved AuditHero release in a non-production workspace where required;
+2. run the installer Self Test;
+3. run a known payroll period;
+4. review representative calculations and rule coverage; and
+5. promote the approved version according to the organisation's release process.
+
+Historical rule packs should not be overwritten merely to apply a new current rate.
 
 ## Employment Hero API (optional)
 
-### Fabric
+Uploaded-file auditing does not require Employment Hero credentials.
 
-Store API secrets in Azure Key Vault. The notebooks retrieve them at runtime; do not place secret values in Git, notebook parameters or Power BI.
+### Microsoft Fabric
+
+Store API secrets in Azure Key Vault. Do not place secret values in source files, notebook parameters or Power BI.
 
 ### Databricks
 
-Use Databricks Secrets for API credentials. Uploaded-file workflows do not require them.
+Use Databricks Secrets. Uploaded-file jobs remain available without API configuration.
 
-API connectivity is an ingestion option. It does not replace controlled evidence that cannot be reliably established from the source API.
+API connectivity is an ingestion option. It does not replace controlled evidence that cannot be established reliably from the source system.
 
 ## Schedules
 
-Recurring payroll audits should be disabled/paused by default. Enable a schedule only after the relevant input path, mapping and known-period validation are stable.
+Recurring payroll audits are installed disabled/paused by default. Enable a schedule only after:
 
-If file mode is used for recurring audits, establish an operational process that replaces/uploads the current source exports before the scheduled conversion/audit run.
+- one representative payroll period has been validated;
+- the source mapping is stable;
+- required evidence registers are maintained; and
+- the payroll/audit team knows how to resolve `REQUIRES_REVIEW` findings.
+
+For recurring file-based auditing, ensure the current source exports are uploaded before the scheduled conversion/audit run.
 
 ## Retention and audit trail
 
-Set retention according to the organisation's payroll/legal requirements. Retain enough evidence to explain:
+Set retention according to the organisation's payroll and legal requirements. Retain enough evidence to explain:
 
 - source files used;
 - mapping version;
-- rule-library version;
-- AuditHero release/version;
+- rule-library/AuditHero release version;
 - audit date range;
-- run identifier/time;
+- run identifier and run time;
 - readiness/review findings; and
-- subsequent corrections.
+- subsequent corrections or approvals.
 
-Do not commit real payroll exports, API secrets or controlled employee evidence to the public/source-code repository.
+Do not commit real payroll exports, API secrets or controlled employee evidence to the source-code repository.
