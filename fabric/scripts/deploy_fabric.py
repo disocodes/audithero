@@ -200,6 +200,50 @@ class FabricClient:
             raise RuntimeError("Environment creation completed but item could not be resolved")
         return item
 
+    @staticmethod
+    def _publish_details(payload: Any) -> dict:
+        if not isinstance(payload, dict):
+            return {}
+        if isinstance(payload.get("publishDetails"), dict):
+            return payload["publishDetails"]
+        properties = payload.get("properties")
+        if isinstance(properties, dict) and isinstance(properties.get("publishDetails"), dict):
+            return properties["publishDetails"]
+        return {}
+
+    def wait_environment_publish(self, environment_id: str, initial: Any = None):
+        """Wait until Fabric confirms that staged libraries/runtime are active."""
+        payload = initial if isinstance(initial, dict) else {}
+        deadline = time.time() + 1800
+        last_state = None
+
+        while time.time() < deadline:
+            details = self._publish_details(payload)
+            state = str(details.get("state") or "").strip().lower()
+
+            if state and state != last_state:
+                print(f"    Environment publish state: {details.get('state')}", flush=True)
+                last_state = state
+
+            if state == "success":
+                return details
+            if state in {"failed", "cancelled", "canceled"}:
+                raise RuntimeError(
+                    "Fabric Environment publish failed: "
+                    + json.dumps(details or payload, default=str)
+                )
+
+            time.sleep(10)
+            payload = self.request(
+                "GET",
+                f"/workspaces/{self.workspace_id}/environments/{environment_id}",
+                wait=False,
+            )
+
+        raise TimeoutError(
+            f"Timed out waiting for Fabric Environment {environment_id} to publish"
+        )
+
     def update_environment(
         self,
         environment_id: str,
@@ -230,12 +274,14 @@ class FabricClient:
             f"/workspaces/{self.workspace_id}/environments/{environment_id}/updateDefinition",
             body={"definition": {"parts": parts}},
         )
-        # Stable release API; beta=false is required during the Aug-2026 transition.
-        self.request(
+        # Fabric can return HTTP 200 while publishDetails.state is still Running.
+        # Never launch AuditHero notebooks until the wheel/runtime publish is Success.
+        publish = self.request(
             "POST",
             f"/workspaces/{self.workspace_id}/environments/{environment_id}/staging/publish?beta=false",
             body=None,
         )
+        self.wait_environment_publish(environment_id, publish)
 
     @staticmethod
     def notebook_source(
@@ -347,9 +393,8 @@ class FabricClient:
             )
             existing = self.find("Notebook", name)
         else:
-            # updateMetadata must only be true when a .platform definition part is
-            # supplied. AuditHero intentionally updates notebook content/bindings
-            # only, so preserve the existing Fabric item metadata.
+            # updateMetadata=true requires a .platform definition part. AuditHero
+            # only replaces source/bindings, so preserve the Fabric item metadata.
             self.request(
                 "POST",
                 f"/workspaces/{self.workspace_id}/notebooks/{existing['id']}/updateDefinition",
@@ -391,19 +436,114 @@ class FabricClient:
             raise RuntimeError(f"Pipeline could not be resolved after deployment: {name}")
         return existing
 
-    def run_notebook(self, item_id: str, parameters: dict[str, Any] | None = None):
-        body = {}
+    @staticmethod
+    def _monitoring_links(payload: dict) -> dict:
+        properties = payload.get("properties") if isinstance(payload, dict) else {}
+        if not isinstance(properties, dict):
+            properties = {}
+        compute_details = properties.get("computeDetails")
+        if not isinstance(compute_details, dict):
+            compute_details = {}
+        monitoring = compute_details.get("monitoringInfo")
+        if not isinstance(monitoring, dict):
+            monitoring = {}
+        keys = (
+            "executionSnapshotUrl",
+            "driverLogUrl",
+            "sparkJobDetailsUrl",
+            "sparkUiUrl",
+        )
+        return {key: monitoring[key] for key in keys if monitoring.get(key)}
+
+    def run_notebook(
+        self,
+        item_id: str,
+        parameters: dict[str, Any] | None = None,
+        *,
+        lakehouse_id: str,
+        environment_id: str,
+    ):
+        """Execute a Spark notebook with explicit compute bindings and rich diagnostics."""
+        body = {
+            "executionData": {
+                "compute": "Spark",
+                "computeConfiguration": {
+                    "defaultLakehouse": {
+                        "referenceType": "ById",
+                        "itemId": lakehouse_id,
+                        "workspaceId": self.workspace_id,
+                    },
+                    "attachedEnvironment": {
+                        "referenceType": "ById",
+                        "itemId": environment_id,
+                        "workspaceId": self.workspace_id,
+                    },
+                },
+            }
+        }
         if parameters:
             body["parameters"] = [
                 {"name": name, "value": value, "type": _parameter_type(value)}
                 for name, value in parameters.items()
             ]
-        return self.request(
-            "POST",
-            f"/workspaces/{self.workspace_id}/items/{item_id}/jobs/RunNotebook/instances",
-            body=body,
-            ok=(202,),
-            wait=True,
+
+        url = self._url(
+            f"/workspaces/{self.workspace_id}/notebooks/{item_id}"
+            "/jobs/execute/instances?beta=false"
+        )
+        r = self.session.post(url, json=body, timeout=120)
+        if r.status_code != 202:
+            raise RuntimeError(f"Fabric POST {url} -> {r.status_code}: {r.text}")
+
+        location = r.headers.get("Location", "")
+        job_id = location.rstrip("/").split("/")[-1] if location else ""
+        if not job_id:
+            raise RuntimeError(
+                "Fabric accepted the notebook run but returned no job instance Location"
+            )
+
+        poll_path = (
+            f"/workspaces/{self.workspace_id}/notebooks/{item_id}"
+            f"/jobs/execute/instances/{job_id}?beta=true"
+        )
+        deadline = time.time() + 1800
+        delay = max(2, int(r.headers.get("Retry-After", "10")))
+
+        while time.time() < deadline:
+            time.sleep(min(delay, 30))
+            payload = self.request("GET", poll_path, wait=False)
+            if not isinstance(payload, dict):
+                continue
+
+            status = str(payload.get("status") or "").strip().lower()
+            if status in {"completed", "succeeded", "success"}:
+                failure = payload.get("failureReason")
+                if failure:
+                    links = self._monitoring_links(payload)
+                    raise RuntimeError(
+                        "Fabric notebook completed with a failure reason: "
+                        + json.dumps(
+                            {"job": payload, "monitoring": links},
+                            default=str,
+                        )
+                    )
+                return payload
+
+            if status in {"failed", "cancelled", "canceled"}:
+                links = self._monitoring_links(payload)
+                details = {
+                    "jobInstanceId": job_id,
+                    "failureReason": payload.get("failureReason"),
+                    "monitoring": links,
+                    "rootActivityId": payload.get("rootActivityId"),
+                }
+                raise RuntimeError(
+                    "Fabric notebook execution failed: "
+                    + json.dumps(details, default=str)
+                )
+
+        raise TimeoutError(
+            f"Timed out waiting for Fabric notebook {item_id} job {job_id}"
         )
 
     def ensure_monthly_schedule(
@@ -416,8 +556,6 @@ class FabricClient:
         enabled: bool,
     ):
         # Data Pipelines use the workload-specific execute scheduler endpoint.
-        # The generic item scheduler can reject DataPipeline + DefaultJob with
-        # InvalidJobType even though older examples used that route.
         path = (
             f"/workspaces/{self.workspace_id}/dataPipelines/{pipeline_id}"
             "/jobs/execute/schedules"
@@ -659,9 +797,9 @@ def main():
     }
     notebooks = {}
     for name, (file_name, parameters) in notebook_specs.items():
-        code = (FABRIC / "notebooks" / file_name).read_text(encoding="utf-8")
+        notebook_code = (FABRIC / "notebooks" / file_name).read_text(encoding="utf-8")
         notebooks[name] = client.upsert_notebook(
-            name, code, lakehouse, environment, parameters
+            name, notebook_code, lakehouse, environment, parameters
         )
 
     historical = None
@@ -705,18 +843,29 @@ def main():
     else:
         print("[4-5/8] Pipeline deployment disabled in config")
 
+    run_binding = {
+        "lakehouse_id": lakehouse["id"],
+        "environment_id": environment["id"],
+    }
+
     if args.skip_run:
         print("[6-8/8] Runtime execution skipped by --skip-run")
     else:
         if deploy_cfg.get("run_setup", True):
             print("[6/8] Execute setup")
-            client.run_notebook(notebooks["AuditHero - Setup"]["id"])
+            client.run_notebook(
+                notebooks["AuditHero - Setup"]["id"],
+                **run_binding,
+            )
         else:
             print("[6/8] Setup execution disabled in config")
 
         if deploy_cfg.get("run_self_test", True):
             print("[7/8] Execute Fabric-native regression self-test")
-            client.run_notebook(notebooks["AuditHero - Self Test"]["id"])
+            client.run_notebook(
+                notebooks["AuditHero - Self Test"]["id"],
+                **run_binding,
+            )
         else:
             print("[7/8] Self-test execution disabled in config")
 
@@ -724,7 +873,11 @@ def main():
             "build_report", True
         ):
             print("[8/8] Build/refresh Direct Lake semantic model and Power BI report")
-            client.run_notebook(notebooks["AuditHero - Build BI"]["id"], bi_params)
+            client.run_notebook(
+                notebooks["AuditHero - Build BI"]["id"],
+                bi_params,
+                **run_binding,
+            )
         else:
             print("[8/8] BI deployment disabled in config")
 
