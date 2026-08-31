@@ -50,6 +50,14 @@ def test_installers_create_the_mapped_file_operator_path():
     assert "AuditHero - Convert Mapped Files and Run Audit" in databricks
 
 
+def test_fabric_installer_surfaces_child_deployer_errors():
+    fabric = source("fabric_install")
+    assert "subprocess.Popen" in fabric
+    assert "stderr=subprocess.STDOUT" in fabric
+    assert "AuditHero installer step" in fabric
+    assert "CalledProcessError" in fabric
+
+
 def test_uninstallers_require_explicit_confirmation_for_data_deletion():
     for name in ("fabric_uninstall", "databricks_uninstall"):
         text = source(name)
