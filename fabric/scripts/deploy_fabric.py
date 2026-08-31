@@ -347,9 +347,12 @@ class FabricClient:
             )
             existing = self.find("Notebook", name)
         else:
+            # updateMetadata must only be true when a .platform definition part is
+            # supplied. AuditHero intentionally updates notebook content/bindings
+            # only, so preserve the existing Fabric item metadata.
             self.request(
                 "POST",
-                f"/workspaces/{self.workspace_id}/notebooks/{existing['id']}/updateDefinition?updateMetadata=true",
+                f"/workspaces/{self.workspace_id}/notebooks/{existing['id']}/updateDefinition",
                 body={"definition": definition},
             )
         if not existing:
