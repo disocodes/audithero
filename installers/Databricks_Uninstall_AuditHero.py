@@ -2,9 +2,8 @@
 # MAGIC %md
 # MAGIC # AuditHero — Uninstall
 # MAGIC
-# MAGIC Import this notebook into the Databricks workspace that contains AuditHero and
-# MAGIC choose **Run all**. By default the AuditHero catalog is preserved so payroll and
-# MAGIC audit evidence is not destroyed accidentally.
+# MAGIC Run this notebook from `/Shared/AuditHero/admin`. By default the AuditHero
+# MAGIC catalog is preserved so payroll and audit evidence is not destroyed accidentally.
 # MAGIC
 # MAGIC To permanently remove the AuditHero catalog and all data in it, set
 # MAGIC `delete_audit_data = True` and enter the exact confirmation phrase shown below.
@@ -47,9 +46,9 @@ print("Catalog data deletion:", "YES" if delete_audit_data else "NO — data wil
 # MAGIC %md
 # MAGIC ## Read the installation record
 # MAGIC
-# MAGIC When available, the installer state identifies the jobs, dashboard and SQL
-# MAGIC warehouse that AuditHero created. If the state file is unavailable, the
-# MAGIC uninstaller falls back to exact AuditHero resource names.
+# MAGIC The installation record identifies the jobs, dashboard and SQL warehouse selected
+# MAGIC during installation. If it is unavailable, the uninstaller falls back to exact
+# MAGIC AuditHero resource names.
 
 # COMMAND ----------
 state = {}
@@ -126,7 +125,6 @@ if dashboard_id:
         call("DELETE", f"/api/2.0/lakeview/dashboards/{dashboard_id}/published")
         print(f"Unpublished AI/BI dashboard: {dashboard_id}")
     except Exception:
-        # The dashboard may already be unpublished; continue with draft removal.
         pass
     call("DELETE", f"/api/2.0/lakeview/dashboards/{dashboard_id}")
     print(f"Removed AI/BI dashboard: {dashboard_id}")
@@ -148,21 +146,10 @@ else:
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Remove installed AuditHero workspace code
-
-# COMMAND ----------
-try:
-    call("POST", "/api/2.0/workspace/delete", {"path": install_root, "recursive": True})
-    print(f"Removed workspace folder: {install_root}")
-except Exception as exc:
-    print(f"Workspace folder removal reported: {exc}")
-
-# COMMAND ----------
-# MAGIC %md
 # MAGIC ## Optionally remove the AuditHero catalog and all data
 # MAGIC
-# MAGIC This is intentionally the last step. `DROP CATALOG ... CASCADE` permanently
-# MAGIC removes AuditHero tables, views and the landing Volume in that catalog.
+# MAGIC `DROP CATALOG ... CASCADE` permanently removes AuditHero tables, views and the
+# MAGIC landing Volume. It runs only after the explicit full-delete confirmation above.
 
 # COMMAND ----------
 if delete_audit_data:
@@ -171,7 +158,21 @@ if delete_audit_data:
 else:
     print(f"Preserved catalog and data: {catalog}")
 
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Remove installed AuditHero workspace code last
+# MAGIC
+# MAGIC This removes `/Shared/AuditHero`, including the installed Install/Upgrade and
+# MAGIC Uninstall notebooks. It is last so the current uninstaller can finish all other
+# MAGIC cleanup first.
+
+# COMMAND ----------
 print("\nAuditHero uninstall completed.")
 if not delete_audit_data:
     print("Payroll/audit data remains available in the preserved catalog.")
-    print("Run this notebook again with the explicit full-delete confirmation only if permanent data removal is required.")
+    print("AuditHero can be reinstalled later using the bootstrap installer notebook.")
+
+try:
+    call("POST", "/api/2.0/workspace/delete", {"path": install_root, "recursive": True})
+except Exception as exc:
+    print(f"Installed workspace folder could not remove itself automatically: {exc}")
