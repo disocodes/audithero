@@ -2,10 +2,10 @@
 """Run AuditHero Fabric initialization notebooks with structured diagnostics.
 
 Resource deployment and Spark execution are intentionally separated. The deployer
-creates/updates Fabric items with --skip-run; this driver then executes Setup,
-Self Test, and Build BI through the notebook Job Scheduler API and inspects each
-notebook exitValue. This avoids Fabric reducing a caught notebook exception to a
-generic System_Cancelled_Session_Statements_Failed message.
+creates/updates Fabric items with --skip-run; this driver then verifies the
+published AuditHero custom wheel, repairs it through Fabric's stable staging API
+when necessary, and executes Setup, Self Test, and Build BI through the notebook
+Job Scheduler API while inspecting each notebook exitValue.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -84,6 +85,142 @@ class FabricRuntimeClient:
             except ValueError:
                 return r.text
         raise RuntimeError(f"Fabric request remained rate-limited: {method} {url}")
+
+    @staticmethod
+    def _publish_details(payload: Any) -> dict:
+        if not isinstance(payload, dict):
+            return {}
+        if isinstance(payload.get("publishDetails"), dict):
+            return payload["publishDetails"]
+        properties = payload.get("properties")
+        if isinstance(properties, dict) and isinstance(properties.get("publishDetails"), dict):
+            return properties["publishDetails"]
+        return {}
+
+    def wait_environment_publish(self, environment_id: str) -> dict:
+        deadline = time.time() + 1800
+        last_state = None
+        while time.time() < deadline:
+            payload = self.request(
+                "GET",
+                f"/workspaces/{self.workspace_id}/environments/{environment_id}",
+            )
+            details = self._publish_details(payload)
+            state = str(details.get("state") or "").strip().lower()
+            if state and state != last_state:
+                print(f"    Environment publish state: {details.get('state')}", flush=True)
+                last_state = state
+            if state == "success":
+                return details
+            if state in {"failed", "cancelled", "canceled"}:
+                raise RuntimeError(
+                    "Fabric Environment publish failed: "
+                    + json.dumps(details or payload, default=str)
+                )
+            time.sleep(10)
+        raise TimeoutError(
+            f"Timed out waiting for Fabric Environment {environment_id} to publish"
+        )
+
+    def published_libraries(self, environment_id: str) -> list[dict]:
+        """Return effective published Environment libraries using the stable API."""
+        path = (
+            f"/workspaces/{self.workspace_id}/environments/{environment_id}"
+            "/libraries?beta=false"
+        )
+        libraries: list[dict] = []
+        while path:
+            payload = self.request("GET", path)
+            if not isinstance(payload, dict):
+                break
+            libraries.extend(payload.get("libraries") or [])
+            continuation_uri = payload.get("continuationUri")
+            token = payload.get("continuationToken")
+            if continuation_uri and str(continuation_uri).lower() not in {"null", "none"}:
+                path = str(continuation_uri)
+            elif token and str(token).lower() not in {"null", "none"}:
+                path = (
+                    f"/workspaces/{self.workspace_id}/environments/{environment_id}"
+                    f"/libraries?beta=false&continuationToken={quote(str(token), safe='')}"
+                )
+            else:
+                path = None
+        return libraries
+
+    def upload_custom_library(self, environment_id: str, wheel_path: Path) -> None:
+        """Upload one wheel with Fabric's stable application/octet-stream API."""
+        url = self._url(
+            f"/workspaces/{self.workspace_id}/environments/{environment_id}"
+            f"/staging/libraries/{quote(wheel_path.name, safe='')}"
+        )
+        data = wheel_path.read_bytes()
+        for attempt in range(8):
+            r = self.session.post(
+                url,
+                data=data,
+                headers={"Content-Type": "application/octet-stream"},
+                timeout=180,
+            )
+            if r.status_code == 429:
+                time.sleep(int(r.headers.get("Retry-After", min(60, 2**attempt))))
+                continue
+            if r.status_code not in (200, 201, 202, 204):
+                raise RuntimeError(
+                    f"Fabric custom-library upload {url} -> {r.status_code}: {r.text}"
+                )
+            return
+        raise RuntimeError(f"Fabric custom-library upload remained rate-limited: {url}")
+
+    def ensure_audithero_wheel(self, environment_id: str) -> str:
+        """Ensure the wheel is effective, repairing staging/publish when absent."""
+        wheels = sorted(
+            (ROOT / "dist" / "fabric").glob("audithero_schads-*.whl"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not wheels:
+            raise RuntimeError(
+                "AuditHero Fabric wheel is missing from dist/fabric after deployment."
+            )
+        wheel = wheels[0]
+
+        published = self.published_libraries(environment_id)
+        published_names = {
+            str(x.get("name"))
+            for x in published
+            if isinstance(x, dict) and x.get("libraryType") == "Custom"
+        }
+        if wheel.name in published_names:
+            print(f"    Published custom library verified: {wheel.name}", flush=True)
+            return wheel.name
+
+        print(
+            f"    AuditHero wheel is not effective in the published Environment; "
+            f"uploading {wheel.name} through the stable staging API...",
+            flush=True,
+        )
+        self.upload_custom_library(environment_id, wheel)
+        self.request(
+            "POST",
+            f"/workspaces/{self.workspace_id}/environments/{environment_id}"
+            "/staging/publish?beta=false",
+        )
+        self.wait_environment_publish(environment_id)
+
+        published = self.published_libraries(environment_id)
+        published_names = {
+            str(x.get("name"))
+            for x in published
+            if isinstance(x, dict) and x.get("libraryType") == "Custom"
+        }
+        if wheel.name not in published_names:
+            raise RuntimeError(
+                "Fabric reported Environment publish Success, but the AuditHero wheel "
+                f"is still absent from the published library list: {wheel.name}. "
+                f"Published custom libraries: {sorted(published_names)}"
+            )
+        print(f"    Published custom library verified: {wheel.name}", flush=True)
+        return wheel.name
 
     @staticmethod
     def _monitoring(payload: dict) -> dict:
@@ -232,6 +369,9 @@ def main():
     lakehouse_id = state["lakehouse_id"]
     environment_id = state["environment_id"]
     deploy_cfg = cfg.get("deploy", {})
+
+    print("[5.5/8] Verify published AuditHero Environment library")
+    client.ensure_audithero_wheel(environment_id)
 
     if deploy_cfg.get("run_setup", True):
         print("[6/8] Execute setup with structured diagnostics")
