@@ -1,0 +1,52 @@
+# AuditHero Fabric notebook source
+#
+# PURPOSE
+# -------
+# Convert arbitrary payroll/HR/timekeeping CSV/XLSX exports into AuditHero's
+# canonical input files using an operator-approved source_mapping.xlsx or JSON.
+# The notebook also runs File Readiness so a successful conversion is not confused
+# with a payroll-ready dataset.
+
+from pathlib import Path
+
+from schads_audit.mapping_workbook import load_mapping
+from schads_audit.source_mapping import convert_source_files
+from schads_audit.file_readiness import assess_file_readiness
+
+print("STEP 1 — Load the approved source mapping")
+mapping_file = Path(mapping_path)
+if not mapping_file.exists():
+    raise FileNotFoundError(
+        f"Mapping file not found: {mapping_path}. Run 'AuditHero - Build Source Mapping Workbook', edit the draft, and upload it as source_mapping.xlsx."
+    )
+mapping = load_mapping(mapping_file)
+enabled = [name for name, cfg in mapping.get("datasets", {}).items() if cfg.get("enabled")]
+print("Datasets enabled for conversion:", ", ".join(enabled) or "NONE")
+
+print("STEP 2 — Convert source fields to AuditHero fields")
+result = convert_source_files(
+    source_root=source_root,
+    mapping=mapping,
+    output_root=output_root,
+    write_workbook=True,
+    strict=str(strict).lower() in {"true", "1", "yes"},
+)
+display(result["report"])
+print(f"Canonical workbook written to: {result['workbook']}")
+
+print("STEP 3 — Validate the converted canonical files")
+# Passing output_root as both arguments allows a self-contained canonical workbook
+# to provide its own control-register sheets. Sidecar control files are also
+# supported if an administrator chooses that layout.
+readiness = assess_file_readiness(output_root, output_root)
+display(readiness)
+blocking = readiness[readiness["status"] == "BLOCKING"] if not readiness.empty else readiness
+if len(blocking):
+    display(blocking)
+    raise ValueError(
+        f"Conversion completed, but {len(blocking)} blocking File Readiness item(s) remain. Correct the source mapping/data and rerun this pipeline."
+    )
+
+print("Source conversion and File Readiness completed successfully.")
+print("NEXT: run 'AuditHero - Uploaded Files Audit Pipeline' and choose the audit date range.")
+notebookutils.notebook.exit(result["workbook"] or output_root)

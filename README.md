@@ -1,126 +1,123 @@
-# AuditHero — SCHADS payroll compliance
+# AuditHero
 
-AuditHero is a production-oriented payroll audit system for the **Social, Community, Home Care and Disability Services Industry Award (SCHADS / MA000100)**. It reconstructs historical Award entitlements with effective-dated rules, reconciles expected versus actual payroll and supports both ongoing payroll assurance and multi-year remediation audits.
+AuditHero is a payroll audit solution for the **Social, Community, Home Care and Disability Services Industry Award 2010 (SCHADS / MA000100)**. It reconstructs expected Award entitlements from employment, roster and timekeeping evidence, compares expected pay with payroll where actual earnings are supplied, and clearly separates confirmed results from items that still need human review.
 
-The repository ships **two first-class deployments**:
+AuditHero can be installed in **Microsoft Fabric** or **Databricks**. The normal user experience is inside the platform UI: upload source files, map fields, run a pipeline/job, review exceptions and open the dashboard. Command-line tools are optional administration and automation tools; they are not required for normal payroll-audit work.
 
-- **Microsoft Fabric** — schema-enabled Lakehouse, Runtime Environment, Fabric notebooks, Data Factory pipelines, Direct Lake semantic model and Power BI report.
-- **Databricks** — Unity Catalog/Delta, notebooks, Declarative Automation Bundle jobs and Databricks AI/BI dashboard.
+> AuditHero is compliance-support software, not legal advice. Validate Award coverage, classifications, historical industrial instruments and representative calculations before using results for remediation, recovery or payroll-change decisions.
 
-Both platforms use the **same `schads_audit` Python engine and the same source-controlled `rules/MA000100` JSON library**.
+## The normal operator workflow
 
-## Data sources: API is optional
+Most organisations do **not** need to reshape their payroll exports before using AuditHero.
 
-AuditHero supports two equally valid ingestion paths:
+1. Upload the original CSV/Excel exports from payroll, HR, rostering and timekeeping systems.
+2. Run **AuditHero - Build Source Mapping Workbook**.
+3. Open the generated Excel mapping workbook and confirm which source fields feed the AuditHero fields.
+4. Save the approved workbook as `source_mapping.xlsx`.
+5. Run **AuditHero - Convert Mapped Files and Run Audit**.
+6. Review results in **Power BI** (Fabric) or **Databricks AI/BI**.
 
-### FILES — simplest / no credentials
-
-Upload either:
-
-```text
-audithero_input.xlsx
-```
-
-with canonical sheets, or separate files such as:
+The combined pipeline/job performs the repetitive work after the mapping is approved:
 
 ```text
-employees.csv
-pay_details.csv
-employment_history.csv
-timesheets.csv
-rostered_shifts.csv
-payroll_earnings.csv
+Raw CSV/XLSX exports
+        ↓
+Approved source_mapping.xlsx
+        ↓
+Convert to AuditHero canonical datasets
+        ↓
+File Readiness checks
+        ↓
+SCHADS audit
+        ↓
+Dashboard refresh
 ```
 
-CSV and Excel can be mixed. Employment Hero credentials are **not required**.
+You can also run **AuditHero - Convert Source Files** by itself when you want to inspect the converted data and readiness results before running an audit.
 
-Generate a blank workbook with:
+If your files already use the AuditHero canonical workbook/CSV format, skip the mapping and conversion stages and run the uploaded-file audit directly.
 
-```bash
-pip install -e .
-python tools/build_input_workbook.py --output audithero_input.xlsx
-```
+## Choose your platform
 
-### API — optional automation
+| | Microsoft Fabric | Databricks |
+|---|---|---|
+| Normal operating surface | Fabric workspace + Data Factory pipelines | Jobs & Pipelines / Workflows |
+| File storage | Lakehouse Files | Unity Catalog Volumes |
+| Reporting | Direct Lake + Power BI | Databricks AI/BI |
+| UI-first installation | Yes | Yes |
+| CSV/Excel field mapping | Yes | Yes |
+| Employment Hero API | Optional | Optional |
+| CLI required for daily use | No | No |
 
-Employment Hero HR/Payroll APIs can be enabled later for direct historical extraction and recurring monthly runs. Fabric uses Azure Key Vault; Databricks uses Databricks Secrets.
+Installation guides:
 
-This lets you validate the complete audit engine using exported payroll/timesheet data before granting API access.
+- **Microsoft Fabric:** [Install AuditHero in Microsoft Fabric](docs/INSTALL_FABRIC_UI.md)
+- **Databricks:** [Install AuditHero in Databricks](docs/INSTALL_DATABRICKS_UI.md)
 
-## Shared calculation coverage
+## Data sources
 
-The engine covers effective-dated SACS and Home Care disability-care rates, classification/employment history, casual loading, weekends/public holidays/shiftwork, minimum engagement, roster and period overtime, broken shifts, sleepovers, part-time written patterns, rest-after-overtime, meal events, on-call/recall/remote/higher-duty events, TOIL, industrial-instrument history and actual-versus-expected pay-period reconciliation. Ambiguous or incomplete evidence produces `REQUIRES_REVIEW` rather than a guessed result.
+### Uploaded files — easiest place to start
 
-## Microsoft Fabric
+AuditHero accepts:
 
-```bash
-cp fabric/config/fabric.example.json fabric/config/fabric.json
-# edit workspace_id; key_vault_url can remain blank for FILES mode
-az login
-./fabric/scripts/deploy.sh
-```
+- arbitrary CSV/XLSX exports that are converted through the field-mapping workflow;
+- one canonical workbook named `audithero_input.xlsx`; or
+- separate canonical CSV/Excel files.
 
-The installer creates/updates the Lakehouse, Runtime 2.0 Environment, AuditHero wheel, self-tests, uploaded-file readiness/audit pipeline, optional Employment Hero API pipelines, Direct Lake semantic model and Power BI report.
+The minimum audit data is:
 
-For FILES mode upload data to:
+- employees;
+- effective-dated pay/classification details;
+- employment history; and
+- timesheets.
 
-```text
-Lakehouse / Files / input /
-```
+Rostered shifts, pay runs and payroll earnings are recommended because they improve overtime analysis and actual-versus-expected reconciliation. Historical instrument coverage, part-time patterns and other controlled evidence can be supplied in the same workbook or as separate mapped datasets.
 
-and run:
+See [Audit data requirements](docs/AUDIT_DATA_REQUIREMENTS.md) and [Importing and mapping CSV/Excel files](docs/IMPORT_AND_FIELD_MAPPING.md).
 
-```text
-AuditHero - Uploaded Files Audit Pipeline
-```
+### Employment Hero API — optional automation
 
-Azure Key Vault is only required if you choose API mode.
+Employment Hero HR and Payroll API connectivity can be enabled later. It is not required to install AuditHero or to run uploaded-file audits. API mode is useful when an organisation wants automatic extraction and scheduled recurring audits without manually uploading exports.
 
-See `fabric/docs/DEPLOYMENT.md` and `QUICKSTART.md`.
+## What AuditHero checks
 
-## Databricks
+The shared calculation engine uses effective-dated SCHADS rule packs and supports the automated controls implemented by this project, including ordinary penalties, casual loading, minimum engagement, roster/daily/period overtime, broken shifts, sleepovers, public holidays, shiftwork, part-time pattern controls, rest-after-overtime, meal events, supplemental events, TOIL and industrial-instrument coverage checks.
 
-```bash
-databricks auth login --host https://<workspace>
-export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
-./scripts/deploy.sh
-```
+Where the available evidence does not support a reliable automated conclusion, AuditHero uses **`REQUIRES_REVIEW`** rather than guessing. Review items are excluded from confirmed remediation totals.
 
-The bundle deploys setup/self-test jobs, the credential-free `manual_file_audit` job, optional Employment Hero API jobs and the Databricks AI/BI dashboard.
+See [SCHADS rules and evidence](docs/SCHADS_RULES_AND_EVIDENCE.md).
 
-Default FILES path:
+## Result statuses
 
-```text
-/Volumes/schads_payroll/bronze/landing/input
-```
+Typical pay-period results are:
 
-Run:
+- `COMPLIANT` — actual auditable pay is within tolerance of expected pay;
+- `UNDERPAID` — confirmed auditable pay is below expected pay;
+- `OVERPAID` — confirmed auditable pay is above expected pay;
+- `REQUIRES_REVIEW` — evidence or rule allocation is not reliable enough for an automated conclusion; and
+- `ACTUAL_PAY_UNAVAILABLE` — expected entitlements were calculated but usable payroll earnings were not supplied.
 
-```bash
-databricks bundle run manual_file_audit -- \
-  --start_date=2023-07-01 \
-  --end_date=2026-06-30
-```
+See [Understanding AuditHero results](docs/UNDERSTANDING_RESULTS.md).
 
-Only run `./scripts/configure_secrets.sh` if you want API mode.
+## Documentation
 
-## Recommended operating sequence
+Start at [Documentation home](docs/README.md). The main guides are:
 
-```text
-Deploy
-  -> platform self-test
-  -> upload a known payroll period
-  -> file-readiness validation
-  -> FILES audit
-  -> manually validate representative calculations
-  -> resolve REQUIRES_REVIEW
-  -> run multi-year historical audit
-  -> optionally enable Employment Hero API automation
-  -> enable recurring monthly workflow
-```
+- [Quick start](QUICKSTART.md)
+- [Install in Microsoft Fabric](docs/INSTALL_FABRIC_UI.md)
+- [Install in Databricks](docs/INSTALL_DATABRICKS_UI.md)
+- [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md)
+- [Audit data requirements](docs/AUDIT_DATA_REQUIREMENTS.md)
+- [Running audits](docs/RUNNING_AUDITS.md)
+- [Understanding results](docs/UNDERSTANDING_RESULTS.md)
+- [SCHADS rules and evidence](docs/SCHADS_RULES_AND_EVIDENCE.md)
+- [Notebook reference](docs/NOTEBOOK_REFERENCE.md)
+- [Administration and security](docs/ADMINISTRATION.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Optional CLI and automation](docs/CLI_AND_AUTOMATION.md)
 
-## Rule source of truth
+## For administrators
 
-`rules/MA000100/` contains effective-dated rate, condition and allowance packs. Add new Fair Work versions there, record the source, add regression tests and redeploy. Do not fork Award logic separately for Fabric and Databricks.
+The effective-dated Award rule library is stored under `rules/MA000100/`. Fabric and Databricks use the same `schads_audit` Python package and the same rule packs so payroll calculation logic is not maintained separately by platform.
 
-AuditHero is compliance-engineering software, not legal advice. Independently validate Award coverage, classifications, industrial-instrument history and representative calculations before remediation or recovery decisions.
+The platform UI is the intended operating surface. CLI scripts, REST deployment tooling and CI/CD remain available for administrators who want repeatable automated deployments; see [CLI and automation](docs/CLI_AND_AUTOMATION.md).

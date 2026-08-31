@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "instructions": "Copy this file to source_mapping.json, change the source files/sheets and map your source column names to AuditHero canonical fields. You can also run the Source Mapping Draft job to generate a first draft from detected headers.",
+  "datasets": {
+    "employees": {
+      "enabled": true,
+      "source": {
+        "file": "raw_payroll_export.xlsx",
+        "sheet": "Employees",
+        "header": 0
+      },
+      "columns": {
+        "employee_id": {"source": "Employee Number", "type": "string"},
+        "employee_name": {"concat": ["First Name", "Last Name"], "separator": " ", "type": "string"},
+        "employment_type_current": {
+          "source": "Employment Status",
+          "value_map": {
+            "Permanent Full Time": "FULL_TIME",
+            "Permanent Part Time": "PART_TIME",
+            "Casual": "CASUAL"
+          }
+        },
+        "state": {"source": "Work State", "type": "string"},
+        "work_group": {"constant": "DISABILITY_SERVICES"}
+      }
+    },
+    "pay_details": {
+      "enabled": true,
+      "source": {"file": "raw_payroll_export.xlsx", "sheet": "Classifications", "header": 0},
+      "columns": {
+        "employee_id": {"source": "Employee Number", "type": "string"},
+        "effective_from": {"source": "Effective Date", "type": "date", "dayfirst": true},
+        "classification_code": {"source": "AuditHero Classification Code", "type": "string"},
+        "classification_name": {"source": "Payroll Classification", "type": "string"}
+      }
+    },
+    "employment_history": {
+      "enabled": true,
+      "source": {"file": "raw_payroll_export.xlsx", "sheet": "Employment History", "header": 0},
+      "columns": {
+        "employee_id": {"source": "Employee Number", "type": "string"},
+        "start_date": {"source": "Start Date", "type": "date", "dayfirst": true},
+        "end_date": {"source": "End Date", "type": "date", "dayfirst": true},
+        "employment_type": {
+          "source": "Employment Type",
+          "value_map": {"Full Time": "FULL_TIME", "Part Time": "PART_TIME", "Casual": "CASUAL"}
+        },
+        "title": {"source": "Position"}
+      }
+    },
+    "timesheets": {
+      "enabled": true,
+      "source": {"file": "time_and_attendance.csv", "header": 0},
+      "columns": {
+        "timesheet_id": {"source": "Entry ID", "type": "string"},
+        "employee_id": {"source": "Employee Number", "type": "string"},
+        "start_datetime": {"date_source": "Shift Date", "time_source": "Start Time", "type": "datetime", "dayfirst": true},
+        "end_datetime": {"date_source": "Shift Date", "time_source": "End Time", "type": "datetime", "dayfirst": true},
+        "unpaid_break_minutes": {"source": "Unpaid Break Minutes", "type": "number", "default": 0},
+        "work_type_name": {"source": "Work Type"},
+        "location_state": {"source": "State"},
+        "is_sleepover": {"source": "Sleepover", "type": "boolean", "default": false},
+        "pay_period_start": {"source": "Pay Period Start", "type": "date", "dayfirst": true},
+        "pay_period_end": {"source": "Pay Period End", "type": "date", "dayfirst": true}
+      }
+    },
+    "payroll_earnings": {
+      "enabled": false,
+      "source": {"file": "payroll_detail.csv", "header": 0},
+      "columns": {
+        "employee_id": {"source": "Employee Number"},
+        "pay_period_start": {"source": "Period Start", "type": "date"},
+        "pay_period_end": {"source": "Period End", "type": "date"},
+        "pay_category": {"source": "Earning Name"},
+        "amount": {"source": "Amount", "type": "number"},
+        "hours": {"source": "Hours", "type": "number"},
+        "rate": {"source": "Rate", "type": "number"}
+      }
+    }
+  }
+}

@@ -1,218 +1,131 @@
-# AuditHero quickstart
+# AuditHero quick start
 
-Choose **Microsoft Fabric** or **Databricks**. Both run the same SCHADS engine and support two ingestion modes:
+This guide takes a payroll/audit operator from an installed AuditHero workspace to a first audit. You do **not** need Employment Hero credentials and you do **not** need to use a terminal.
 
-- **FILES** — upload CSV/XLSX data; no Employment Hero credentials required.
-- **API** — connect directly to Employment Hero HR/Payroll for automated extraction.
+## 1. Open AuditHero in your platform
 
-For an initial deployment, **FILES is the simplest path** and is the recommended way to validate the engine against a known pay period before enabling API automation.
+- **Microsoft Fabric:** open the AuditHero workspace and `AuditHero_Lakehouse`.
+- **Databricks:** open the AuditHero workspace, then **Jobs & Pipelines** and **Catalog Explorer**.
 
-## Build the optional Excel input template
+If AuditHero is not installed yet, use the UI-first installation guide for your platform:
 
-From the repository:
+- [Microsoft Fabric installation](docs/INSTALL_FABRIC_UI.md)
+- [Databricks installation](docs/INSTALL_DATABRICKS_UI.md)
 
-```bash
-pip install -e .
-python tools/build_input_workbook.py --output audithero_input.xlsx
-```
+## 2. Upload the exports you already have
 
-The workbook contains these sheets:
+If your payroll/HR/timekeeping files use their own headings, upload them unchanged.
 
-```text
-employees              required
-pay_details            required
-employment_history     required
-timesheets             required
-rostered_shifts        recommended
-payroll_earnings       optional for actual-vs-expected
-pay_runs               optional
-```
+**Fabric raw import folder**
 
-You can instead use separate files named `employees.csv`, `timesheets.xlsx`, etc.
+`AuditHero_Lakehouse / Files / import / raw`
 
----
+**Databricks raw import folder**
 
-## Microsoft Fabric — file-first setup
+`/Volumes/schads_payroll/bronze/landing/import/raw`
 
-Prerequisites:
+You can mix CSV and Excel files. Excel workbooks can contain multiple sheets.
 
-- Microsoft Fabric workspace/capacity
-- Azure CLI or `FABRIC_ACCESS_TOKEN`
+If you already have `audithero_input.xlsx` or canonical AuditHero CSV files, upload them directly to the standard input folder and skip to step 6.
 
-**Azure Key Vault and Employment Hero credentials are optional.** They are needed only for API mode.
+## 3. Let AuditHero propose the field mapping
 
-Linux/macOS/Git Bash:
+From the platform UI run:
 
-```bash
-cp fabric/config/fabric.example.json fabric/config/fabric.json
-# set workspace_id; key_vault_url may remain blank
-az login
-./fabric/scripts/deploy.sh
-```
+**AuditHero - Build Source Mapping Workbook**
 
-Windows PowerShell:
+AuditHero inspects file names, Excel sheet names and column headings and creates `source_mapping_draft.xlsx`.
 
-```powershell
-Copy-Item fabric/config/fabric.example.json fabric/config/fabric.json
-# set workspace_id; key_vault_url may remain blank
-az login
-.\fabric\scripts\deploy.ps1
-```
+This step does not calculate payroll. It only helps identify where each AuditHero field probably exists in your exports.
 
-The installer creates:
+## 4. Review and approve the mapping in Excel
 
-- schema-enabled Lakehouse
-- Fabric Runtime 2.0 Environment
-- AuditHero wheel + SCHADS rule packs
-- setup/self-test notebooks
-- file audit notebook + `AuditHero - Uploaded Files Audit Pipeline`
-- optional Employment Hero API notebooks/pipelines
-- disabled monthly API schedule
-- Direct Lake snapshot tables
-- semantic model
-- Power BI report
+Open `source_mapping_draft.xlsx` and review the `field_mapping` sheet.
 
-### Upload files
+Each row answers:
 
-Upload either:
+> Which field in my export should populate this AuditHero field?
 
-```text
-Files/input/audithero_input.xlsx
-```
+Example:
 
-or separate canonical CSV/XLSX files into:
+| AuditHero dataset | AuditHero field | Source field |
+|---|---|---|
+| employees | employee_id | Employee Number |
+| employees | employee_name | Full Name |
+| timesheets | start_datetime | Clock In |
+| timesheets | end_datetime | Clock Out |
+| payroll_earnings | amount | Gross Amount |
 
-```text
-Files/input/
-```
+Use the `value_mapping` sheet where source values also need translation, for example:
 
-Then run the Fabric pipeline:
+`Permanent FT` → `FULL_TIME`
 
-```text
-AuditHero - Uploaded Files Audit Pipeline
-```
+Save the reviewed workbook as **`source_mapping.xlsx`** in the import folder.
 
-Set the date range you want to audit. No Key Vault configuration is required for this workflow.
+See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md) for examples covering first/last-name joins, separate date/time fields, defaults, constants and value translations.
 
-If you later want automated Employment Hero extraction, configure Azure Key Vault using `fabric/docs/KEY_VAULT.md` and use the API historical/monthly pipelines.
+## 5. Convert and run the audit
 
----
+For the normal recurring workflow run:
 
-## Databricks — file-first setup
+**AuditHero - Convert Mapped Files and Run Audit**
 
-Prerequisites:
+Enter the required audit start and end dates in the UI and start the job/pipeline.
 
-- Databricks workspace with Unity Catalog
-- Databricks CLI 0.283.0+
-- SQL warehouse
+The workflow automatically:
 
-Employment Hero API access is optional.
+1. reads your approved `source_mapping.xlsx`;
+2. converts the raw exports into AuditHero canonical datasets;
+3. writes canonical CSV files and `audithero_input.xlsx`;
+4. runs File Readiness checks;
+5. stops if required evidence/fields are still missing;
+6. runs the SCHADS audit when readiness succeeds; and
+7. refreshes the dashboard/report after a successful audit.
 
-Linux/macOS/Git Bash:
+If you only want to inspect conversion results before auditing, run **AuditHero - Convert Source Files** instead.
 
-```bash
-databricks auth login --host https://<workspace>
-export DATABRICKS_BUNDLE_VAR_sql_warehouse_id="<warehouse-id>"
-export DATABRICKS_BUNDLE_VAR_accounts_email="accounts-user@your-company.example"
-./scripts/deploy.sh
-```
+## 6. If your files are already canonical
 
-Windows PowerShell:
+If the files already use the AuditHero standard format, run:
 
-```powershell
-databricks auth login --host https://<workspace>
-$env:DATABRICKS_BUNDLE_VAR_sql_warehouse_id = "<warehouse-id>"
-$env:DATABRICKS_BUNDLE_VAR_accounts_email = "accounts-user@your-company.example"
-.\scripts\deploy.ps1
-```
+- **Fabric:** `AuditHero - Uploaded Files Audit Pipeline`
+- **Databricks:** `AuditHero - Audit Uploaded CSV Excel`
 
-The setup creates the default input Volume path:
+No mapping step is needed.
 
-```text
-/Volumes/schads_payroll/bronze/landing/input
-```
+## 7. Start with one known payroll period
 
-Upload `audithero_input.xlsx` or separate canonical files there, then run:
+Do not begin with a multi-year remediation run. Choose one completed period that payroll staff can independently check.
 
-```bash
-databricks bundle run manual_file_audit -- \
-  --start_date=2026-07-01 \
-  --end_date=2026-07-31
-```
+Review:
 
-For a three-year file audit:
+- expected pay;
+- actual auditable pay;
+- under/over-payment variance;
+- `REQUIRES_REVIEW` items;
+- employee and shift evidence; and
+- supplemental/TOIL findings where applicable.
 
-```bash
-databricks bundle run manual_file_audit -- \
-  --start_date=2023-07-01 \
-  --end_date=2026-06-30
-```
+Read [Understanding results](docs/UNDERSTANDING_RESULTS.md) before treating any amount as remediation-ready.
 
-The job refreshes the Databricks dashboard after the audit.
+## 8. Validate representative cases
 
-### Optional Employment Hero API mode
+Manually calculate representative employees/shifts that cover the conditions actually used by your organisation, for example:
 
-Only if you want automated extraction.
+- casual Saturday/Sunday;
+- public holiday;
+- overtime;
+- broken shift;
+- sleepover; and
+- part-time agreed patterns.
 
-Linux/macOS/Git Bash:
+Only expand to the full historical date range after the known period behaves as expected.
 
-```bash
-./scripts/configure_secrets.sh
-databricks bundle run connection_test
-databricks bundle run audit_readiness
-```
+## 9. Optional API automation
 
-Windows PowerShell:
+Employment Hero API connectivity is optional. Add it later if you want direct extraction and scheduled automation.
 
-```powershell
-.\scripts\configure_secrets.ps1
-databricks bundle run connection_test
-databricks bundle run audit_readiness
-```
+- Fabric uses Azure Key Vault for API secrets.
+- Databricks uses Databricks Secrets.
 
-Then use `historical_audit` or the paused `monthly_audit` job.
-
----
-
-## Controlled compliance registers
-
-Both ingestion modes use the same controlled evidence. Create/populate these where applicable:
-
-```text
-industrial_instrument_history.csv
-part_time_patterns.csv
-part_time_variations.csv
-public_holiday_overrides.csv
-overtime_rest_controls.csv
-meal_break_events.csv
-supplemental_events.csv
-toil_register.csv
-```
-
-Version-controlled `.example` files are in `config/`.
-
-For historical remediation, `industrial_instrument_history.csv` is especially important because classification alone does not prove that SCHADS rather than an enterprise agreement/IFA applied at the time.
-
-## Recommended validation sequence
-
-```text
-Deploy
-  ↓
-Run platform self-test
-  ↓
-Upload one known payroll period
-  ↓
-Run FILES audit
-  ↓
-Compare representative employees manually
-  ↓
-Resolve REQUIRES_REVIEW
-  ↓
-Run multi-year audit
-  ↓
-Optionally configure Employment Hero API
-  ↓
-Enable recurring monthly automation
-```
-
-Do not use headline remediation totals until unresolved review items, historical instrument coverage, classifications, locations/public holidays and payroll-category treatment have been validated.
+See [Administration](docs/ADMINISTRATION.md).

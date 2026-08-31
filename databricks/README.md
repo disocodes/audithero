@@ -1,52 +1,38 @@
 # AuditHero on Databricks
 
-Databricks is a complete deployment target using:
+AuditHero is intended to be operated from the **Databricks UI** after installation.
 
-- Unity Catalog / Delta
-- notebooks and the shared AuditHero package
-- Lakeflow Jobs / Declarative Automation Bundle
-- Databricks AI/BI dashboard
-- runtime self-tests and readiness analysis
+## Normal operator workflow
 
-Employment Hero credentials are **optional**.
+Open **Jobs & Pipelines** and use:
 
-## File-first mode
+1. **AuditHero - Build Source Mapping Workbook** — inspect arbitrary CSV/Excel exports and create an editable field-mapping workbook.
+2. Review/download the draft, correct the source-to-AuditHero matches, then upload it as `source_mapping.xlsx`.
+3. **AuditHero - Convert Mapped Files and Run Audit** — convert the exports, run File Readiness, execute the selected audit period and refresh AI/BI.
+4. Open **AuditHero Payroll Compliance** in AI/BI to review results.
 
-After deployment, upload `audithero_input.xlsx` or separate canonical CSV/XLSX files to:
+If you only want to validate the mapping/conversion, use **AuditHero - Convert Source Files**.
 
-```text
-/Volumes/schads_payroll/bronze/landing/input
-```
+If the source files already use AuditHero canonical columns, upload them to the canonical input folder and run **AuditHero - Audit Uploaded CSV Excel** directly.
 
-Then run:
+Use **Catalog Explorer** to upload/download files. Standard folders are:
 
-```bash
-databricks bundle run manual_file_audit -- \
-  --start_date=2023-07-01 \
-  --end_date=2026-06-30
-```
+- raw exports: `/Volumes/schads_payroll/bronze/landing/import/raw`
+- canonical input: `/Volumes/schads_payroll/bronze/landing/input`
 
-The job first runs `02c_file_readiness.py`, then the complete shared SCHADS calculation flow, then refreshes the AI/BI dashboard. No Databricks secrets or Employment Hero API access are used.
+Employment Hero API jobs are optional and clearly labelled `(Optional API)`.
 
-Generate a blank workbook with:
+## Install / upgrade
 
-```bash
-pip install -e .
-python tools/build_input_workbook.py --output audithero_input.xlsx
-```
+Use the UI-first bundle guide: [Install AuditHero in Databricks](../docs/INSTALL_DATABRICKS_UI.md).
 
-## Optional API mode
+## Main documentation
 
-If automated Employment Hero extraction is desired later:
-
-```bash
-./scripts/configure_secrets.sh
-databricks bundle run connection_test
-databricks bundle run audit_readiness
-```
-
-Then use the `historical_audit` or paused `monthly_audit` jobs.
-
-The shared SCHADS engine includes part-time written patterns, rest-after-overtime, meal-break evidence, remote-work aggregation, TOIL, industrial-instrument history, roster/daily/weekly/fortnightly overtime, broken shifts and sleepovers.
-
-See the repository root `README.md`, `QUICKSTART.md` and `docs/` for operating runbooks.
+- [Quick start](../QUICKSTART.md)
+- [Import and field mapping](../docs/IMPORT_AND_FIELD_MAPPING.md)
+- [Audit data requirements](../docs/AUDIT_DATA_REQUIREMENTS.md)
+- [Running audits](../docs/RUNNING_AUDITS.md)
+- [Understanding results](../docs/UNDERSTANDING_RESULTS.md)
+- [Troubleshooting](../docs/TROUBLESHOOTING.md)
+- [Notebook reference](../docs/NOTEBOOK_REFERENCE.md)
+- [Optional CLI/automation](../docs/CLI_AND_AUTOMATION.md)
