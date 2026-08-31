@@ -1,12 +1,25 @@
 # AuditHero on Databricks
 
-AuditHero is installed and operated from the **Databricks UI**.
+AuditHero is installed, upgraded, operated and removed from the **Databricks UI**.
 
-## Install or upgrade
+## First installation
 
 In **Workspace → Import → URL**, import the public raw URL for `installers/Databricks_Install_AuditHero.py`, open it and choose **Run all**.
 
-The installer creates or updates the AuditHero workspace files/notebooks, jobs and AI/BI dashboard and runs Setup/Self Test automatically.
+The installer creates or updates:
+
+- `/Shared/AuditHero` workspace files and notebooks;
+- AuditHero Jobs;
+- the AuditHero AI/BI dashboard;
+- Unity Catalog structures and the landing Volume through Setup; and
+- the installation record used for safe removal.
+
+It then runs Setup and Self Test automatically and installs two permanent administration notebooks under `/Shared/AuditHero/admin`:
+
+- **AuditHero - Install or Upgrade**
+- **AuditHero - Uninstall**
+
+After the first installation, use those installed notebooks for upgrades and removal. You do not need to import the bootstrap again unless you are reinstalling after removal.
 
 See [Install AuditHero in Databricks](../docs/INSTALL_DATABRICKS_UI.md).
 
@@ -30,13 +43,28 @@ Use **Catalog Explorer** to upload/download files. Standard folders are:
 
 Employment Hero API jobs are optional and clearly labelled `(Optional API)`.
 
+## Upgrade
+
+Open:
+
+`/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
+
+Select the approved `release_ref` if required and choose **Run all**. The notebook updates the existing application and reruns Setup and Self Test.
+
 ## Uninstall
 
-Import the public raw URL for `installers/Databricks_Uninstall_AuditHero.py` and choose **Run all**. AuditHero application resources are removed while the catalog/data are preserved by default. Permanent data removal requires the explicit full-delete confirmation in the notebook.
+Open:
+
+`/Shared/AuditHero/admin/AuditHero - Uninstall`
+
+Then choose **Run all**.
+
+The normal uninstall removes AuditHero Jobs, dashboard/code and any SQL warehouse created specifically by the installer while preserving the AuditHero catalog and payroll/audit data. Permanent data removal requires the explicit confirmation phrase `DELETE AUDITHERO DATA` inside the uninstaller notebook.
 
 ## Main documentation
 
 - [Quick start](../QUICKSTART.md)
+- [Install, upgrade and remove](../docs/INSTALL_DATABRICKS_UI.md)
 - [Import and field mapping](../docs/IMPORT_AND_FIELD_MAPPING.md)
 - [Audit data requirements](../docs/AUDIT_DATA_REQUIREMENTS.md)
 - [Running audits](../docs/RUNNING_AUDITS.md)
