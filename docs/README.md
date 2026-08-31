@@ -2,6 +2,13 @@
 
 Use this page to find the guide that matches what you are trying to do.
 
+## Installing or removing AuditHero
+
+AuditHero provides one installer notebook and one uninstaller notebook for each platform. The installer creates the platform resources and runs Setup/Self Test; the uninstaller removes application resources while preserving payroll/audit data by default.
+
+- [Install or remove AuditHero in Microsoft Fabric](INSTALL_FABRIC_UI.md)
+- [Install or remove AuditHero in Databricks](INSTALL_DATABRICKS_UI.md)
+
 ## Payroll / audit operators
 
 Start here if you upload data, run audits and review results.
@@ -15,10 +22,8 @@ Start here if you upload data, run audits and review results.
 
 ## Platform administrators
 
-Use these guides to install and maintain AuditHero.
+Use these guides to maintain an installed AuditHero environment.
 
-- [Install in Microsoft Fabric](INSTALL_FABRIC_UI.md)
-- [Install in Databricks](INSTALL_DATABRICKS_UI.md)
 - [Administration, security and optional API connectivity](ADMINISTRATION.md)
 - [Optional CLI and automation](CLI_AND_AUTOMATION.md)
 - [Architecture](ARCHITECTURE.md)
@@ -36,4 +41,4 @@ Use these guides when validating the basis of an audit.
 - [Notebook reference](NOTEBOOK_REFERENCE.md)
 - [Architecture](ARCHITECTURE.md)
 
-The documentation is intentionally written around user tasks. Platform implementation details that are not needed for normal operation are kept out of the main workflow guides.
+The main guides are written around user tasks. Implementation details that are not required for installation, operation or audit review are kept in the technical/administration material.
