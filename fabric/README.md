@@ -1,6 +1,14 @@
 # AuditHero on Microsoft Fabric
 
-AuditHero is intended to be operated from the **Fabric UI** after installation.
+AuditHero is installed and operated from the **Microsoft Fabric UI**.
+
+## Install or upgrade
+
+Download/import `installers/Fabric_Install_AuditHero.py` into the target Fabric workspace and choose **Run all**.
+
+The installer creates or updates the AuditHero Lakehouse, Environment, notebooks, pipelines, schedule, Direct Lake model and Power BI report and runs Setup/Self Test automatically.
+
+See [Install AuditHero in Microsoft Fabric](../docs/INSTALL_FABRIC_UI.md).
 
 ## Normal operator workflow
 
@@ -12,17 +20,15 @@ In the AuditHero Fabric workspace:
 4. run **AuditHero - Convert Mapped Files and Run Audit** for the required dates; and
 5. review **AuditHero - SCHADS Payroll Compliance** in Power BI.
 
-The combined pipeline converts the mapped source exports to AuditHero canonical datasets, runs readiness checks, executes the SCHADS audit and refreshes the reporting layer after success.
-
 If you only want to inspect conversion/readiness, run **AuditHero - Convert Source Files**.
 
-If the exports are already in AuditHero canonical format, upload them under `Files/input` and run **AuditHero - Uploaded Files Audit Pipeline** directly.
+If the exports already use AuditHero canonical format, upload them under `Files/input` and run **AuditHero - Uploaded Files Audit Pipeline** directly.
 
 Employment Hero API connectivity is optional.
 
-## Install / upgrade
+## Uninstall
 
-Use the UI-first guide: [Install AuditHero in Microsoft Fabric](../docs/INSTALL_FABRIC_UI.md).
+Import `installers/Fabric_Uninstall_AuditHero.py` and run it. Application resources are removed while the Lakehouse is preserved by default. Permanent data removal requires the explicit full-delete confirmation in the notebook.
 
 ## Main documentation
 
