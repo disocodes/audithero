@@ -1,69 +1,108 @@
 # Running AuditHero audits
 
-Normal audits are run from Microsoft Fabric pipelines or Databricks Jobs & Pipelines. The examples below describe the UI workflow.
+Normal audits are run from **Microsoft Fabric pipelines** or **Databricks Jobs & Pipelines**. The platform UI is the intended operating surface.
 
-## Uploaded-file audit
+## Which workflow should I run?
 
-This is the recommended starting mode because it does not require API credentials and makes the evidence being audited explicit.
+Use this decision guide:
 
-### Before running
+- Your exports have organisation-specific column names → **AuditHero - Convert Mapped Files and Run Audit**.
+- Your files already use AuditHero canonical fields → run the uploaded-file audit directly.
+- You only want to test/inspect field conversion → **AuditHero - Convert Source Files**.
+- You want AuditHero to pull from Employment Hero automatically → use the optional API workflows after API setup/readiness.
 
-1. upload source exports;
-2. map/convert them if they are not already canonical;
-3. resolve File Readiness blocking findings; and
-4. choose the audit date range.
+## Mapped source-file audit — normal workflow for most organisations
 
-### Fabric
+After `source_mapping.xlsx` has been reviewed and approved, run:
+
+**AuditHero - Convert Mapped Files and Run Audit**
+
+The workflow performs:
+
+```text
+raw exports
+   ↓
+source mapping
+   ↓
+canonical conversion
+   ↓
+File Readiness
+   ↓
+SCHADS audit
+   ↓
+BI refresh
+```
+
+Enter the audit start and end dates in the platform UI. The source, mapping and output paths normally use the standard defaults and only need changing if your administrator chose different folders.
+
+If conversion/readiness fails, the payroll audit does not run. Correct the mapping or source evidence, then rerun the same workflow.
+
+## Canonical uploaded-file audit
+
+Use this path when the input already consists of `audithero_input.xlsx` or canonical AuditHero CSV/Excel files.
+
+### Microsoft Fabric
 
 Run **AuditHero - Uploaded Files Audit Pipeline**.
 
-The pipeline validates the canonical inputs, executes the shared entitlement engine, writes the audit outputs and then refreshes the BI-facing snapshot after a successful run.
+The pipeline checks the canonical inputs, runs the entitlement engine and publishes the successful result to the Power BI-facing snapshot tables.
 
 ### Databricks
 
-Run **AuditHero - Audit Uploaded CSV Excel** from Jobs & Pipelines. Enter `input_root`, `start_date` and `end_date` in the run parameters when needed.
+Run **AuditHero - Audit Uploaded CSV Excel** from **Jobs & Pipelines**. Set the date range and, if necessary, the input folder in the run parameters.
 
-The job runs File Readiness first, then the audit and dashboard refresh.
+The job performs File Readiness before payroll calculation and refreshes the dashboard only after the audit succeeds.
 
-## Why you should validate one known period first
+## Start with one known payroll period
 
-A technically successful multi-year run can still be wrong for your organisation if classifications, pay-category treatment, industrial-instrument history or source mappings are wrong. A known period gives payroll/compliance staff a manageable sample to compare manually.
+Do not make the first test a multi-year remediation run. A technically successful large run can still reflect a wrong classification, source mapping or pay-category treatment.
 
-Recommended validation cases include the actual conditions your workforce uses, such as:
+Choose one completed period that payroll/compliance staff can independently check. Include representative conditions actually used by the workforce, for example:
 
-- ordinary weekday shift;
-- casual weekend/public holiday;
-- overtime threshold;
+- ordinary weekday work;
+- casual Saturday/Sunday/public holiday;
+- daily or period overtime;
 - broken shift;
 - sleepover and active sleepover work;
 - part-time agreed pattern/variation;
 - shiftwork loading; and
-- supplemental/TOIL event if applicable.
+- supplemental or TOIL events where applicable.
+
+Compare the AuditHero calculation evidence with the source records and an independent manual calculation.
 
 ## Historical audit
 
-Once the known period is validated, set the full start/end dates and rerun the uploaded-file audit. Keep the same approved source mapping for exports with the same structure; version the mapping if the source layout changed historically.
+After the known period is validated:
 
-Historical remediation should not rely on a single current classification or current contract. Supply effective-dated employment/classification and industrial-instrument evidence.
+1. load the historical exports/evidence;
+2. use the correct mapping version for each export layout;
+3. set the historical start/end dates; and
+4. run the mapped or canonical uploaded-file workflow again.
 
-## Optional API audit
+Historical work should use effective-dated employment/classification records and industrial-instrument evidence. A current classification or current employment contract is not enough to establish historical Award coverage.
 
-API mode uses the same calculation engine after ingestion. Use it only after API Connection Test and API Readiness complete successfully.
+If export formats changed during the historical window, keep separate approved mapping versions and convert the relevant batches with the mapping that matches each layout.
 
-API mode is useful for recurring extraction, but it does not remove the need to maintain controlled evidence that an API cannot reliably establish (for example historical industrial-instrument coverage or written agreement evidence).
+## Optional Employment Hero API audit
 
-## Monthly operation
+API mode uses the same calculation engine after ingestion. Use it only after the optional API Connection Test and API Readiness workflows succeed.
 
-The recurring monthly workflow should start paused/disabled. Enable it only after:
+API extraction can reduce repetitive file handling, but it does not eliminate the need for controlled evidence that an API may not establish reliably, such as historical industrial-instrument coverage or written agreement evidence.
 
-- a representative file/API run succeeds;
-- source mapping is stable;
-- required evidence registers are maintained;
-- dashboard/reconciliation results are signed off; and
-- the appropriate payroll owners know how to handle `REQUIRES_REVIEW`.
+## Recurring operation
 
-## Re-running the same period
+Recurring schedules should remain paused/disabled until:
 
-AuditHero writes each run with an audit run identifier and run timestamps. BI-facing “current” outputs should represent the latest successful run rather than a partially failed run.
+- one representative audit period has been independently validated;
+- the source mapping is stable;
+- required evidence registers/processes are maintained;
+- dashboard/reconciliation outputs are understood by the payroll owners; and
+- the team knows how `REQUIRES_REVIEW` items are resolved and documented.
 
-When rerunning after correcting data, keep evidence of what changed and why, especially for remediation work.
+A file-based recurring process can still be used without any API: payroll staff replace/upload the latest source exports and run the mapped-import audit pipeline from the UI.
+
+## Re-running a period
+
+Each AuditHero run is identified separately. BI-facing “current” results are intended to reflect the latest successful run rather than a partially failed run.
+
+When rerunning after correcting evidence or a mapping, keep a record of what changed and why, particularly for historical remediation work.
