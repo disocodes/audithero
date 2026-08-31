@@ -67,6 +67,50 @@ resources:
               output_root: "{{job.parameters.output_root}}"
               strict: "{{job.parameters.strict}}"
 
+    mapped_import_audit:
+      name: "AuditHero - Convert Mapped Files and Run Audit"
+      parameters:
+        - name: source_root
+          default: ""
+        - name: mapping_path
+          default: ""
+        - name: output_root
+          default: ""
+        - name: strict
+          default: "true"
+        - name: start_date
+          default: "2023-07-01"
+        - name: end_date
+          default: "2026-06-30"
+      tasks:
+        - task_key: convert_source_files
+          notebook_task:
+            notebook_path: ../notebooks/02e_convert_source_files.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              source_root: "{{job.parameters.source_root}}"
+              mapping_path: "{{job.parameters.mapping_path}}"
+              output_root: "{{job.parameters.output_root}}"
+              strict: "{{job.parameters.strict}}"
+        - task_key: audit_converted_files
+          depends_on:
+            - task_key: convert_source_files
+          notebook_task:
+            notebook_path: ../notebooks/03b_manual_file_audit.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              input_root: "{{job.parameters.output_root}}"
+              start_date: "{{job.parameters.start_date}}"
+              end_date: "{{job.parameters.end_date}}"
+          max_retries: 1
+          min_retry_interval_millis: 30000
+        - task_key: refresh_dashboard
+          depends_on:
+            - task_key: audit_converted_files
+          dashboard_task:
+            dashboard_id: ${resources.dashboards.payroll_compliance.id}
+            warehouse_id: ${var.sql_warehouse_id}
+
     file_readiness:
       name: "AuditHero - File Readiness"
       parameters:
