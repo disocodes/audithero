@@ -237,16 +237,17 @@ subprocess.check_call([
 ])
 print("AuditHero bootstrap dependencies installed in an isolated temporary directory.")
 
-# Deployment and Spark initialization are deliberately separate. deploy_fabric.py
-# is run with --skip-run so it only creates/updates resources and writes state.
-# run_fabric_initialization.py then executes Setup/Self Test/BI and inspects each
-# notebook exitValue for exact runtime diagnostics.
+# Deploy every managed notebook/pipeline before running Spark validation. This is
+# intentional: a later Setup/Self Test/BI failure must never leave the operator
+# notebooks on an older definition or older Lakehouse/Environment binding.
+# deploy_fabric.py still runs with --skip-run so resource deployment and runtime
+# validation remain separate operations.
 steps = [
     repo_root / "fabric" / "scripts" / "deploy_fabric.py",
-    repo_root / "fabric" / "scripts" / "run_fabric_initialization.py",
     repo_root / "fabric" / "scripts" / "deploy_file_source.py",
     repo_root / "fabric" / "scripts" / "deploy_source_mapping.py",
     repo_root / "fabric" / "scripts" / "deploy_admin_notebooks.py",
+    repo_root / "fabric" / "scripts" / "run_fabric_initialization.py",
 ]
 
 
