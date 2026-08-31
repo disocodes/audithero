@@ -120,11 +120,12 @@ mkdirs(install_root)
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Install AuditHero code and notebooks
+# MAGIC ## Install AuditHero code, notebooks and administration notebooks
 # MAGIC
 # MAGIC Audit notebooks are imported as runnable Databricks notebooks. Shared Python,
 # MAGIC rule packs and configuration templates remain workspace files so every job uses
-# MAGIC the same source-controlled calculation package.
+# MAGIC the same source-controlled calculation package. The installer also keeps managed
+# MAGIC Install/Upgrade and Uninstall notebooks under `/Shared/AuditHero/admin`.
 
 # COMMAND ----------
 for name in ("databricks.yml", "pyproject.toml", "README.md"):
@@ -152,7 +153,17 @@ for file_path in sorted(notebook_dir.glob("*.py")):
     else:
         import_notebook(file_path, f"{install_root}/notebooks/{file_path.stem}")
 
-print("AuditHero workspace files installed.")
+mkdirs(f"{install_root}/admin")
+import_notebook(
+    repo_root / "installers" / "Databricks_Install_AuditHero.py",
+    f"{install_root}/admin/AuditHero - Install or Upgrade",
+)
+import_notebook(
+    repo_root / "installers" / "Databricks_Uninstall_AuditHero.py",
+    f"{install_root}/admin/AuditHero - Uninstall",
+)
+
+print("AuditHero workspace files and administration notebooks installed.")
 
 # COMMAND ----------
 # MAGIC %md
@@ -388,4 +399,18 @@ print("  • AuditHero - Build Source Mapping Workbook")
 print("  • AuditHero - Convert Mapped Files and Run Audit")
 print("  • AuditHero - Audit Uploaded CSV Excel")
 print("Then review AuditHero - SCHADS Payroll Compliance in AI/BI.")
+print("Administration notebooks are installed under /Shared/AuditHero/admin:")
+print("  • AuditHero - Install or Upgrade")
+print("  • AuditHero - Uninstall")
 print("Employment Hero credentials are optional.")
+
+# Remove the one-time imported bootstrap copy after a successful installation.
+# The managed installer has already been installed under /Shared/AuditHero/admin.
+try:
+    context = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+    current_path = context.notebookPath().get()
+    managed_installer = f"{install_root}/admin/AuditHero - Install or Upgrade"
+    if current_path and current_path != managed_installer and not current_path.startswith(f"{install_root}/"):
+        call("POST", "/api/2.0/workspace/delete", {"path": current_path, "recursive": False})
+except Exception as exc:
+    print(f"Bootstrap notebook cleanup was not completed automatically: {exc}")
