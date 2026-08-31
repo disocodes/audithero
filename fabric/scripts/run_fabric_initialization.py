@@ -2,10 +2,9 @@
 """Run AuditHero Fabric initialization notebooks with structured diagnostics.
 
 Resource deployment and Spark execution are intentionally separated. The deployer
-creates/updates Fabric items with --skip-run; this driver then verifies the
-published AuditHero custom wheel, repairs it through Fabric's stable staging API
-when necessary, and executes Setup, Self Test, and Build BI through the notebook
-Job Scheduler API while inspecting each notebook exitValue.
+creates/updates Fabric items with --skip-run; this driver verifies the published
+AuditHero custom wheel, repairs it when necessary, and then executes Setup,
+Self Test, and Build BI through Fabric's release Notebook Background Jobs API.
 """
 from __future__ import annotations
 
@@ -184,12 +183,14 @@ class FabricRuntimeClient:
             )
         wheel = wheels[0]
 
-        published = self.published_libraries(environment_id)
-        published_names = {
-            str(x.get("name"))
-            for x in published
-            if isinstance(x, dict) and x.get("libraryType") == "Custom"
-        }
+        def custom_names() -> set[str]:
+            return {
+                str(x.get("name"))
+                for x in self.published_libraries(environment_id)
+                if isinstance(x, dict) and x.get("libraryType") == "Custom"
+            }
+
+        published_names = custom_names()
         if wheel.name in published_names:
             print(f"    Published custom library verified: {wheel.name}", flush=True)
             return wheel.name
@@ -207,12 +208,7 @@ class FabricRuntimeClient:
         )
         self.wait_environment_publish(environment_id)
 
-        published = self.published_libraries(environment_id)
-        published_names = {
-            str(x.get("name"))
-            for x in published
-            if isinstance(x, dict) and x.get("libraryType") == "Custom"
-        }
+        published_names = custom_names()
         if wheel.name not in published_names:
             raise RuntimeError(
                 "Fabric reported Environment publish Success, but the AuditHero wheel "
@@ -247,10 +243,14 @@ class FabricRuntimeClient:
 
     @staticmethod
     def _print_failure_summary(label: str, detail: dict) -> None:
-        """Print one compact line before a long traceback can obscure the real cause."""
         stage = detail.get("stage") or "unknown"
         exc_type = detail.get("exception_type") or detail.get("errorCode") or "RuntimeError"
-        message = detail.get("message") or detail.get("failureReason") or detail.get("rawExitValue") or "Unknown failure"
+        message = (
+            detail.get("message")
+            or detail.get("failureReason")
+            or detail.get("rawExitValue")
+            or "Unknown failure"
+        )
         if isinstance(message, (dict, list)):
             message = json.dumps(message, separators=(",", ":"), default=str)
         message = str(message).replace("\n", " ").strip()
@@ -276,6 +276,13 @@ class FabricRuntimeClient:
         parameters: dict[str, Any] | None = None,
         label: str,
     ) -> dict:
+        """Run one PySpark notebook through Fabric's release workload API.
+
+        Do not mix the workload-specific `/jobs/execute/instances` route with the
+        legacy `jobType=RunNotebook` query parameter. The release endpoint uses
+        `beta=false`; for Spark notebooks its computeConfiguration supports explicit
+        defaultLakehouse and attachedEnvironment item references.
+        """
         body = {
             "executionData": {
                 "compute": "Spark",
@@ -301,7 +308,7 @@ class FabricRuntimeClient:
 
         url = self._url(
             f"/workspaces/{self.workspace_id}/notebooks/{item_id}"
-            "/jobs/execute/instances?jobType=RunNotebook"
+            "/jobs/execute/instances?beta=false"
         )
         r = self.session.post(url, json=body, timeout=120)
         if r.status_code != 202:
@@ -320,11 +327,13 @@ class FabricRuntimeClient:
         )
         print(f"    {label} job: {job_id}", flush=True)
         deadline = time.time() + 1800
-        delay = max(2, int(r.headers.get("Retry-After", "10")))
+        first_delay = max(2, int(r.headers.get("Retry-After", "10")))
         last_status = None
+        first_poll = True
 
         while time.time() < deadline:
-            time.sleep(min(delay, 30))
+            time.sleep(first_delay if first_poll else 10)
+            first_poll = False
             payload = self.request("GET", poll_path)
             if not isinstance(payload, dict):
                 continue
