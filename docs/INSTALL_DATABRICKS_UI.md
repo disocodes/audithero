@@ -1,119 +1,130 @@
 # Install AuditHero in Databricks
 
-AuditHero includes a Databricks Declarative Automation Bundle (`databricks.yml`). The intended installation and operating experience is through the Databricks workspace UI. Local CLI deployment remains available as an optional administrator method.
+AuditHero can be installed from the **Databricks workspace UI** with a single installer notebook. You do not need to create the Unity Catalog objects, jobs or AI/BI dashboard manually.
+
+## What the installer creates
+
+The installer creates or updates:
+
+- the AuditHero workspace folder under `/Shared/AuditHero`;
+- the AuditHero Python source, rule packs and configuration templates;
+- all AuditHero Databricks notebooks;
+- the AuditHero Lakeflow Jobs;
+- the AuditHero AI/BI dashboard;
+- the `schads_payroll` Unity Catalog structures and landing Volume through Setup; and
+- the installation state used by the uninstaller.
+
+It then runs **AuditHero - Setup** and **AuditHero - Self Test** automatically.
+
+Employment Hero credentials are **not** required for installation or uploaded-file audits.
 
 ## Before you begin
 
 You need:
 
 - a Databricks workspace with Unity Catalog;
-- permission to create/use a Git folder and deploy bundle resources;
-- a SQL warehouse for the AI/BI dashboard; and
-- access to the AuditHero GitHub repository.
+- permission to run a notebook;
+- permission to create the AuditHero catalog or permission to use the catalog name you configure;
+- permission to create Jobs; and
+- access to a SQL warehouse for AI/BI.
 
-Employment Hero credentials are **not** required for file-based auditing.
+The installer can normally select an existing SQL warehouse automatically. If none exists and your permissions allow warehouse creation, it attempts to create a small serverless `AuditHero SQL Warehouse`.
 
-## 1. Add AuditHero as a Git folder
+## Install AuditHero
 
-In the Databricks workspace:
+### 1. Import the installer notebook
+
+In Databricks:
 
 1. open **Workspace**;
-2. create a **Git folder**;
-3. select GitHub as the provider;
-4. enter the AuditHero repository URL; and
-5. select the approved branch/version.
+2. choose **Import**;
+3. choose **URL**;
+4. use the raw GitHub URL for `installers/Databricks_Install_AuditHero.py` from the approved AuditHero release;
+5. open the imported notebook.
 
-The repository contains `databricks.yml`, which defines the AuditHero jobs and dashboard resources.
+Databricks supports importing public notebooks directly from a URL.
 
-## 2. Open the bundle deployment view
+### 2. Review the installation settings
 
-Open the bundle/Deployments experience for the Git folder and choose the required target. Use a validation/non-production target first where your governance process requires it.
+For a normal installation, the defaults can remain unchanged:
 
-Configure required bundle variables in the UI/approved workspace configuration, particularly the SQL warehouse used by the dashboard.
+```python
+release_ref = "main"
+catalog = "schads_payroll"
+install_root = "/Shared/AuditHero"
+sql_warehouse_id = ""
+create_sql_warehouse_if_missing = True
+existing_cluster_id = ""
+```
 
-## 3. Deploy from the Databricks UI
+Leave `sql_warehouse_id` blank to let AuditHero choose an existing warehouse automatically.
 
-Choose **Deploy**.
+Leave `existing_cluster_id` blank to use Databricks serverless jobs. If serverless jobs are not available in the workspace, enter the ID of an existing compatible cluster and rerun the installer.
 
-After deployment, open **Jobs & Pipelines**. You should see operator jobs including:
+### 3. Choose Run all
 
-- **AuditHero - Build Source Mapping Workbook**
-- **AuditHero - Convert Source Files**
-- **AuditHero - Convert Mapped Files and Run Audit**
-- **AuditHero - File Readiness**
-- **AuditHero - Audit Uploaded CSV Excel**
+The installer then:
 
-You will also see:
+1. authenticates using the current Databricks notebook session;
+2. downloads the selected AuditHero release;
+3. installs the AuditHero workspace files and notebooks under `/Shared/AuditHero`;
+4. selects or creates the SQL warehouse used by AI/BI;
+5. creates or updates the AuditHero dashboard;
+6. creates or updates all AuditHero Jobs;
+7. runs AuditHero Setup;
+8. runs AuditHero Self Test; and
+9. saves an installation record for safe removal later.
 
-- AuditHero - Setup
-- AuditHero - Self Test
+Do not use production payroll data if Setup or Self Test fails.
 
-and optional Employment Hero API jobs that are clearly labelled `(Optional API)`.
+## After installation
 
-## 4. Run Setup and Self Test
+Normal users work from **Jobs & Pipelines**, **Catalog Explorer** and **AI/BI**.
 
-Run **AuditHero - Setup**, then **AuditHero - Self Test**.
+For organisation-specific CSV/Excel exports:
 
-Setup creates/updates the Unity Catalog schemas, reference tables and output tables used by the application. Self Test runs representative calculations against the installed rule library.
+1. upload the original exports to `/Volumes/schads_payroll/bronze/landing/import/raw`;
+2. run **AuditHero - Build Source Mapping Workbook**;
+3. review and upload the approved `source_mapping.xlsx`;
+4. run **AuditHero - Convert Mapped Files and Run Audit**; and
+5. review **AuditHero - SCHADS Payroll Compliance** in AI/BI.
 
-Do not proceed with production payroll evidence if Self Test fails.
+If files already use AuditHero canonical columns, run **AuditHero - Audit Uploaded CSV Excel** directly.
 
-## 5. Confirm the standard Volume folders
+## Upgrade AuditHero
 
-Raw exports are normally uploaded to:
+Open the installer notebook, change `release_ref` if required, and choose **Run all** again.
 
-`/Volumes/schads_payroll/bronze/landing/import/raw`
+The installer updates the installed notebooks, jobs and dashboard and reruns Setup and Self Test. Validate one known payroll period before relying on the upgraded version in production.
 
-The mapping/conversion workflow writes canonical inputs to:
+## Uninstall AuditHero
 
-`/Volumes/schads_payroll/bronze/landing/input`
+Import the raw GitHub URL for:
 
-Use **Catalog Explorer** to upload/download files. Payroll operators do not need to use a terminal.
+`installers/Databricks_Uninstall_AuditHero.py`
 
-## 6. Configure your source fields
+Then choose **Run all**.
 
-Upload one representative set of the original payroll/HR/timekeeping exports to the raw folder.
+The uninstaller removes:
 
-Run:
+- AuditHero Jobs;
+- the AuditHero AI/BI dashboard;
+- the `/Shared/AuditHero` workspace folder; and
+- the SQL warehouse only when the installer created that warehouse.
 
-**AuditHero - Build Source Mapping Workbook**
+The AuditHero catalog and payroll/audit data are preserved by default.
 
-Download `source_mapping_draft.xlsx`, review the suggested field matches, then upload the approved file as:
+To permanently remove the AuditHero catalog and all data, the uninstaller requires:
 
-`source_mapping.xlsx`
+```python
+delete_audit_data = True
+confirmation = "DELETE AUDITHERO DATA"
+```
 
-The mapping workbook is the normal place to tell AuditHero that, for example, `Employee Number` means `employee_id` or `Clock In` means `start_datetime`.
-
-See [Import and field mapping](IMPORT_AND_FIELD_MAPPING.md).
-
-## 7. Run the complete mapped-import audit
-
-From **Jobs & Pipelines**, run:
-
-**AuditHero - Convert Mapped Files and Run Audit**
-
-Set the audit start/end dates and use the standard source/mapping/output paths unless your administrator intentionally changed them.
-
-The job then performs conversion, readiness, payroll audit and AI/BI refresh in sequence.
-
-For the first run, use one known payroll period that can be checked manually before expanding to a historical range.
-
-## 8. Open the dashboard
-
-Open the AuditHero payroll compliance dashboard in Databricks AI/BI. Review confirmed exceptions separately from `REQUIRES_REVIEW` items.
-
-See [Understanding results](UNDERSTANDING_RESULTS.md).
+This safeguard prevents an ordinary application uninstall from deleting payroll evidence accidentally.
 
 ## Optional Employment Hero API
 
-If API automation is required later, create the required Databricks secrets and run the optional Connection Test and API Readiness jobs. File-based auditing continues to work regardless of API configuration.
+If direct API extraction is enabled later, configure Databricks Secrets and run the optional API connection/readiness jobs. Uploaded-file auditing remains independent of API credentials.
 
-## Upgrading AuditHero
-
-1. update/pull the Git folder to the approved AuditHero version;
-2. use the bundle deployment UI to redeploy;
-3. run Setup;
-4. run Self Test; and
-5. validate one known payroll period before relying on changed calculations or mappings.
-
-The optional command-line equivalent is documented in [CLI and automation](CLI_AND_AUTOMATION.md).
+The optional command-line deployment method is documented in [CLI and automation](CLI_AND_AUTOMATION.md).
