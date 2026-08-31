@@ -24,8 +24,6 @@ install_root = "/Shared/AuditHero"
 default_catalog = "schads_payroll"
 
 # COMMAND ----------
-from __future__ import annotations
-
 import base64
 import json
 
