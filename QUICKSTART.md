@@ -1,54 +1,54 @@
 # AuditHero quick start
 
-This guide gets an operator from an installed AuditHero workspace to a first audit. You do not need Employment Hero credentials and you do not need to use a terminal.
+This guide takes a payroll/audit operator from an installed AuditHero workspace to a first audit. You do **not** need Employment Hero credentials and you do **not** need to use a terminal.
 
-## 1. Open the installed platform
+## 1. Open AuditHero in your platform
 
-Choose your platform:
-
-- **Microsoft Fabric:** open the AuditHero workspace and its `AuditHero_Lakehouse`.
+- **Microsoft Fabric:** open the AuditHero workspace and `AuditHero_Lakehouse`.
 - **Databricks:** open the AuditHero workspace, then **Jobs & Pipelines** and **Catalog Explorer**.
 
-If AuditHero has not been installed yet, use the UI-first installation guides:
+If AuditHero is not installed yet, use the UI-first installation guide for your platform:
 
 - [Microsoft Fabric installation](docs/INSTALL_FABRIC_UI.md)
 - [Databricks installation](docs/INSTALL_DATABRICKS_UI.md)
 
-## 2. Upload your source exports
+## 2. Upload the exports you already have
 
-You have two choices.
+If your payroll/HR/timekeeping files use their own headings, upload them unchanged.
 
-### Your files already use AuditHero's standard format
+**Fabric raw import folder**
 
-Upload `audithero_input.xlsx` or the canonical CSV files directly to the standard input folder:
+`AuditHero_Lakehouse / Files / import / raw`
 
-- Fabric: `AuditHero_Lakehouse / Files / input`
-- Databricks: `/Volumes/schads_payroll/bronze/landing/input`
+**Databricks raw import folder**
 
-Then go to step 5.
+`/Volumes/schads_payroll/bronze/landing/import/raw`
 
-### Your files use your payroll system's own fields
+You can mix CSV and Excel files. Excel workbooks can contain multiple sheets.
 
-Upload the original files without manually renaming columns:
+If you already have `audithero_input.xlsx` or canonical AuditHero CSV files, upload them directly to the standard input folder and skip to step 6.
 
-- Fabric: `AuditHero_Lakehouse / Files / import / raw`
-- Databricks: `/Volumes/schads_payroll/bronze/landing/import/raw`
+## 3. Let AuditHero propose the field mapping
 
-CSV and Excel files can be mixed.
+From the platform UI run:
 
-## 3. Build and edit the source mapping workbook
+**AuditHero - Build Source Mapping Workbook**
 
-Run **AuditHero - Build Source Mapping Workbook** from the platform UI.
+AuditHero inspects file names, Excel sheet names and column headings and creates `source_mapping_draft.xlsx`.
 
-AuditHero inspects file names, Excel sheet names and column headers and creates `source_mapping_draft.xlsx`.
+This step does not calculate payroll. It only helps identify where each AuditHero field probably exists in your exports.
 
-Open the workbook and review the `field_mapping` sheet. Each row answers a simple question:
+## 4. Review and approve the mapping in Excel
 
-> Which source field should populate this AuditHero field?
+Open `source_mapping_draft.xlsx` and review the `field_mapping` sheet.
 
-For example:
+Each row answers:
 
-| Dataset | AuditHero field | Your source field |
+> Which field in my export should populate this AuditHero field?
+
+Example:
+
+| AuditHero dataset | AuditHero field | Source field |
 |---|---|---|
 | employees | employee_id | Employee Number |
 | employees | employee_name | Full Name |
@@ -56,57 +56,74 @@ For example:
 | timesheets | end_datetime | Clock Out |
 | payroll_earnings | amount | Gross Amount |
 
-Use `value_mapping` when source values need translation, for example `Permanent FT` → `FULL_TIME`.
+Use the `value_mapping` sheet where source values also need translation, for example:
 
-Save the approved file as **`source_mapping.xlsx`** in the import folder.
+`Permanent FT` → `FULL_TIME`
 
-See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md) for advanced examples such as combining first/last name, separate date/time fields, defaults and constants.
+Save the reviewed workbook as **`source_mapping.xlsx`** in the import folder.
 
-## 4. Convert the source files
+See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md) for examples covering first/last-name joins, separate date/time fields, defaults, constants and value translations.
 
-Run **AuditHero - Convert Source Files**.
+## 5. Convert and run the audit
 
-The job/pipeline:
+For the normal recurring workflow run:
 
-1. reads your approved mapping;
-2. converts the source exports to AuditHero's canonical datasets;
+**AuditHero - Convert Mapped Files and Run Audit**
+
+Enter the required audit start and end dates in the UI and start the job/pipeline.
+
+The workflow automatically:
+
+1. reads your approved `source_mapping.xlsx`;
+2. converts the raw exports into AuditHero canonical datasets;
 3. writes canonical CSV files and `audithero_input.xlsx`;
-4. writes `conversion_report.csv`; and
-5. runs File Readiness checks.
+4. runs File Readiness checks;
+5. stops if required evidence/fields are still missing;
+6. runs the SCHADS audit when readiness succeeds; and
+7. refreshes the dashboard/report after a successful audit.
 
-If the conversion stops, read the blocking rows shown by File Readiness, correct the source data or mapping, and rerun conversion.
+If you only want to inspect conversion results before auditing, run **AuditHero - Convert Source Files** instead.
 
-## 5. Run one known payroll period first
+## 6. If your files are already canonical
 
-Do not begin with a multi-year remediation run. Choose one completed period that payroll staff can manually verify.
+If the files already use the AuditHero standard format, run:
 
-- Fabric: run **AuditHero - Uploaded Files Audit Pipeline**.
-- Databricks: run **AuditHero - Audit Uploaded CSV Excel**.
+- **Fabric:** `AuditHero - Uploaded Files Audit Pipeline`
+- **Databricks:** `AuditHero - Audit Uploaded CSV Excel`
 
-Set the audit start and end dates in the UI parameters and run the workflow.
+No mapping step is needed.
 
-## 6. Review the dashboard
+## 7. Start with one known payroll period
 
-Check:
+Do not begin with a multi-year remediation run. Choose one completed period that payroll staff can independently check.
+
+Review:
 
 - expected pay;
 - actual auditable pay;
 - under/over-payment variance;
 - `REQUIRES_REVIEW` items;
-- employee/shift evidence; and
+- employee and shift evidence; and
 - supplemental/TOIL findings where applicable.
 
-Read [Understanding results](docs/UNDERSTANDING_RESULTS.md) before treating a number as remediation-ready.
+Read [Understanding results](docs/UNDERSTANDING_RESULTS.md) before treating any amount as remediation-ready.
 
-## 7. Validate representative cases
+## 8. Validate representative cases
 
-Manually calculate a sample that covers the conditions you use in practice, such as casual Saturday, Sunday/public holiday, overtime, broken shift, sleepover and part-time patterns.
+Manually calculate representative employees/shifts that cover the conditions actually used by your organisation, for example:
 
-Only after the known period reconciles should you expand to the historical date range.
+- casual Saturday/Sunday;
+- public holiday;
+- overtime;
+- broken shift;
+- sleepover; and
+- part-time agreed patterns.
 
-## 8. Optional API automation
+Only expand to the full historical date range after the known period behaves as expected.
 
-Employment Hero API connectivity is optional. Add it only if you want direct extraction and recurring automation.
+## 9. Optional API automation
+
+Employment Hero API connectivity is optional. Add it later if you want direct extraction and scheduled automation.
 
 - Fabric uses Azure Key Vault for API secrets.
 - Databricks uses Databricks Secrets.
