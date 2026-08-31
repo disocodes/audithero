@@ -17,14 +17,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def fail(msg, errors):
     errors.append(msg); print(f"FAIL  {msg}")
-
 def ok(msg): print(f"OK    {msg}")
 
 
 def check_python(errors):
     files = sorted(
-        p for base in (ROOT/"src",ROOT/"notebooks",ROOT/"fabric"/"notebooks",ROOT/"fabric"/"scripts",ROOT/"scripts",ROOT/"tools")
-        if base.exists() for p in base.rglob("*.py")
+        p for base in (
+            ROOT/"src",ROOT/"notebooks",ROOT/"fabric"/"notebooks",ROOT/"fabric"/"scripts",
+            ROOT/"installers",ROOT/"scripts",ROOT/"tools"
+        ) if base.exists() for p in base.rglob("*.py")
     )
     for p in files:
         try: ast.parse(p.read_text(encoding="utf-8"),filename=str(p))
@@ -81,6 +82,7 @@ def check_required_files(errors,platform):
         "tests/test_platform_parity.py","tests/test_source_mapping.py","tests/test_mapping_workbook.py",
     ]
     fabric=[
+        "installers/Fabric_Install_AuditHero.py","installers/Fabric_Uninstall_AuditHero.py",
         "docs/INSTALL_FABRIC_UI.md","fabric/README.md","fabric/config/fabric.example.json",
         "fabric/scripts/deploy.sh","fabric/scripts/deploy.ps1","fabric/scripts/deploy_fabric.py",
         "fabric/scripts/deploy_file_source.py","fabric/scripts/deploy_source_mapping.py",
@@ -91,6 +93,7 @@ def check_required_files(errors,platform):
         "fabric/notebooks/06_build_bi.py",
     ]
     databricks=[
+        "installers/Databricks_Install_AuditHero.py","installers/Databricks_Uninstall_AuditHero.py",
         "docs/INSTALL_DATABRICKS_UI.md","databricks/README.md","databricks.yml",
         "resources/jobs.yml","resources/dashboard.yml",
         "scripts/deploy.sh","scripts/deploy.ps1","scripts/configure_secrets.sh","scripts/configure_secrets.ps1",

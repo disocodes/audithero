@@ -2,9 +2,51 @@
 
 AuditHero is a payroll audit solution for the **Social, Community, Home Care and Disability Services Industry Award 2010 (SCHADS / MA000100)**. It reconstructs expected Award entitlements from employment, roster and timekeeping evidence, compares expected pay with payroll where actual earnings are supplied, and clearly separates confirmed results from items that still need human review.
 
-AuditHero can be installed in **Microsoft Fabric** or **Databricks**. The normal user experience is inside the platform UI: upload source files, map fields, run a pipeline/job, review exceptions and open the dashboard. Command-line tools are optional administration and automation tools; they are not required for normal payroll-audit work.
+AuditHero runs in **Microsoft Fabric** or **Databricks**. Installation and normal operation are designed to happen from the platform UI. Command-line deployment remains available for administrators who prefer automation, but it is not required.
 
 > AuditHero is compliance-support software, not legal advice. Validate Award coverage, classifications, historical industrial instruments and representative calculations before using results for remediation, recovery or payroll-change decisions.
+
+## Install AuditHero
+
+Each platform uses a single bootstrap installer notebook for the first installation. The bootstrap creates a managed **AuditHero - Install or Upgrade** notebook and a managed **AuditHero - Uninstall** notebook inside the installed application, so later upgrades and removal are performed from the platform itself.
+
+### Microsoft Fabric
+
+Download and import:
+
+`installers/Fabric_Install_AuditHero.py`
+
+Open it in the target Fabric workspace and choose **Run all**. The notebook detects the current workspace and creates or updates the Lakehouse, Environment, AuditHero notebooks, Data Factory pipelines, schedule, Direct Lake semantic model and Power BI report. It runs Setup and Self Test and installs the permanent administration notebooks.
+
+See [Install AuditHero in Microsoft Fabric](docs/INSTALL_FABRIC_UI.md).
+
+### Databricks
+
+From the Databricks Workspace **Import** dialog, import the public raw URL for:
+
+`installers/Databricks_Install_AuditHero.py`
+
+Open the notebook and choose **Run all**. It installs the AuditHero workspace files and notebooks, selects or creates the SQL warehouse used by AI/BI, creates and publishes the AuditHero dashboard, creates or updates the AuditHero Jobs, runs Setup and Self Test, and installs the permanent administration notebooks under `/Shared/AuditHero/admin`.
+
+See [Install AuditHero in Databricks](docs/INSTALL_DATABRICKS_UI.md).
+
+Employment Hero credentials are **not** required for either installation method or for uploaded-file auditing.
+
+## Upgrade or uninstall later
+
+After installation, use the managed administration notebooks rather than downloading setup files again.
+
+**Microsoft Fabric**
+
+- `AuditHero - Install or Upgrade`
+- `AuditHero - Uninstall`
+
+**Databricks**
+
+- `/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
+- `/Shared/AuditHero/admin/AuditHero - Uninstall`
+
+A normal uninstall removes AuditHero application resources but preserves payroll/audit data. Permanent data deletion requires the explicit confirmation phrase `DELETE AUDITHERO DATA` inside the uninstaller notebook.
 
 ## The normal operator workflow
 
@@ -33,9 +75,9 @@ SCHADS audit
 Dashboard refresh
 ```
 
-You can also run **AuditHero - Convert Source Files** by itself when you want to inspect the converted data and readiness results before running an audit.
+You can run **AuditHero - Convert Source Files** separately when you want to inspect converted data and readiness results before calculating payroll.
 
-If your files already use the AuditHero canonical workbook/CSV format, skip the mapping and conversion stages and run the uploaded-file audit directly.
+If your files already use the AuditHero canonical workbook/CSV format, skip the mapping/conversion stages and run the uploaded-file audit directly.
 
 ## Choose your platform
 
@@ -44,15 +86,12 @@ If your files already use the AuditHero canonical workbook/CSV format, skip the 
 | Normal operating surface | Fabric workspace + Data Factory pipelines | Jobs & Pipelines / Workflows |
 | File storage | Lakehouse Files | Unity Catalog Volumes |
 | Reporting | Direct Lake + Power BI | Databricks AI/BI |
-| UI-first installation | Yes | Yes |
+| One-notebook first installation | Yes | Yes |
+| Installed upgrade notebook | Yes | Yes |
+| Installed uninstall notebook | Yes | Yes |
 | CSV/Excel field mapping | Yes | Yes |
 | Employment Hero API | Optional | Optional |
-| CLI required for daily use | No | No |
-
-Installation guides:
-
-- **Microsoft Fabric:** [Install AuditHero in Microsoft Fabric](docs/INSTALL_FABRIC_UI.md)
-- **Databricks:** [Install AuditHero in Databricks](docs/INSTALL_DATABRICKS_UI.md)
+| CLI required | No | No |
 
 ## Data sources
 
@@ -60,7 +99,7 @@ Installation guides:
 
 AuditHero accepts:
 
-- arbitrary CSV/XLSX exports that are converted through the field-mapping workflow;
+- arbitrary CSV/XLSX exports converted through the field-mapping workflow;
 - one canonical workbook named `audithero_input.xlsx`; or
 - separate canonical CSV/Excel files.
 
@@ -77,7 +116,7 @@ See [Audit data requirements](docs/AUDIT_DATA_REQUIREMENTS.md) and [Importing an
 
 ### Employment Hero API — optional automation
 
-Employment Hero HR and Payroll API connectivity can be enabled later. It is not required to install AuditHero or to run uploaded-file audits. API mode is useful when an organisation wants automatic extraction and scheduled recurring audits without manually uploading exports.
+Employment Hero HR and Payroll API connectivity can be enabled later. It is not required to install AuditHero or run uploaded-file audits. API mode is useful when an organisation wants automatic extraction and recurring audits without manually uploading exports.
 
 ## What AuditHero checks
 
@@ -120,4 +159,4 @@ Start at [Documentation home](docs/README.md). The main guides are:
 
 The effective-dated Award rule library is stored under `rules/MA000100/`. Fabric and Databricks use the same `schads_audit` Python package and the same rule packs so payroll calculation logic is not maintained separately by platform.
 
-The platform UI is the intended operating surface. CLI scripts, REST deployment tooling and CI/CD remain available for administrators who want repeatable automated deployments; see [CLI and automation](docs/CLI_AND_AUTOMATION.md).
+The installed administration notebooks are the primary UI setup, upgrade and removal path. CLI scripts, REST deployment tooling and CI/CD remain available as optional automation methods.

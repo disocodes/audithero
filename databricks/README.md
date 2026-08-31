@@ -1,6 +1,27 @@
 # AuditHero on Databricks
 
-AuditHero is intended to be operated from the **Databricks UI** after installation.
+AuditHero is installed, upgraded, operated and removed from the **Databricks UI**.
+
+## First installation
+
+In **Workspace → Import → URL**, import the public raw URL for `installers/Databricks_Install_AuditHero.py`, open it and choose **Run all**.
+
+The installer creates or updates:
+
+- `/Shared/AuditHero` workspace files and notebooks;
+- AuditHero Jobs;
+- the AuditHero AI/BI dashboard;
+- Unity Catalog structures and the landing Volume through Setup; and
+- the installation record used for safe removal.
+
+It then runs Setup and Self Test automatically and installs two permanent administration notebooks under `/Shared/AuditHero/admin`:
+
+- **AuditHero - Install or Upgrade**
+- **AuditHero - Uninstall**
+
+After the first installation, use those installed notebooks for upgrades and removal. You do not need to import the bootstrap again unless you are reinstalling after removal.
+
+See [Install AuditHero in Databricks](../docs/INSTALL_DATABRICKS_UI.md).
 
 ## Normal operator workflow
 
@@ -9,9 +30,9 @@ Open **Jobs & Pipelines** and use:
 1. **AuditHero - Build Source Mapping Workbook** — inspect arbitrary CSV/Excel exports and create an editable field-mapping workbook.
 2. Review/download the draft, correct the source-to-AuditHero matches, then upload it as `source_mapping.xlsx`.
 3. **AuditHero - Convert Mapped Files and Run Audit** — convert the exports, run File Readiness, execute the selected audit period and refresh AI/BI.
-4. Open **AuditHero Payroll Compliance** in AI/BI to review results.
+4. Open **AuditHero - SCHADS Payroll Compliance** in AI/BI to review results.
 
-If you only want to validate the mapping/conversion, use **AuditHero - Convert Source Files**.
+If you only want to validate mapping/conversion, use **AuditHero - Convert Source Files**.
 
 If the source files already use AuditHero canonical columns, upload them to the canonical input folder and run **AuditHero - Audit Uploaded CSV Excel** directly.
 
@@ -22,13 +43,28 @@ Use **Catalog Explorer** to upload/download files. Standard folders are:
 
 Employment Hero API jobs are optional and clearly labelled `(Optional API)`.
 
-## Install / upgrade
+## Upgrade
 
-Use the UI-first bundle guide: [Install AuditHero in Databricks](../docs/INSTALL_DATABRICKS_UI.md).
+Open:
+
+`/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
+
+Select the approved `release_ref` if required and choose **Run all**. The notebook updates the existing application and reruns Setup and Self Test.
+
+## Uninstall
+
+Open:
+
+`/Shared/AuditHero/admin/AuditHero - Uninstall`
+
+Then choose **Run all**.
+
+The normal uninstall removes AuditHero Jobs, dashboard/code and any SQL warehouse created specifically by the installer while preserving the AuditHero catalog and payroll/audit data. Permanent data removal requires the explicit confirmation phrase `DELETE AUDITHERO DATA` inside the uninstaller notebook.
 
 ## Main documentation
 
 - [Quick start](../QUICKSTART.md)
+- [Install, upgrade and remove](../docs/INSTALL_DATABRICKS_UI.md)
 - [Import and field mapping](../docs/IMPORT_AND_FIELD_MAPPING.md)
 - [Audit data requirements](../docs/AUDIT_DATA_REQUIREMENTS.md)
 - [Running audits](../docs/RUNNING_AUDITS.md)

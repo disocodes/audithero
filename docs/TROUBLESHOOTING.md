@@ -1,6 +1,34 @@
 # AuditHero troubleshooting
 
-Start with the message shown by the job/pipeline. AuditHero tries to fail early with a data/mapping explanation rather than continue to an unreliable payroll result.
+Start with the message shown by the installer notebook, job or pipeline. AuditHero is designed to stop early when installation, mapping or audit evidence is incomplete.
+
+## Installer notebook cannot create workspace items
+
+Confirm that the user running the installer has permission to create/manage the required items in the target workspace.
+
+### Microsoft Fabric
+
+The installer needs permission to create/manage the AuditHero Lakehouse, Environment, notebooks, Data Factory pipelines, semantic model and Power BI report in the current workspace.
+
+### Databricks
+
+The installer needs permission to create Jobs and the configured Unity Catalog objects. It also needs access to a SQL warehouse for AI/BI.
+
+## Databricks installer says no SQL warehouse is available
+
+Leave `sql_warehouse_id` blank to let AuditHero select an available warehouse. If there are no warehouses and the installer cannot create one because of permissions, create/select a SQL warehouse in the UI, paste its ID into `sql_warehouse_id`, and rerun the installer.
+
+## Databricks Setup job has no usable compute
+
+The installer defaults to serverless Jobs. If serverless Jobs are disabled in the workspace, set `existing_cluster_id` in the installer notebook to a compatible existing cluster ID and rerun.
+
+## Fabric installer cannot obtain a Fabric token
+
+Run the installer as a user with access to the target workspace. The notebook uses the current Fabric notebook identity through `notebookutils.credentials.getToken("pbi")`; it does not require a manually pasted Fabric token.
+
+## Installer fails during Setup or Self Test
+
+Do not continue to production payroll data. Correct the installation/runtime error and rerun the installer. The installer is safe to rerun and updates existing AuditHero items.
 
 ## No files found in the mapping job
 
@@ -59,6 +87,15 @@ Confirm that the audit itself completed successfully. BI-facing snapshots are in
 
 Uploaded-file audits can still operate. For API mode, run the platform's Employment Hero Connection Test first and verify secret access/tenant identifiers before troubleshooting the calculation engine.
 
-## Platform Self Test fails
+## Uninstall completed but payroll data is still present
 
-Do not continue to payroll data. Treat Self Test failure as an installation/version issue and have the platform administrator review the failed assertion and environment/package versions.
+This is the default safe behavior. The uninstaller removes AuditHero application resources but preserves the Lakehouse/catalog unless permanent deletion is explicitly confirmed.
+
+To remove payroll/audit data permanently, rerun the uninstaller with:
+
+```python
+delete_audit_data = True
+confirmation = "DELETE AUDITHERO DATA"
+```
+
+Only use full deletion after the required records have been retained or backed up.

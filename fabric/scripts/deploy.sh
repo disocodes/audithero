@@ -24,6 +24,9 @@ python "$ROOT/fabric/scripts/deploy_file_source.py" --config "$CONFIG"
 echo "Deploying source inspection, field mapping and conversion/audit pipelines..."
 python "$ROOT/fabric/scripts/deploy_source_mapping.py" --config "$CONFIG"
 
+echo "Deploying AuditHero administration notebooks..."
+python "$ROOT/fabric/scripts/deploy_admin_notebooks.py" --config "$CONFIG"
+
 cat <<'EOF'
 
 AuditHero Fabric deployment complete.
@@ -34,6 +37,10 @@ Normal operator path in Fabric:
   3. Review the generated Excel mapping and upload the approved version as source_mapping.xlsx.
   4. Run "AuditHero - Convert Mapped Files and Run Audit" for the required dates.
   5. Review the Power BI report.
+
+Administration notebooks:
+  - AuditHero - Install or Upgrade
+  - AuditHero - Uninstall
 
 Use "AuditHero - Convert Source Files" when you only want to test conversion/readiness.
 If files already use the AuditHero canonical workbook/CSV format, upload them to Files/input and run the direct uploaded-file audit pipeline.
