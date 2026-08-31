@@ -8,7 +8,7 @@ AuditHero runs in **Microsoft Fabric** or **Databricks**. Installation and norma
 
 ## Install AuditHero
 
-Each platform has a single bootstrap installer notebook.
+Each platform uses a single bootstrap installer notebook for the first installation. The bootstrap creates a managed **AuditHero - Install or Upgrade** notebook and a managed **AuditHero - Uninstall** notebook inside the installed application, so later upgrades and removal are performed from the platform itself.
 
 ### Microsoft Fabric
 
@@ -16,7 +16,7 @@ Download and import:
 
 `installers/Fabric_Install_AuditHero.py`
 
-Open it in the target Fabric workspace and choose **Run all**. The notebook detects the current workspace and creates or updates the Lakehouse, Environment, AuditHero notebooks, Data Factory pipelines, schedule, Direct Lake semantic model and Power BI report. It also runs Setup and Self Test.
+Open it in the target Fabric workspace and choose **Run all**. The notebook detects the current workspace and creates or updates the Lakehouse, Environment, AuditHero notebooks, Data Factory pipelines, schedule, Direct Lake semantic model and Power BI report. It runs Setup and Self Test and installs the permanent administration notebooks.
 
 See [Install AuditHero in Microsoft Fabric](docs/INSTALL_FABRIC_UI.md).
 
@@ -26,18 +26,25 @@ From the Databricks Workspace **Import** dialog, import the public raw URL for:
 
 `installers/Databricks_Install_AuditHero.py`
 
-Open the notebook and choose **Run all**. It installs the AuditHero workspace files and notebooks, selects or creates the SQL warehouse used by AI/BI, creates or updates the AuditHero jobs/dashboard, then runs Setup and Self Test.
+Open the notebook and choose **Run all**. It installs the AuditHero workspace files and notebooks, selects or creates the SQL warehouse used by AI/BI, creates and publishes the AuditHero dashboard, creates or updates the AuditHero Jobs, runs Setup and Self Test, and installs the permanent administration notebooks under `/Shared/AuditHero/admin`.
 
 See [Install AuditHero in Databricks](docs/INSTALL_DATABRICKS_UI.md).
 
 Employment Hero credentials are **not** required for either installation method or for uploaded-file auditing.
 
-## Uninstall AuditHero
+## Upgrade or uninstall later
 
-Matching uninstaller notebooks are provided:
+After installation, use the managed administration notebooks rather than downloading setup files again.
 
-- `installers/Fabric_Uninstall_AuditHero.py`
-- `installers/Databricks_Uninstall_AuditHero.py`
+**Microsoft Fabric**
+
+- `AuditHero - Install or Upgrade`
+- `AuditHero - Uninstall`
+
+**Databricks**
+
+- `/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
+- `/Shared/AuditHero/admin/AuditHero - Uninstall`
 
 A normal uninstall removes AuditHero application resources but preserves payroll/audit data. Permanent data deletion requires the explicit confirmation phrase `DELETE AUDITHERO DATA` inside the uninstaller notebook.
 
@@ -79,8 +86,9 @@ If your files already use the AuditHero canonical workbook/CSV format, skip the 
 | Normal operating surface | Fabric workspace + Data Factory pipelines | Jobs & Pipelines / Workflows |
 | File storage | Lakehouse Files | Unity Catalog Volumes |
 | Reporting | Direct Lake + Power BI | Databricks AI/BI |
-| One-notebook installation | Yes | Yes |
-| One-notebook uninstall | Yes | Yes |
+| One-notebook first installation | Yes | Yes |
+| Installed upgrade notebook | Yes | Yes |
+| Installed uninstall notebook | Yes | Yes |
 | CSV/Excel field mapping | Yes | Yes |
 | Employment Hero API | Optional | Optional |
 | CLI required | No | No |
@@ -151,4 +159,4 @@ Start at [Documentation home](docs/README.md). The main guides are:
 
 The effective-dated Award rule library is stored under `rules/MA000100/`. Fabric and Databricks use the same `schads_audit` Python package and the same rule packs so payroll calculation logic is not maintained separately by platform.
 
-The installer notebooks are the primary UI setup/upgrade path. CLI scripts, REST deployment tooling and CI/CD remain available as optional automation methods.
+The installed administration notebooks are the primary UI setup, upgrade and removal path. CLI scripts, REST deployment tooling and CI/CD remain available as optional automation methods.
