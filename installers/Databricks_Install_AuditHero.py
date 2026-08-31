@@ -206,7 +206,11 @@ print(f"AI/BI SQL warehouse: {warehouse_id}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Create or update the AuditHero AI/BI dashboard
+# MAGIC ## Create, publish or update the AuditHero AI/BI dashboard
+# MAGIC
+# MAGIC Dashboard tasks can refresh only a published dashboard. The installer publishes
+# MAGIC the current draft with embedded credentials disabled, so dashboard queries run
+# MAGIC with the viewer/run identity rather than storing the installer's credentials.
 
 # COMMAND ----------
 dashboard_name = "AuditHero - SCHADS Payroll Compliance"
@@ -245,7 +249,12 @@ else:
         query={"dataset_catalog": catalog, "dataset_schema": "gold"},
     )
 dashboard_id = (dashboard or existing_dashboard)["dashboard_id"]
-print(f"AI/BI dashboard ready: {dashboard_id}")
+call(
+    "POST",
+    f"/api/2.0/lakeview/dashboards/{dashboard_id}/published",
+    {"embed_credentials": False, "warehouse_id": warehouse_id},
+)
+print(f"AI/BI dashboard published: {dashboard_id}")
 
 # COMMAND ----------
 # MAGIC %md
@@ -294,7 +303,7 @@ def list_jobs():
         query = {"limit": 100}
         if token:
             query["page_token"] = token
-        payload = call("GET", "/api/2.1/jobs/list", query=query) or {}
+        payload = call("GET", "/api/2.2/jobs/list", query=query) or {}
         jobs.extend(payload.get("jobs", []) or [])
         token = payload.get("next_page_token")
         if not token:
@@ -308,11 +317,11 @@ for resource_key, raw_settings in job_defs.items():
     name = settings["name"]
     existing = existing_by_name.get(name)
     if existing:
-        call("POST", "/api/2.1/jobs/reset", {"job_id": existing["job_id"], "new_settings": settings})
+        call("POST", "/api/2.2/jobs/reset", {"job_id": existing["job_id"], "new_settings": settings})
         job_id = existing["job_id"]
         print(f"Updated job: {name}")
     else:
-        created = call("POST", "/api/2.1/jobs/create", settings)
+        created = call("POST", "/api/2.2/jobs/create", settings)
         job_id = created["job_id"]
         print(f"Created job: {name}")
     installed_jobs[resource_key] = job_id
@@ -327,12 +336,12 @@ for resource_key, raw_settings in job_defs.items():
 
 # COMMAND ----------
 def run_job_and_wait(job_id: int, label: str):
-    run = call("POST", "/api/2.1/jobs/run-now", {"job_id": job_id})
+    run = call("POST", "/api/2.2/jobs/run-now", {"job_id": job_id})
     run_id = run["run_id"]
     print(f"Started {label}: run {run_id}")
     deadline = time.time() + 3600
     while time.time() < deadline:
-        state = (call("GET", "/api/2.1/jobs/runs/get", query={"run_id": run_id}) or {}).get("state", {})
+        state = (call("GET", "/api/2.2/jobs/runs/get", query={"run_id": run_id}) or {}).get("state", {})
         lifecycle = state.get("life_cycle_state")
         result = state.get("result_state")
         if lifecycle in {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}:
