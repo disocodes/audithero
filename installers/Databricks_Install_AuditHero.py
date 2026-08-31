@@ -37,8 +37,6 @@ timezone = "Australia/Perth"
 existing_cluster_id = ""
 
 # COMMAND ----------
-from __future__ import annotations
-
 import base64
 import json
 from pathlib import Path
@@ -129,13 +127,11 @@ mkdirs(install_root)
 # MAGIC the same source-controlled calculation package.
 
 # COMMAND ----------
-# Root marker used by the notebook bootstrap.
 for name in ("databricks.yml", "pyproject.toml", "README.md"):
     path = repo_root / name
     if path.exists():
         import_raw(path, f"{install_root}/{name}")
 
-# Shared application files.
 for directory in ("src", "rules", "config", "dashboard"):
     base = repo_root / directory
     if not base.exists():
@@ -148,8 +144,6 @@ for directory in ("src", "rules", "config", "dashboard"):
         mkdirs(str(Path(dest).parent).replace("\\", "/"))
         import_raw(file_path, dest)
 
-# Databricks notebooks. _common.py must stay a workspace file because the other
-# notebooks load it directly from their working directory.
 notebook_dir = repo_root / "notebooks"
 mkdirs(f"{install_root}/notebooks")
 for file_path in sorted(notebook_dir.glob("*.py")):
