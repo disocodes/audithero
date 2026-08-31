@@ -25,3 +25,20 @@ def test_fabric_source_mapping_notebooks_explain_stale_environment_sessions():
         assert 'AuditHero_Environment' in text
         assert 'stop the current session and start a new one' in text
         assert 'environment changes' in text
+
+
+def test_fabric_source_mapping_notebooks_normalize_legacy_lakehouse_mounts():
+    for path in (MAPPING_DRAFT, MAPPING_CONVERT):
+        text = path.read_text(encoding="utf-8")
+        assert "_normalize_fabric_lakehouse_path" in text
+        assert '("/lakehouse/Files", "/lakehouse/default/Files")' in text
+        assert '("/lakehouse/Tables", "/lakehouse/default/Tables")' in text
+        assert "Normalized legacy Fabric Lakehouse path:" in text
+
+
+def test_fabric_mapping_draft_creates_operator_upload_folder_before_scan():
+    text = MAPPING_DRAFT.read_text(encoding="utf-8")
+    mkdir_pos = text.index("source_dir.mkdir(parents=True, exist_ok=True)")
+    scan_pos = text.index("inventory = scan_source_items(source_root)")
+    assert mkdir_pos < scan_pos
+    assert "Upload the payroll/HR/timekeeping exports to this Lakehouse Files folder" in text
