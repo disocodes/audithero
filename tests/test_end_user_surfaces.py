@@ -98,10 +98,25 @@ def test_databricks_pay_category_treatment_is_explicit_and_complete():
     assert "pay_category_treatment" in mapping
     assert '"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"' in mapping
     assert "Suggested treatments are guidance only" in mapping
+    assert 'draft["datasets"]["pay_category_mapping"]["enabled"] = False' in mapping
     assert "pay_category_treatment" in conversion
     assert "Complete the pay_category_treatment sheet before conversion" in conversion
     assert "pay_category_mapping.csv" in conversion
     assert "does not cover all pay categories present in payroll earnings" in conversion
+
+
+def test_fabric_pay_category_treatment_matches_databricks_control():
+    mapping = _text(ROOT / "fabric" / "notebooks" / "03c_source_mapping_draft.py")
+    conversion = _text(ROOT / "fabric" / "notebooks" / "03d_convert_source_files.py")
+    assert "pay_category_treatment" in mapping
+    assert '"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"' in mapping
+    assert "Suggested treatments are guidance only" in mapping
+    assert 'draft["datasets"]["pay_category_mapping"]["enabled"] = False' in mapping
+    assert "pay_category_treatment" in conversion
+    assert "Complete the pay_category_treatment sheet before conversion" in conversion
+    assert "pay_category_mapping.csv" in conversion
+    assert "does not cover all pay categories present in payroll earnings" in conversion
+    assert 'mapping["datasets"]["pay_category_mapping"]["enabled"] = False' in conversion
 
 
 def test_readiness_success_messages_do_not_report_blocking_items_present():
