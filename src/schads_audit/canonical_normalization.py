@@ -68,6 +68,19 @@ def parse_datetime_series(series: pd.Series) -> pd.Series:
     return series.map(parse_datetime_value)
 
 
+def numeric_value(value: Any, default: float = 0.0) -> float:
+    """Return a finite numeric value or the supplied safe default."""
+    if value is None:
+        return float(default)
+    try:
+        converted = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    except Exception:
+        return float(default)
+    if pd.isna(converted):
+        return float(default)
+    return float(converted)
+
+
 def _nonblank(series: pd.Series) -> pd.Series:
     return ~(series.isna() | series.astype(str).str.strip().str.lower().isin({"", "nan", "nat", "none"}))
 
