@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 from .file_source import load_file_source, input_inventory
+from .canonical_normalization import normalize_canonical_frames
 
 REQUIRED_COLUMNS={
  "employees":{"employee_id","employee_name"},
@@ -31,7 +32,7 @@ def assess_file_readiness(input_root,config_root):
         if bool(r["required"]) and not bool(r["found"]): add("INPUT_DATASET",r["dataset"],"BLOCKING",f"Required dataset missing from {input_root}")
         elif bool(r["found"]): add("INPUT_DATASET",r["dataset"],"READY",str(r["file"]))
         elif r.get("category")=="CORE": add("INPUT_DATASET",r["dataset"],"OPTIONAL",f"Optional core dataset not supplied: {r['dataset']}")
-    try: frames=load_file_source(input_root)
+    try: frames=normalize_canonical_frames(load_file_source(input_root))
     except Exception as exc:
         add("INPUT_LOAD","manual_files","BLOCKING",str(exc)); return pd.DataFrame(findings)
 
@@ -40,6 +41,17 @@ def assess_file_readiness(input_root,config_root):
     for name,cols in OPTIONAL_COLUMNS.items():
         missing=sorted(cols-set(frames[name].columns))
         if missing: add("INPUT_COLUMNS_RECOMMENDED",name,"REVIEW","Recommended columns absent: "+", ".join(missing))
+
+    for dataset,frame in frames.items():
+        if frame is None or frame.empty:
+            continue
+        for column in frame.columns:
+            if not str(column).startswith("_invalid_"):
+                continue
+            count=int(frame[column].fillna(False).astype(bool).sum())
+            if count:
+                field=str(column)[len("_invalid_"):]
+                add("INPUT_VALUE_TYPE",f"{dataset}.{field}","REVIEW",f"{count} non-blank value(s) could not be converted to the canonical numeric type; affected calculations will be marked for review")
 
     pdets=frames["pay_details"]
     if "classification_code" in pdets.columns:
@@ -66,8 +78,12 @@ def assess_file_readiness(input_root,config_root):
         add("ACTUAL_PAY","payroll_earnings","REVIEW","Expected entitlements can be calculated; actual-pay reconciliation is unavailable because payroll earnings were not supplied")
     else:
         needed={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}; miss=sorted(needed-set(payroll.columns))
-        if miss:
-            add("ACTUAL_PAY","payroll_earnings","REVIEW","Payroll earnings were supplied but actual-pay reconciliation is unavailable. Missing: "+", ".join(miss))
+        invalid_required=[field for field in needed if field in payroll.columns and payroll[field].isna().any()]
+        if miss or invalid_required:
+            details=[]
+            if miss: details.append("Missing: "+", ".join(miss))
+            if invalid_required: details.append("Blank/invalid values: "+", ".join(sorted(invalid_required)))
+            add("ACTUAL_PAY","payroll_earnings","REVIEW","Payroll earnings were supplied but actual-pay reconciliation is unavailable. "+"; ".join(details))
         else:
             add("ACTUAL_PAY","payroll_earnings","READY","Actual payroll earnings available")
             mapping=frames.get("pay_category_mapping",pd.DataFrame())
