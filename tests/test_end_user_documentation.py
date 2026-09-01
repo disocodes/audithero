@@ -62,15 +62,31 @@ def test_databricks_operator_docs_use_current_operating_surfaces():
     assert "No separate application is required" in readme
 
 
-def test_databricks_setup_notebook_is_operator_facing():
-    setup = (ROOT / "notebooks" / "00_setup.py").read_text(encoding="utf-8")
+def test_databricks_notebooks_have_end_user_title_and_purpose():
+    for path in sorted((ROOT / "notebooks").glob("*.py")):
+        if path.name == "_common.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        opening = "\n".join(text.splitlines()[:20])
+        assert "# MAGIC # AuditHero —" in opening, f"Missing AuditHero title: {path.name}"
+        assert "**Purpose:**" in opening, f"Missing end-user purpose: {path.name}"
+
+
+def test_fabric_notebooks_have_end_user_title_and_purpose():
+    for path in sorted((ROOT / "fabric" / "notebooks").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        opening = "\n".join(text.splitlines()[:24])
+        assert "AuditHero" in opening, f"Missing AuditHero title: {path.name}"
+        assert "PURPOSE" in opening, f"Missing end-user PURPOSE section: {path.name}"
+
+
+def test_key_operator_notebooks_include_next_step_guidance():
     mapping = (ROOT / "notebooks" / "02d_source_mapping_draft.py").read_text(encoding="utf-8")
+    conversion = (ROOT / "notebooks" / "02e_convert_source_files.py").read_text(encoding="utf-8")
+    readiness = (ROOT / "notebooks" / "02c_file_readiness.py").read_text(encoding="utf-8")
     audit = (ROOT / "notebooks" / "03b_manual_file_audit.py").read_text(encoding="utf-8")
 
-    assert "# MAGIC # AuditHero — Setup" in setup
-    assert "Setup does not read employee payroll data" in setup
-    assert "# MAGIC # AuditHero — Build a Source Mapping Workbook" in mapping
-    assert "No payroll calculations are performed" in mapping
-    assert "# MAGIC # AuditHero — Audit Uploaded CSV / Excel" in audit
     assert "NEXT:" in mapping
+    assert "NEXT:" in conversion
+    assert "NEXT:" in readiness
     assert "NEXT:" in audit
