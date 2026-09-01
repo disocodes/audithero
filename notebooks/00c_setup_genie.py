@@ -2,8 +2,9 @@
 # MAGIC %md
 # MAGIC # AuditHero — Configure Genie
 # MAGIC
-# MAGIC This is a managed Setup task. It runs only after AuditHero tables/views and the
-# MAGIC Unity Catalog metric views exist. Normal payroll operators do not run it directly.
+# MAGIC **Purpose:** create or update the **AuditHero - Payroll Compliance** Genie space after the governed Gold views and Unity Catalog metric views have been created.
+# MAGIC
+# MAGIC This notebook is invoked by **AuditHero - Setup**.
 
 # COMMAND ----------
 # MAGIC %pip install -q "databricks-sdk>=0.20"
@@ -32,8 +33,7 @@ def call(method: str, path: str, body=None, query=None):
     return api.do(method, path, body=body, query=query)
 
 
-# Ensure the workspace parent exists. Workspace APIs use /Shared/... while Genie may
-# expose the same folder as /Workspace/Shared/....
+# Normalize the configured workspace path before creating the parent folder.
 workspace_parent = parent_path
 if workspace_parent.startswith("/Workspace/"):
     workspace_parent = workspace_parent[len("/Workspace"):]
@@ -120,12 +120,12 @@ body = {
 
 if existing:
     space_id = existing.get("space_id") or existing.get("id")
-    result = call("PATCH", f"/api/2.0/genie/spaces/{space_id}", body)
-    print(f"Updated Genie Agent: {title} ({space_id})")
+    call("PATCH", f"/api/2.0/genie/spaces/{space_id}", body)
+    print(f"Updated Genie space: {title} ({space_id})")
 else:
     result = call("POST", "/api/2.0/genie/spaces", body)
     space_id = result.get("space_id") or result.get("id")
-    print(f"Created Genie Agent: {title} ({space_id})")
+    print(f"Created Genie space: {title} ({space_id})")
 
-print(f"Trusted semantic assets: {catalog}.semantic.payroll_compliance, {catalog}.semantic.audit_detail")
+print(f"Semantic sources: {catalog}.semantic.payroll_compliance, {catalog}.semantic.audit_detail")
 dbutils.notebook.exit(str(space_id or ""))
