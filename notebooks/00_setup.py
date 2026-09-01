@@ -10,6 +10,8 @@
 # COMMAND ----------
 # MAGIC %pip install "holidays>=0.75" "requests>=2.32" "pandas>=2.0" "databricks-sdk>=0.20"
 # COMMAND ----------
+from pathlib import Path
+
 exec(open(str(Path.cwd() / "_common.py")).read())
 
 from databricks.sdk import WorkspaceClient
@@ -131,4 +133,4 @@ print(f"Canonical input folder:  /Volumes/{catalog}/bronze/landing/input")
 print(f"Payroll metric view:     {catalog}.semantic.payroll_compliance")
 print(f"Audit detail metric view:{catalog}.semantic.audit_detail")
 print(f"Genie Agent ID:          {genie_space_id}")
-print("NEXT: upload CSV/XLSX files to the raw import folder and run 'AuditHero - Build Source Mapping', or configure Employment Hero API credentials.")
+print("NEXT: upload CSV/XLSX files to the raw import folder and run 'AuditHero - Build Source Mapping Workbook', or configure Employment Hero API credentials.")
