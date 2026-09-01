@@ -2,10 +2,10 @@
 #
 # PURPOSE
 # -------
-# Inspect an Employment Hero tenant and show which controlled mappings/evidence are
-# still needed before API-sourced historical results can be relied on. This is a
-# readiness report, not a payroll calculation. FILES-mode users should run the File
-# Readiness pipeline instead.
+# Inspect Employment Hero data and identify controlled mappings/evidence that
+# require configuration before API-sourced historical results are used. This is a
+# readiness report, not a payroll calculation. For uploaded-file audits, use the
+# File Readiness pipeline.
 #
 # PARAMETER: key_vault_url — Azure Key Vault used by optional API mode.
 
@@ -99,7 +99,7 @@ for row in client.work_types(organisation_id):
     source_id = first(row, "id", "Id")
     label = first(row, "name", "display_name", "displayName")
     mapped = any(key in work_map for key in (str(source_id or ""), str(label or "")))
-    add("WORK_TYPE", source_id, label, "READY" if mapped else "MAPPING_RECOMMENDED", "Used for service-stream and sleepover automation")
+    add("WORK_TYPE", source_id, label, "READY" if mapped else "MAPPING_RECOMMENDED", "Used for service-stream and sleepover analysis")
 
 for row in client.work_locations(organisation_id):
     source_id = first(row, "id", "Id")
@@ -134,7 +134,7 @@ for filename, detail in {
     "toil_register.csv": "Populate written TOIL agreements when TOIL is used.",
     "supplemental_events.csv": "Populate recall, on-call, remote work, active sleepover work or other controlled events when applicable.",
 }.items():
-    add("CONTROL_REGISTER", filename, filename, "READY" if csv_has_rows(filename) else "REGISTER_REVIEW", detail + " An empty register is acceptable only after confirming the event type was not applicable in the audit window.")
+    add("CONTROL_REGISTER", filename, filename, "READY" if csv_has_rows(filename) else "REGISTER_REVIEW", detail + " An empty register is acceptable when the event type did not occur in the audit window.")
 
 print("STEP 5 — Save and display readiness findings")
 results = pd.DataFrame(findings).drop_duplicates(["finding_type", "source_key", "source_label"])
@@ -145,8 +145,8 @@ blocking = results[results.status.isin(["MAPPING_REQUIRED", "REGISTER_REQUIRED"]
 print("\nAUDIT READINESS SUMMARY")
 print(results.status.value_counts().to_string())
 if len(blocking):
-    print(f"\n{len(blocking)} blocking readiness finding(s). Resolve these before relying on historical remediation totals.")
+    print(f"\n{len(blocking)} blocking readiness finding(s). Resolve these before relying on historical reconciliation totals.")
     notebookutils.notebook.exit("review_required")
 
-print("\nBlocking mappings/registers are present. Review recommended/review items, then validate one known payroll period.")
+print("\nNo blocking mapping/register findings remain. Review recommended items, then validate one known payroll period.")
 notebookutils.notebook.exit("success")
