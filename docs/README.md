@@ -1,6 +1,6 @@
 # AuditHero documentation
 
-Use this page to find the guide for the task being performed.
+Use this index to find the guide for the task being performed.
 
 ## Installation, upgrade and removal
 
@@ -11,9 +11,7 @@ The first installation uses a platform-specific installer notebook. After instal
 
 A standard uninstall preserves payroll and audit storage. Permanent data deletion requires explicit confirmation in the uninstaller notebook.
 
-## Payroll and audit operators
-
-Use these guides to prepare data, run audits and review results:
+## Prepare and run audits
 
 1. [Quick start](../QUICKSTART.md)
 2. [Importing and mapping CSV/Excel files](IMPORT_AND_FIELD_MAPPING.md)
@@ -22,29 +20,27 @@ Use these guides to prepare data, run audits and review results:
 5. [Understanding results](UNDERSTANDING_RESULTS.md)
 6. [Troubleshooting](TROUBLESHOOTING.md)
 
-## Administrators
-
-Use these guides to maintain an installed AuditHero environment:
+## Administration
 
 - [Administration and security](ADMINISTRATION.md)
 - [Notebook reference](NOTEBOOK_REFERENCE.md)
-- [CLI and automation](CLI_AND_AUTOMATION.md)
+- [Optional CLI and automation](CLI_AND_AUTOMATION.md)
 - [Architecture](ARCHITECTURE.md)
 
 ## Payroll governance and compliance review
-
-Use these guides when validating the basis and limitations of an audit:
 
 - [SCHADS rules and evidence](SCHADS_RULES_AND_EVIDENCE.md)
 - [Audit data requirements](AUDIT_DATA_REQUIREMENTS.md)
 - [Understanding results](UNDERSTANDING_RESULTS.md)
 
-## Platform-specific entry points
+## Platform operating surfaces
 
 ### Microsoft Fabric
 
-Routine operation uses the deployed Fabric pipelines and Power BI report.
+Routine operation uses the deployed Fabric pipelines, Lakehouse and Power BI report.
 
 ### Databricks
 
-Routine operation uses **Jobs & Pipelines**, **Catalog Explorer**, **AI/BI** and **Genie**. No separate AuditHero application is required.
+Routine operation uses **Jobs & Pipelines**, **Catalog Explorer**, the **AuditHero - SCHADS Payroll Compliance** AI/BI dashboard and the **AuditHero - Payroll Compliance** Genie space.
+
+> AuditHero is compliance-support software, not legal advice. Validate Award coverage, classifications, historical industrial instruments and representative calculations before using results for remediation, recovery or payroll-change decisions.
