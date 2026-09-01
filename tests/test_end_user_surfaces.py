@@ -101,6 +101,7 @@ def test_databricks_pay_category_treatment_is_explicit_and_complete():
     assert "Suggested treatments are guidance only" in mapping
     assert 'draft["datasets"]["pay_category_mapping"]["enabled"] = False' in mapping
     assert "same source column as employee_id" in mapping
+    assert "overlap substantially with employee identifiers" not in mapping
     assert "pay_category_treatment" in conversion
     assert "Complete the pay_category_treatment sheet before conversion" in conversion
     assert "pay_category_mapping.csv" in conversion
@@ -113,6 +114,7 @@ def test_fabric_pay_category_treatment_matches_databricks_control():
     assert "pay_category_treatment" in mapping
     assert '"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"' in mapping
     assert "same source column as employee_id" in mapping
+    assert "overlap substantially with employee identifiers" not in mapping
     assert 'draft["datasets"]["pay_category_mapping"]["enabled"] = False' in mapping
     assert "pay_category_treatment" in conversion
     assert "Complete the pay_category_treatment sheet before conversion" in conversion
