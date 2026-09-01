@@ -2,10 +2,12 @@
 # MAGIC %md
 # MAGIC # AuditHero — Employment Hero Connection Test (Optional API)
 # MAGIC
-# MAGIC **Purpose:** confirm that the optional Employment Hero HR API credentials can authenticate and read the basic metadata AuditHero needs. This notebook does not calculate payroll and is not required for uploaded-file audits.
+# MAGIC **Purpose:** confirm that the optional Employment Hero HR API credentials can authenticate and read the metadata required by AuditHero API workflows. This notebook does not calculate payroll and is not required for uploaded-file audits.
 # COMMAND ----------
 # MAGIC %pip install "requests>=2.32"
 # COMMAND ----------
+from pathlib import Path
+
 exec(open(str(Path.cwd() / "_common.py")).read())
 
 from schads_audit.config import AuditConfig
@@ -14,7 +16,7 @@ from schads_audit.employment_hero_hr import EmploymentHeroHRClient
 # MAGIC %md
 # MAGIC ## 1. Read the Databricks secret scope
 # MAGIC
-# MAGIC The secret values themselves are never printed. The scope contains the Employment Hero client ID, client secret, refresh token and organisation ID configured by an administrator.
+# MAGIC Secret values are not printed. The scope contains the Employment Hero client ID, client secret, refresh token and organisation ID configured by an administrator.
 # COMMAND ----------
 dbutils.widgets.text("secret_scope", "audithero")
 scope = dbutils.widgets.get("secret_scope")
@@ -34,9 +36,9 @@ client = EmploymentHeroHRClient(
 organisation_id = secret("EH_ORGANISATION_ID")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 2. Make small read-only API calls
+# MAGIC ## 2. Perform read-only API checks
 # MAGIC
-# MAGIC Successful counts prove the token can access the organisation and the main metadata endpoints. No Employee Hero records are changed.
+# MAGIC The calls below verify access to the organisation and required metadata endpoints. No Employment Hero records are changed.
 # COMMAND ----------
 print("Employment Hero connection succeeded")
 print("Employees:", len(client.employees(organisation_id)))
