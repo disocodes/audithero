@@ -1,70 +1,89 @@
 # AuditHero architecture
 
-AuditHero separates installation, source-system conversion, canonical payroll evidence, Award calculation and reporting so each layer can be operated and reviewed independently.
+AuditHero separates source ingestion, canonical payroll evidence, SCHADS calculation, audit persistence and reporting so each layer can be reviewed independently.
 
 ```text
-One-time platform installer notebook
-              |
-              v
-Fabric workspace or Databricks workspace
-              |
-              +--------------------------------------+
-              |                                      |
-Payroll / HR / Timekeeping exports       Optional Employment Hero API
-              |                                      |
-              v                                      v
-     Source Mapping + Conversion              API normalization
-              \                                      /
-               \                                    /
-                v                                  v
-                 Canonical AuditHero datasets
-                           |
-                    File/API Readiness
-                           |
-                           v
-                 Shared SCHADS audit engine
-                           |
-             Effective-dated MA000100 rules
-                           |
-          +----------------+----------------+
-          |                |                |
-     audit detail     event/TOIL       reconciliation
-          |                |                |
-          +----------------+----------------+
-                           |
-                  latest successful data
-                           |
-               +-----------+-----------+
-               |                       |
-          Power BI/Fabric        Databricks AI/BI
+Payroll / HR / Timekeeping exports        Optional Employment Hero API
+                 |                                   |
+                 v                                   v
+       Source mapping + conversion             API normalization
+                 \                                   /
+                  \                                 /
+                   v                               v
+                    Canonical AuditHero data
+                              |
+                       Readiness checks
+                              |
+                              v
+                    Shared SCHADS audit engine
+                              |
+                  Effective-dated MA000100 rules
+                              |
+             +----------------+----------------+
+             |                |                |
+        audit detail      event / TOIL    reconciliation
+             |                |                |
+             +----------------+----------------+
+                              |
+                     successful audit data
+                              |
+                +-------------+-------------+
+                |                           |
+        Microsoft Fabric                Databricks
+                |                           |
+        Direct Lake model             Gold Delta tables
+                |                           |
+            Power BI               Unity Catalog metric views
+                                            |
+                                      +-----+-----+
+                                      |           |
+                                    AI/BI       Genie
 ```
 
 ## Installation layer
 
-Each platform has an installer notebook that is run from the platform UI. It creates or updates the AuditHero application resources and runs Setup/Self Test.
+Each platform provides an installer notebook that creates or updates the AuditHero application resources and runs Setup and Self Test. The matching uninstaller removes AuditHero-managed application resources while preserving payroll and audit storage unless permanent deletion is explicitly confirmed.
 
-The matching uninstaller removes AuditHero-managed application resources. Payroll/audit storage is preserved by default and requires an explicit confirmation before permanent deletion.
+## Source ingestion and mapping
 
-## Source mapping layer
+Source mapping converts organisation-specific CSV/XLSX exports into AuditHero canonical datasets. Mapping configuration identifies source files, sheets, columns, value translations and approved transformations. SCHADS formulas are not stored in source mappings.
 
-This layer knows how the source system names fields. It converts arbitrary CSV/Excel exports to canonical AuditHero datasets and records `mapping_used.json` plus a conversion report. It does not contain SCHADS formulas.
+Employment Hero API ingestion is an optional alternative to uploaded files. Both ingestion methods feed the same canonical model and calculation engine.
 
 ## Canonical evidence layer
 
-The canonical model provides stable employee, employment history, classification/pay details, timesheet, roster, payroll and evidence-register structures. This allows source systems to change without changing the Award engine.
+The canonical model provides stable structures for employees, employment history, classifications/pay details, timesheets, rosters, payroll earnings and controlled evidence registers. Source-system changes are handled in the ingestion or mapping layer without changing Award calculation rules.
 
 ## Shared calculation layer
 
-Both Fabric and Databricks call the same Python modules and effective-dated rule packs. Platform notebooks orchestrate work but do not maintain separate payroll formulas.
+Fabric and Databricks use the same `schads_audit` Python package and effective-dated rule packs. The engine selects applicable rules from the supplied employee, shift, pay-period and evidence facts and records calculation evidence with the results.
 
-## Storage/output layer
+When the available evidence does not support a reliable automated conclusion, the result is recorded for review rather than classified as a definitive underpayment or overpayment.
 
-Fabric uses a Lakehouse and Databricks uses Unity Catalog/Delta. Both persist detailed evidence and pay-period reconciliation rather than only a dashboard total.
+## Storage and audit trail
 
-## Reporting layer
+### Microsoft Fabric
 
-Fabric materializes latest-successful `gold.current_*` tables for Direct Lake/Power BI. Databricks exposes latest-successful views/tables to AI/BI. Failed runs should not replace the last successful operator-facing snapshot.
+Fabric stores normalized evidence and audit results in the AuditHero Lakehouse. Latest-successful `gold.current_*` tables provide the reporting snapshot used by Direct Lake and Power BI.
 
-## Fail-closed principle
+### Databricks
 
-When an automated allocation would require guessing a material fact, AuditHero records a review finding/status. This keeps unresolved evidence separate from confirmed remediation figures.
+Databricks retains source/canonical files in Unity Catalog Volumes, normalized evidence in Silver Delta tables, audit results in Gold Delta tables and run/readiness records in the `ops` schema.
+
+Each persisted audit result is associated with an audit run so reruns and historical investigations remain traceable.
+
+## Semantic and reporting layer
+
+### Microsoft Fabric
+
+A Direct Lake semantic model exposes AuditHero business measures and the Power BI report.
+
+### Databricks
+
+Unity Catalog metric views under the `semantic` schema define governed payroll and audit measures. The same governed results are available to the AI/BI dashboard and the **AuditHero - Payroll Compliance** Genie space.
+
+Genie is an analysis interface over calculated audit results; SCHADS entitlement calculations are completed by the AuditHero engine before the data reaches the semantic layer.
+
+## Result integrity
+
+Reporting uses successful audit runs. `REQUIRES_REVIEW` remains separate from definitive reconciliation statuses and is excluded from confirmed underpayment and overpayment totals until the relevant evidence is resolved.
