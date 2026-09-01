@@ -74,11 +74,12 @@ def test_mapping_notebooks_point_to_combined_operator_workflow():
         assert "conversion and File Readiness" in text
 
 
-def test_databricks_mapping_workbook_is_written_locally_before_volume_copy():
+def test_databricks_mapping_workbook_is_published_without_dbutils_tmp_access():
     text = _text(ROOT / "notebooks" / "02d_source_mapping_draft.py")
     assert "tempfile.mkdtemp" in text
     assert "write_mapping_workbook(mapping, local_file)" in text
-    assert "dbutils.fs.cp(local_file.as_uri()" in text
+    assert "shutil.copyfile(local_file, destination)" in text
+    assert "dbutils.fs.cp(local_file.as_uri()" not in text
     assert "dbfs:{path}" in text
 
 
