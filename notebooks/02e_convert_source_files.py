@@ -1,17 +1,17 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # AuditHero — Convert Source Files to the Canonical Audit Format
+# MAGIC # AuditHero — Convert Source Files
 # MAGIC
-# MAGIC This notebook turns your organisation's payroll/HR/timekeeping exports into the standard files that every AuditHero audit uses. It is the bridge between arbitrary source column names and the shared SCHADS calculation engine.
+# MAGIC **Purpose:** convert approved payroll, HR, rostering and timekeeping exports into the AuditHero canonical file format and run File Readiness.
 # MAGIC
-# MAGIC It does **not** change Award rules or calculate entitlements. It only reads the approved mapping workbook/JSON, converts fields, writes canonical CSV files and `audithero_input.xlsx`, and produces a conversion report for review.
+# MAGIC This notebook does not calculate SCHADS entitlements. Use it when conversion and readiness need to be reviewed before running the payroll audit.
 # COMMAND ----------
 # MAGIC %pip install "openpyxl>=3.1"
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 1. Parameters and standard locations
+# MAGIC ## 1. Select the source, mapping and output locations
 # MAGIC
-# MAGIC Run this from **Jobs & Pipelines** and override the paths if your files live elsewhere. The default paths keep raw exports separate from the converted AuditHero input files.
+# MAGIC The standard Job already supplies the AuditHero Unity Catalog Volume paths. Override a path only when the files are stored elsewhere.
 # COMMAND ----------
 from pathlib import Path
 import sys
@@ -26,7 +26,7 @@ from schads_audit.mapping_workbook import load_mapping
 from schads_audit.source_mapping import convert_source_files
 from schads_audit.file_readiness import assess_file_readiness
 
-# UI/job parameters.
+# Job parameters.
 dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("source_root", "")
 dbutils.widgets.text("mapping_path", "")
@@ -44,9 +44,9 @@ print(f"Mapping file:    {mapping_path}")
 print(f"Canonical output:{output_root}")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 2. Load the field mapping you approved
+# MAGIC ## 2. Load the approved source mapping
 # MAGIC
-# MAGIC `source_mapping.xlsx` is designed for non-technical editing. The `field_mapping` sheet tells AuditHero which source file/sheet/column feeds each canonical field. The optional `value_mapping` sheet translates values such as `Permanent FT` to `FULL_TIME`.
+# MAGIC `source_mapping.xlsx` identifies the source file, sheet and field used for each AuditHero canonical field. The optional `value_mapping` sheet translates source values to approved canonical values.
 # COMMAND ----------
 mapping_file = Path(mapping_path)
 if not mapping_file.exists():
@@ -59,11 +59,11 @@ enabled = [name for name, cfg in mapping.get("datasets", {}).items() if cfg.get(
 print("Enabled canonical datasets:", ", ".join(enabled) or "NONE")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 3. Convert the exports
+# MAGIC ## 3. Convert the source files
 # MAGIC
-# MAGIC The converter applies only the safe operations defined by the mapping workbook: copy, coalesce, concatenate, combine date/time, use a constant/default, translate known values and convert basic data types. Arbitrary Python expressions are never executed from the workbook.
+# MAGIC Supported mapping operations include direct copy, coalesce, concatenate, separate date/time combination, constants, defaults, value translation and basic data-type conversion. Mapping workbooks cannot execute arbitrary Python code.
 # MAGIC
-# MAGIC Outputs include individual canonical CSV files, a canonical `audithero_input.xlsx`, `mapping_used.json`, and `conversion_report.csv` showing row counts and blanks in required fields.
+# MAGIC Outputs include canonical CSV files, `audithero_input.xlsx`, `mapping_used.json` and `conversion_report.csv`.
 # COMMAND ----------
 result = convert_source_files(
     source_root=source_root,
@@ -81,9 +81,9 @@ if result["errors"]:
         print(" -", issue)
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 4. Run the same readiness checks used before an audit
+# MAGIC ## 4. Run File Readiness
 # MAGIC
-# MAGIC Conversion success only proves that columns were transformed. This next step checks whether the canonical data is sufficiently complete for an audit — for example, whether classifications, timesheet identifiers and required historical coverage evidence are present.
+# MAGIC File Readiness checks whether the converted canonical data contains the required fields and evidence for an audit. Blocking findings must be resolved before payroll calculation.
 # COMMAND ----------
 readiness = assess_file_readiness(output_root, output_root)
 display(readiness)
