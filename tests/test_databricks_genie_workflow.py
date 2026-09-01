@@ -6,6 +6,7 @@ DATABRICKS_YML = ROOT / "databricks.yml"
 JOBS = ROOT / "resources" / "jobs.yml"
 SETUP = ROOT / "notebooks" / "00_setup.py"
 GENIE_SETUP = ROOT / "notebooks" / "00c_setup_genie.py"
+GENIE_JSON = ROOT / "genie" / "audithero.geniespace.json"
 DB_IO = ROOT / "src" / "schads_audit" / "databricks_io.py"
 FILE_AUDIT = ROOT / "notebooks" / "03b_manual_file_audit.py"
 
@@ -30,15 +31,19 @@ def test_setup_creates_semantic_schema_metric_views_and_genie():
     assert "from pathlib import Path" in setup_text
 
 
-def test_genie_is_governed_by_gold_and_semantic_assets_only():
-    text = GENIE_SETUP.read_text(encoding="utf-8")
-    assert '"/api/2.0/genie/spaces"' in text
-    assert "semantic.payroll_compliance" in text
-    assert "semantic.audit_detail" in text
-    assert "v_readiness_findings" in text
-    assert "v_rule_coverage" in text
-    assert "Never treat REQUIRES_REVIEW as an underpayment" in text
-    assert "Do not query Bronze or Silver assets" in text
+def test_genie_is_governed_by_gold_and_metric_view_assets_only():
+    setup_text = GENIE_SETUP.read_text(encoding="utf-8")
+    json_text = GENIE_JSON.read_text(encoding="utf-8")
+
+    assert '"/api/2.0/genie/spaces"' in setup_text
+    assert '"metric_views": [' in setup_text
+    assert '"metric_views": [' in json_text
+    assert "semantic.payroll_compliance" in setup_text
+    assert "semantic.audit_detail" in setup_text
+    assert "v_readiness_findings" in setup_text
+    assert "v_rule_coverage" in setup_text
+    assert "Never treat REQUIRES_REVIEW as an underpayment" in setup_text
+    assert "Do not query Bronze or Silver assets" in setup_text
 
 
 def test_operator_jobs_have_real_unity_catalog_volume_defaults():
