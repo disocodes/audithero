@@ -1,34 +1,34 @@
 # AuditHero quick start
 
-This guide takes a user from installation to a first uploaded-file audit. Employment Hero credentials and a local terminal are not required.
+This guide covers first installation and a first uploaded-file audit. Employment Hero credentials and a local terminal are not required.
 
-## 1. Install AuditHero if it is not already installed
+## 1. Install AuditHero
 
 ### Microsoft Fabric
 
-Download `installers/Fabric_Install_AuditHero.py`, import it as a notebook into the target Fabric workspace, open it and choose **Run all**.
+Import `installers/Fabric_Install_AuditHero.py` into the target Fabric workspace and choose **Run all**.
 
-The bootstrap creates or updates the AuditHero Lakehouse, Environment, operational notebooks, pipelines, Direct Lake semantic model and Power BI report, then runs Setup and Self Test. It also installs **AuditHero - Install or Upgrade** and **AuditHero - Uninstall** for future administration.
+The installer creates or updates the AuditHero Lakehouse, Environment, operational notebooks, pipelines, Direct Lake semantic model and Power BI report, then runs Setup and Self Test. It also installs **AuditHero - Install or Upgrade** and **AuditHero - Uninstall** for future administration.
 
 ### Databricks
 
-In **Workspace → Import → URL**, import the public raw URL for `installers/Databricks_Install_AuditHero.py`, open it and choose **Run all**.
+In **Workspace → Import → URL**, import the raw GitHub URL for `installers/Databricks_Install_AuditHero.py`, open it and choose **Run all**.
 
-The bootstrap creates or updates the AuditHero workspace files, operational notebooks, Jobs and published AI/BI dashboard, then runs Setup and Self Test. It also installs **AuditHero - Install or Upgrade** and **AuditHero - Uninstall** under `/Shared/AuditHero/admin`.
+The installer creates or updates the AuditHero workspace files, Jobs, Unity Catalog structures, AI/BI dashboard, semantic metric views and Genie space, then runs Setup and Self Test. Administration notebooks are installed under `/Shared/AuditHero/admin`.
 
-For full installation and removal instructions see:
+Detailed installation guides:
 
 - [Microsoft Fabric installation](docs/INSTALL_FABRIC_UI.md)
 - [Databricks installation](docs/INSTALL_DATABRICKS_UI.md)
 
-## 2. Open AuditHero in your platform
+## 2. Open the operating surfaces
 
 - **Microsoft Fabric:** open the AuditHero workspace and `AuditHero_Lakehouse`.
 - **Databricks:** open **Jobs & Pipelines** and **Catalog Explorer**.
 
-## 3. Upload the exports you already have
+## 3. Upload the source exports
 
-If your payroll/HR/timekeeping files use their own headings, upload them unchanged.
+Upload the original payroll, HR, rostering and timekeeping exports without renaming or rearranging their source columns.
 
 **Fabric raw import folder**
 
@@ -38,27 +38,23 @@ If your payroll/HR/timekeeping files use their own headings, upload them unchang
 
 `/Volumes/schads_payroll/bronze/landing/import/raw`
 
-You can mix CSV and Excel files. Excel workbooks can contain multiple sheets.
+CSV and Excel files can be used together. Excel workbooks can contain multiple sheets.
 
-If you already have `audithero_input.xlsx` or canonical AuditHero CSV files, upload them directly to the standard input folder and skip to step 7.
+If `audithero_input.xlsx` or canonical AuditHero files are already available, place them in the canonical input folder and continue at step 7.
 
-## 4. Let AuditHero propose the field mapping
+## 4. Build the source mapping workbook
 
-From the platform UI run:
+Run:
 
 **AuditHero - Build Source Mapping Workbook**
 
 AuditHero inspects file names, Excel sheet names and column headings and creates `source_mapping_draft.xlsx`.
 
-This step does not calculate payroll. It only helps identify where each AuditHero field probably exists in your exports.
+This step only proposes source-to-canonical mappings; it does not calculate payroll.
 
-## 5. Review and approve the mapping in Excel
+## 5. Review and approve the mapping
 
 Open `source_mapping_draft.xlsx` and review the `field_mapping` sheet.
-
-Each row answers:
-
-> Which field in my export should populate this AuditHero field?
 
 Example:
 
@@ -70,46 +66,46 @@ Example:
 | timesheets | end_datetime | Clock Out |
 | payroll_earnings | amount | Gross Amount |
 
-Use the `value_mapping` sheet where source values also need translation, for example:
+Use the `value_mapping` sheet when source values also need translation, for example:
 
 `Permanent FT` → `FULL_TIME`
 
 Save the reviewed workbook as **`source_mapping.xlsx`** in the import folder.
 
-See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md) for examples covering first/last-name joins, separate date/time fields, defaults, constants and value translations.
+See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md) for joins, separate date/time fields, defaults, constants and value translations.
 
 ## 6. Convert and run the audit
 
-For the normal recurring workflow run:
+Run:
 
 **AuditHero - Convert Mapped Files and Run Audit**
 
-Enter the required audit start and end dates in the UI and start the job/pipeline.
+Enter the required audit start and end dates.
 
-The workflow automatically:
+The workflow:
 
 1. reads the approved `source_mapping.xlsx`;
 2. converts the raw exports into AuditHero canonical datasets;
-3. writes canonical CSV files and `audithero_input.xlsx`;
-4. runs File Readiness checks;
-5. stops if required evidence/fields are still missing;
+3. writes the canonical files and `audithero_input.xlsx`;
+4. runs File Readiness;
+5. stops if blocking data or evidence issues remain;
 6. runs the SCHADS audit when readiness succeeds; and
-7. refreshes the dashboard/report after a successful audit.
+7. refreshes the reporting layer after a successful audit.
 
-If you only want to inspect conversion results before auditing, run **AuditHero - Convert Source Files** instead.
+Run **AuditHero - Convert Source Files** when conversion and readiness need to be reviewed without calculating payroll.
 
-## 7. If your files are already canonical
+## 7. Canonical uploaded-file audit
 
-If the files already use the AuditHero standard format, run:
+If the files already use the AuditHero canonical format, run:
 
 - **Fabric:** `AuditHero - Uploaded Files Audit Pipeline`
 - **Databricks:** `AuditHero - Audit Uploaded CSV Excel`
 
-No mapping step is needed.
+No source-mapping step is required.
 
-## 8. Start with one known payroll period
+## 8. Validate one known payroll period
 
-Do not begin with a multi-year remediation run. Choose one completed period that payroll staff can independently check.
+Use one completed period that payroll or compliance staff can independently verify before expanding to a historical range.
 
 Review:
 
@@ -120,11 +116,11 @@ Review:
 - employee and shift evidence; and
 - supplemental/TOIL findings where applicable.
 
-Read [Understanding results](docs/UNDERSTANDING_RESULTS.md) before treating any amount as remediation-ready.
+Read [Understanding results](docs/UNDERSTANDING_RESULTS.md) before using any amount for remediation.
 
-## 9. Validate representative cases
+## 9. Validate representative conditions
 
-Manually calculate representative employees/shifts that cover the conditions actually used by your organisation, for example:
+Independently check representative employees/shifts covering conditions used by the organisation, for example:
 
 - casual Saturday/Sunday;
 - public holiday;
@@ -133,20 +129,20 @@ Manually calculate representative employees/shifts that cover the conditions act
 - sleepover; and
 - part-time agreed patterns.
 
-Only expand to the full historical date range after the known period behaves as expected.
+Expand to a historical date range after the known period and representative cases are validated.
 
-## 10. Optional API automation
+## 10. Optional Employment Hero API
 
-Employment Hero API connectivity is optional. Add it later if you want direct extraction and scheduled automation.
+Employment Hero API connectivity can be enabled for direct extraction and scheduled audits.
 
-- Fabric uses Azure Key Vault for API secrets.
-- Databricks uses Databricks Secrets.
+- Fabric stores API secrets in Azure Key Vault.
+- Databricks stores API secrets in Databricks Secrets.
 
 See [Administration](docs/ADMINISTRATION.md).
 
-## Upgrading or removing AuditHero
+## Upgrade or remove AuditHero
 
-After the first installation, use the administration notebooks installed inside AuditHero itself.
+Use the administration notebooks installed by the first installation.
 
 **Fabric**
 
@@ -158,4 +154,4 @@ After the first installation, use the administration notebooks installed inside 
 - `/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
 - `/Shared/AuditHero/admin/AuditHero - Uninstall`
 
-A normal uninstall preserves payroll/audit data. Permanent data removal requires the explicit `DELETE AUDITHERO DATA` confirmation.
+A standard uninstall preserves payroll and audit data. Permanent data removal requires the explicit `DELETE AUDITHERO DATA` confirmation.
