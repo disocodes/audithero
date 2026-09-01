@@ -14,7 +14,9 @@
 # MAGIC The standard Job already supplies the AuditHero Unity Catalog Volume paths. Override a path only when the files are stored elsewhere.
 # COMMAND ----------
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 ROOT = Path.cwd()
 for candidate in (ROOT, *ROOT.parents):
@@ -65,13 +67,40 @@ print("Enabled canonical datasets:", ", ".join(enabled) or "NONE")
 # MAGIC
 # MAGIC Outputs include canonical CSV files, `audithero_input.xlsx`, `mapping_used.json` and `conversion_report.csv`.
 # COMMAND ----------
-result = convert_source_files(
-    source_root=source_root,
-    mapping=mapping,
-    output_root=output_root,
-    write_workbook=True,
-    strict=strict,
-)
+def _publish_staged_files(staging_root: Path, destination_root: str) -> None:
+    """Copy completed conversion files into a Unity Catalog Volume."""
+    target_root = Path(destination_root)
+    target_root.mkdir(parents=True, exist_ok=True)
+    for source_file in staging_root.iterdir():
+        if source_file.is_file():
+            shutil.copyfile(source_file, target_root / source_file.name)
+
+
+# Some Excel/CSV writers use filesystem operations that are not supported directly
+# against Unity Catalog Volume FUSE paths on shared compute. Generate complete files
+# in local driver storage, then copy the completed files into the Volume.
+staging_dir = None
+conversion_output_root = output_root
+if output_root.startswith("/Volumes/"):
+    staging_dir = Path(tempfile.mkdtemp(prefix="audithero-convert-"))
+    conversion_output_root = str(staging_dir / "canonical")
+
+try:
+    result = convert_source_files(
+        source_root=source_root,
+        mapping=mapping,
+        output_root=conversion_output_root,
+        write_workbook=True,
+        strict=False,
+    )
+
+    if staging_dir is not None:
+        _publish_staged_files(Path(conversion_output_root), output_root)
+        result["output_root"] = output_root
+        result["workbook"] = f"{output_root}/audithero_input.xlsx" if result.get("workbook") else None
+finally:
+    if staging_dir is not None:
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
 display(result["report"])
 print(f"Canonical workbook: {result['workbook']}")
@@ -79,6 +108,8 @@ if result["errors"]:
     print("Conversion completed with issues:")
     for issue in result["errors"]:
         print(" -", issue)
+    if strict:
+        raise ValueError("Source conversion failed:\n - " + "\n - ".join(result["errors"]))
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 4. Run File Readiness
