@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC **Purpose:** run a file-based AuditHero audit from canonical CSV files or `audithero_input.xlsx`.
 # MAGIC
-# MAGIC The standard uploaded-file Job runs File Readiness before invoking this notebook. The audit calculates expected entitlements, applies supported event and TOIL controls, reconciles actual payroll when supplied, stores normalized evidence and audit results, and refreshes the latest-successful reporting views.
+# MAGIC The standard uploaded-file Job runs File Readiness before invoking this notebook. The audit calculates expected entitlements, applies supported event and TOIL controls, reconciles actual payroll when sufficient earning-line evidence is available, stores normalized evidence and audit results, and refreshes the latest-successful reporting views.
 # COMMAND ----------
 # MAGIC %pip install "pandas>=2.0" "openpyxl>=3.1" "holidays>=0.75"
 # COMMAND ----------
@@ -41,7 +41,7 @@ print(f"Audit window: {start_date} to {end_date}")
 # MAGIC %md
 # MAGIC ## 2. Run the file-based audit engine
 # MAGIC
-# MAGIC `run_manual_audit` loads canonical evidence, assigns pay periods where supported, applies the effective-dated SCHADS modules and returns detailed and reconciled results. A new run ID is assigned to the stored evidence and results.
+# MAGIC `run_manual_audit` loads canonical evidence, assigns pay periods where supported, applies the effective-dated SCHADS modules and returns detailed and reconciled results. Missing optional actual-pay detail does not prevent expected entitlement calculation. A new run ID is assigned to the stored evidence and results.
 # COMMAND ----------
 run_id = str(uuid.uuid4())
 started = datetime.now(timezone.utc)
@@ -95,10 +95,10 @@ write_df(spark, result["reconciliation"], f"{catalog}.gold.pay_period_reconcilia
 # MAGIC %md
 # MAGIC ## 5. Record audit-run status and refresh reporting views
 # MAGIC
-# MAGIC `actual_pay_source` is `FILES` when usable payroll earnings were supplied and `NONE` when the run calculated expected entitlements without actual-pay reconciliation.
+# MAGIC `actual_pay_source` is `FILES` only when the supplied payroll earnings contain the fields and treatment mapping required for safe reconciliation. Otherwise the run records `NONE` and retains the supplied payroll file as Silver evidence.
 # COMMAND ----------
 reconciliation = result["reconciliation"]
-actual_source = "FILES" if not result["payroll_earnings"].empty else "NONE"
+actual_source = "FILES" if result.get("actual_pay_usable", False) else "NONE"
 run = pd.DataFrame([
     {
         "audit_run_id": run_id,
