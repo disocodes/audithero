@@ -2,10 +2,12 @@
 #
 # PURPOSE
 # -------
-# Run a date-range audit using Employment Hero HR/Payroll API extraction. Uploaded-
-# file audits use the same shared calculation engine without API credentials.
+# Run a payroll audit for a selected date range using Employment Hero HR/Payroll
+# API extraction. Uploaded-file audits use the same shared calculation engine
+# without Employment Hero API credentials.
 #
 # PARAMETERS
+# ----------
 # key_vault_url       — Azure Key Vault for Employment Hero API secrets.
 # start_date/end_date — audit and extraction window.
 # actual_pay_source   — PAYROLL_API to reconcile actual earnings, otherwise NONE.
@@ -40,5 +42,5 @@ print(f"Historical audit complete: {result['run_id']}")
 if not result["reconciliation"].empty:
     print(result["reconciliation"]["status"].value_counts(dropna=False).to_string())
     display(result["reconciliation"].sort_values(["status", "employee_name"]).head(200))
-print("NEXT: review exceptions and supporting evidence in the AuditHero Power BI report.")
+print("Recommended next step: review exceptions and supporting evidence in the AuditHero Power BI report.")
 notebookutils.notebook.exit(result["run_id"])
