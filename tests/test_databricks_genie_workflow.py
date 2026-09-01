@@ -29,6 +29,8 @@ def test_setup_creates_semantic_schema_metric_views_genie_and_upload_folders():
     assert "create_metric_views(spark, catalog)" in setup_text
     assert 'dbutils.fs.mkdirs(raw_import_root)' in setup_text
     assert 'dbutils.fs.mkdirs(canonical_input_root)' in setup_text
+    assert 'dbutils.widgets.text("sql_warehouse_id", "")' in setup_text
+    assert 'configured_warehouse_id = dbutils.widgets.get("sql_warehouse_id").strip()' in setup_text
     assert 'dbutils.notebook.run(' in setup_text
     assert '"./00c_setup_genie"' in setup_text
     assert "from pathlib import Path" in setup_text
@@ -49,8 +51,9 @@ def test_genie_is_governed_by_gold_and_metric_view_assets_only():
     assert "Do not query Bronze or Silver assets" in setup_text
 
 
-def test_operator_jobs_have_real_unity_catalog_volume_defaults():
+def test_operator_jobs_have_real_unity_catalog_volume_defaults_and_setup_warehouse():
     text = JOBS.read_text(encoding="utf-8")
+    assert 'sql_warehouse_id: "${var.sql_warehouse_id}"' in text
     assert 'default: "/Volumes/${var.catalog}/bronze/landing/import/raw"' in text
     assert 'default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping.xlsx"' in text
     assert 'default: "/Volumes/${var.catalog}/bronze/landing/input"' in text
