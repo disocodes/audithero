@@ -2,12 +2,14 @@
 # MAGIC %md
 # MAGIC # AuditHero — Databricks Self Test
 # MAGIC
-# MAGIC **Purpose:** verify representative SCHADS calculations inside the deployed Databricks environment before real payroll data is used.
+# MAGIC **Purpose:** verify representative SCHADS calculations inside the installed Databricks environment before production payroll data is used.
 # MAGIC
-# MAGIC The tests use synthetic employees/shifts only. They check historical/current rate selection, a casual Saturday, sleepover treatment, location-specific holidays, broken-shift grouping/allowance and period overtime allocation. A failed assertion is an installation/rule regression and should stop production use until reviewed.
+# MAGIC Self Test uses synthetic records only. It checks historical/current rate selection, a casual Saturday, sleepover treatment, location-specific holidays, broken-shift grouping/allowance and period overtime allocation. A failed assertion indicates that the installed runtime or rule configuration requires review.
 # COMMAND ----------
 # MAGIC %pip install "pandas>=2.0"
 # COMMAND ----------
+from pathlib import Path
+
 exec(open(str(Path.cwd() / "_common.py")).read())
 
 import pandas as pd
@@ -21,7 +23,7 @@ passed = []
 
 
 def ok(name, condition, detail=""):
-    """Record a passed check or stop immediately with useful diagnostic evidence."""
+    """Record a passed check or raise an assertion containing diagnostic detail."""
     if not condition:
         raise AssertionError(f"{name} failed: {detail}")
     passed.append(name)
@@ -30,7 +32,7 @@ def ok(name, condition, detail=""):
 # MAGIC %md
 # MAGIC ## 1. Rule versions and known rates
 # MAGIC
-# MAGIC These checks detect accidental loss or mutation of historical/current rate packs.
+# MAGIC These checks confirm that the expected historical and current rule packs are available.
 # COMMAND ----------
 errors = lib.validate()
 ok("rule library validation", errors == [], errors)
@@ -42,9 +44,9 @@ rate_2026, _ = lib.rate("SACS-L2-P3", "2026-08-01")
 ok("current 2026 SACS rate", rate_2026 and rate_2026["base_hourly_rate"] == 38.50, rate_2026)
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 2. Build one synthetic casual employee
+# MAGIC ## 2. Build a synthetic employee
 # MAGIC
-# MAGIC Reusing one controlled employee makes the following examples deterministic and independent of your real tenant data.
+# MAGIC A single synthetic employee is reused across the following test cases. No production employee data is read.
 # COMMAND ----------
 employees = pd.DataFrame([
     {"employee_id": "E1", "employee_name": "Test", "employment_type_current": "Casual", "state": "WA", "work_group": "DISABILITY_SERVICES"}
@@ -60,7 +62,7 @@ empty_holidays = pd.DataFrame(columns=["state", "holiday_date", "holiday_name", 
 # MAGIC %md
 # MAGIC ## 3. Casual Saturday example
 # MAGIC
-# MAGIC Confirms that a four-hour Saturday shift at the current synthetic classification produces the expected loaded amount used by the regression suite.
+# MAGIC Confirms the expected amount for a four-hour Saturday shift at the synthetic classification.
 # COMMAND ----------
 sat = pd.DataFrame([
     {"timesheet_id": "SAT", "employee_id": "E1", "start_datetime": "2026-08-08 18:00", "end_datetime": "2026-08-08 22:00", "break_units": 0, "work_group": "DISABILITY_SERVICES", "location_state": "WA", "pay_period_start": "2026-08-03", "pay_period_end": "2026-08-16"}
@@ -71,7 +73,7 @@ ok("casual Saturday calculation", float(detail.iloc[0].expected_amount) == 269.5
 # MAGIC %md
 # MAGIC ## 4. Sleepover treatment
 # MAGIC
-# MAGIC The sleepover span must remain allowance evidence rather than being paid again as eight ordinary worked hours. Active sleepover work is represented separately when it occurs.
+# MAGIC Confirms that the sleepover span is represented as sleepover evidence rather than ordinary worked hours. Active sleepover work is represented separately when it occurs.
 # COMMAND ----------
 sleep = pd.DataFrame([
     {"timesheet_id": "SO", "employee_id": "E1", "start_datetime": "2026-08-03 22:00", "end_datetime": "2026-08-04 06:00", "break_units": 0, "work_group": "DISABILITY_SERVICES", "location_state": "WA", "pay_period_start": "2026-08-03", "pay_period_end": "2026-08-16", "is_sleepover": True}
@@ -83,7 +85,7 @@ ok("sleepover allowance evidence", "SLEEPOVER_ALLOWANCE" in detail.iloc[0].calcu
 # MAGIC %md
 # MAGIC ## 5. Local public holiday matching
 # MAGIC
-# MAGIC Confirms that a local holiday applies only to the matching `holiday_location_key` and does not leak to all employees in the state.
+# MAGIC Confirms that a local holiday applies only to the matching `holiday_location_key`.
 # COMMAND ----------
 local_ts = pd.DataFrame([
     {"timesheet_id": "LOCAL", "employee_id": "E1", "start_datetime": "2026-09-28 09:00", "end_datetime": "2026-09-28 13:00", "break_units": 0, "work_group": "DISABILITY_SERVICES", "location_state": "WA", "holiday_location_key": "KUNUNURRA", "pay_period_start": "2026-09-21", "pay_period_end": "2026-10-04"},
@@ -100,7 +102,7 @@ ok("local holiday does not leak statewide", "PUBLIC_HOLIDAY" not in evidence["OT
 # MAGIC %md
 # MAGIC ## 6. Broken-shift grouping and allowance
 # MAGIC
-# MAGIC Two work periods separated by a genuine unpaid gap should be grouped as the same eligible broken shift and produce the appropriate allowance evidence.
+# MAGIC Confirms that separated work periods can be grouped as the same eligible broken shift and produce the expected allowance evidence.
 # COMMAND ----------
 broken = pd.DataFrame([
     {"timesheet_id": "B1", "employee_id": "E1", "start_datetime": "2026-08-03 07:00", "end_datetime": "2026-08-03 09:00", "break_units": 0, "work_group": "DISABILITY_SERVICES", "location_state": "WA", "pay_period_start": "2026-08-03", "pay_period_end": "2026-08-16"},
@@ -115,7 +117,7 @@ ok("broken shift allowance applied", any("BROKEN_SHIFT_ALLOWANCE" in x for x in 
 # MAGIC %md
 # MAGIC ## 7. Weekly threshold overtime allocation
 # MAGIC
-# MAGIC Creates a synthetic week above the relevant threshold and confirms that the period-overtime allocator marks/reprices the trailing hours rather than merely reporting a threshold warning.
+# MAGIC Confirms that hours above the synthetic weekly threshold are allocated and repriced by the period-overtime stage.
 # COMMAND ----------
 week = []
 for day in range(3, 8):
@@ -126,4 +128,4 @@ detail = allocate_period_overtime(detail, empty_holidays, lib)
 ok("weekly threshold overtime allocation", any("PERIOD_OVERTIME_REPRICE" in x for x in detail.calculation_evidence))
 
 print(f"\nAuditHero self-test complete: {len(passed)} checks passed.")
-print("NEXT: validate your source data/mapping, then run one known payroll period.")
+print("NEXT: validate source data and mapping, then run one known payroll period.")
