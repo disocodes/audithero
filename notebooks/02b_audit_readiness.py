@@ -2,12 +2,14 @@
 # MAGIC %md
 # MAGIC # AuditHero — API Audit Readiness (Optional API)
 # MAGIC
-# MAGIC **Purpose:** inspect an Employment Hero tenant and show which classifications, pay categories, work types, work locations and historical evidence controls still need configuration before API-sourced audit results can be relied on.
+# MAGIC **Purpose:** inspect Employment Hero data and identify classifications, pay categories, work types, work locations and controlled evidence that require configuration before API-sourced audit results are used.
 # MAGIC
-# MAGIC This is a readiness report, not a payroll calculation. Uploaded-file users should use **AuditHero - File Readiness** instead.
+# MAGIC This is a readiness report, not a payroll calculation. For uploaded-file audits, use **AuditHero - File Readiness**.
 # COMMAND ----------
 # MAGIC %pip install "requests>=2.32" "pandas>=2.0"
 # COMMAND ----------
+from pathlib import Path
+
 exec(open(str(Path.cwd() / "_common.py")).read())
 
 import json
@@ -18,9 +20,9 @@ from schads_audit.normalize import infer_schads_classification, first
 from schads_audit.databricks_io import write_df
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 1. Connect to Employment Hero and load the local mapping files
+# MAGIC ## 1. Connect to Employment Hero and load controlled mappings
 # MAGIC
-# MAGIC API data is compared with controlled mapping files in `config/`. The notebook never guesses a missing pay-category treatment or legal instrument merely to achieve a READY status.
+# MAGIC API metadata is compared with the mapping files in `config/`. Missing pay-category treatment, classification mapping or controlled evidence remains a readiness finding until it is configured.
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("secret_scope", "audithero")
@@ -62,9 +64,9 @@ work_map = load_json("work_type_mapping.json")
 location_map = load_json("work_location_state_mapping.json")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 2. Check employee classifications and whether part-time evidence is needed
+# MAGIC ## 2. Check employee classifications and part-time history
 # MAGIC
-# MAGIC Each Employment Hero classification must either already be a recognizable AuditHero classification or have an explicit mapping. The notebook also scans employment history to determine whether a written part-time pattern register is required.
+# MAGIC Each Employment Hero classification must resolve to a supported AuditHero classification. Employment history is also checked to determine whether effective-dated part-time pattern evidence is required.
 # COMMAND ----------
 findings = []
 
@@ -93,9 +95,9 @@ for employee_id in employee_ids:
         add("CLASSIFICATION", source_id, label, "READY" if resolved else "MAPPING_REQUIRED", resolved or "No canonical SCHADS classification resolved")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 3. Check payroll/work/location mappings
+# MAGIC ## 3. Check payroll, work-type and location mappings
 # MAGIC
-# MAGIC Pay categories affect actual-pay reconciliation; work types help identify service stream/sleepover facts; state/location data drives public-holiday testing.
+# MAGIC Pay-category treatment is required for actual-pay reconciliation. Work-type mappings support service-stream and sleepover analysis. Work-location mappings provide state and optional local-holiday context.
 # COMMAND ----------
 for row in client.pay_categories(organisation_id):
     source_id = first(row, "id", "Id")
@@ -107,7 +109,7 @@ for row in client.work_types(organisation_id):
     source_id = first(row, "id", "Id")
     label = first(row, "name", "display_name", "displayName")
     mapped = any(key in work_map for key in (str(source_id or ""), str(label or "")))
-    add("WORK_TYPE", source_id, label, "READY" if mapped else "MAPPING_RECOMMENDED", "Used for service-stream and sleepover automation")
+    add("WORK_TYPE", source_id, label, "READY" if mapped else "MAPPING_RECOMMENDED", "Used for service-stream and sleepover analysis")
 
 for row in client.work_locations(organisation_id):
     source_id = first(row, "id", "Id")
@@ -122,9 +124,9 @@ for row in client.work_locations(organisation_id):
         add("WORK_LOCATION", source_id, label, "READY" if location_key else "MAPPING_RECOMMENDED", detail)
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 4. Check historical/conditional evidence registers
+# MAGIC ## 4. Check historical and conditional evidence registers
 # MAGIC
-# MAGIC Instrument history is a historical-audit release gate. Part-time patterns are required when part-time employment exists. Other event registers are review controls that may legitimately be empty if the event did not occur.
+# MAGIC Instrument history is required for historical coverage checks. Part-time pattern evidence is required when part-time employment exists. Other event registers can remain empty when the relevant event did not occur in the audit period.
 # COMMAND ----------
 add(
     "CONTROL_REGISTER",
@@ -151,12 +153,12 @@ for filename, detail in {
     "toil_register.csv": "Populate written TOIL agreements when TOIL is used.",
     "supplemental_events.csv": "Populate recall, on-call, remote work, active sleepover work or other controlled events when applicable.",
 }.items():
-    add("CONTROL_REGISTER", filename, filename, "READY" if csv_has_rows(filename) else "REGISTER_REVIEW", detail + " An empty register is acceptable only after confirming the event type was not applicable in the audit window.")
+    add("CONTROL_REGISTER", filename, filename, "READY" if csv_has_rows(filename) else "REGISTER_REVIEW", detail + " An empty register is acceptable when the event type did not occur in the audit window.")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 5. Save and display readiness findings
 # MAGIC
-# MAGIC The results are written to `ops.readiness_findings` for dashboard/operational review. `MAPPING_REQUIRED` and `REGISTER_REQUIRED` are blocking for a dependable historical audit.
+# MAGIC Findings are written to `ops.readiness_findings`. `MAPPING_REQUIRED` and `REGISTER_REQUIRED` must be resolved before a dependable historical reconciliation is produced.
 # COMMAND ----------
 out = pd.DataFrame(findings).drop_duplicates(["finding_type", "source_key", "source_label"])
 out["checked_at"] = pd.Timestamp.utcnow()
@@ -167,6 +169,6 @@ blocking = out[out.status.isin(["MAPPING_REQUIRED", "REGISTER_REQUIRED"])]
 print("\nAUDIT READINESS SUMMARY")
 print(out.status.value_counts().to_string())
 if len(blocking):
-    print(f"\nResolve {len(blocking)} blocking mapping/register item(s) before relying on remediation totals.")
+    print(f"\nResolve {len(blocking)} blocking mapping/register item(s) before relying on historical reconciliation totals.")
 else:
-    print("\nBlocking mappings/registers are present. Review recommended/review items, then validate one known payroll period.")
+    print("\nNo blocking mapping/register findings remain. Review recommended items, then validate one known payroll period.")
