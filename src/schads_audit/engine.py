@@ -3,9 +3,10 @@ from datetime import time
 from decimal import Decimal
 import json,pandas as pd,numpy as np
 from .money import money,effective_hourly_rate,line_amount
+from .canonical_normalization import parse_datetime_value,numeric_value
 
 def _dt(v):
-    x=pd.to_datetime(v,errors='coerce');return None if pd.isna(x) else x
+    x=parse_datetime_value(v);return None if pd.isna(x) else x
 def _bool(v):
     if isinstance(v,bool):return v
     return str(v).strip().lower() in ('1','true','yes','y')
@@ -17,19 +18,19 @@ def _emp_type(v):
     return 'UNKNOWN'
 def _effective_row(df,eid,at_date,start_col,end_col=None):
     if df is None or df.empty:return None
-    q=df[df.employee_id.astype(str)==str(eid)].copy();q['_s']=pd.to_datetime(q[start_col],errors='coerce');q=q[q['_s']<=pd.to_datetime(at_date)]
-    if end_col and end_col in q.columns:q['_e']=pd.to_datetime(q[end_col],errors='coerce');q=q[q['_e'].isna()|(q['_e']>=pd.to_datetime(at_date))]
+    q=df[df.employee_id.astype(str)==str(eid)].copy();q['_s']=q[start_col].map(parse_datetime_value);at=_dt(at_date);q=q[q['_s']<=at]
+    if end_col and end_col in q.columns:q['_e']=q[end_col].map(parse_datetime_value);q=q[q['_e'].isna()|(q['_e']>=at)]
     return None if q.empty else q.sort_values('_s',ascending=False).iloc[0].to_dict()
 def _split(start,end,break_minutes=0):
-    start=pd.to_datetime(start);end=pd.to_datetime(end);cuts=[start];m=start.normalize()+pd.Timedelta(days=1)
+    start=_dt(start);end=_dt(end);cuts=[start];m=start.normalize()+pd.Timedelta(days=1)
     while m<end:cuts.append(m);m+=pd.Timedelta(days=1)
     cuts.append(end);out=[]
     for a,b in zip(cuts[:-1],cuts[1:]):out.append({'date':a.date(),'hours':(b-a).total_seconds()/3600})
-    if len(out)==1:out[0]['hours']=max(0,out[0]['hours']-float(break_minutes or 0)/60)
+    if len(out)==1:out[0]['hours']=max(0,out[0]['hours']-numeric_value(break_minutes)/60)
     return out
 def _day_type(d,state,holidays,location_key=None):
     if holidays is not None and not holidays.empty:
-        h=holidays.copy();h['_d']=pd.to_datetime(h.holiday_date,errors='coerce').dt.date;q=h[(h['_d']==d)&(h.state.astype(str).str.upper()==str(state).upper())]
+        h=holidays.copy();h['_d']=h.holiday_date.map(parse_datetime_value).dt.date;q=h[(h['_d']==d)&(h.state.astype(str).str.upper()==str(state).upper())]
         if not q.empty:
             if 'holiday_location_key' not in q.columns:return 'PUBLIC_HOLIDAY'
             def applies(v):
@@ -38,7 +39,7 @@ def _day_type(d,state,holidays,location_key=None):
             if q['holiday_location_key'].apply(applies).any():return 'PUBLIC_HOLIDAY'
     return 'SATURDAY' if d.weekday()==5 else 'SUNDAY' if d.weekday()==6 else 'WEEKDAY'
 def _shift_type(start,end):
-    start=pd.to_datetime(start);end=pd.to_datetime(end)
+    start=_dt(start);end=_dt(end)
     if start.weekday()>4:return 'NONE'
     if start.time()<time(6):return 'NIGHT'
     if end.date()>start.date():return 'NIGHT'
@@ -91,10 +92,12 @@ def calculate_entitlements(employees,employment_history,classifications,timeshee
         if not conditions:flags.append('CONDITION_PACK_MISSING')
         base=float(rate['base_hourly_rate']) if rate else None;state=ts.get('location_state') or emp.get('state');work_group=ts.get('work_group') or emp.get('work_group') or 'DISABILITY_SERVICES';holiday_location_key=ts.get('holiday_location_key');is_sleepover=_bool(ts.get('is_sleepover'))
         if not state:flags.append('STATE_MISSING_PUBLIC_HOLIDAY_CHECK_INCOMPLETE')
-        break_minutes=float(ts.get('unpaid_break_minutes') or 0)
+        if bool(ts.get('_invalid_unpaid_break_minutes',False)):flags.append('UNPAID_BREAK_MINUTES_INVALID')
+        break_minutes=numeric_value(ts.get('unpaid_break_minutes'))
         if not break_minutes and ts.get('break_units') not in (None,''):
-            try:break_minutes=float(ts.get('break_units') or 0)*60
-            except Exception:break_minutes=0
+            parsed_break_units=pd.to_numeric(pd.Series([ts.get('break_units')]),errors='coerce').iloc[0]
+            if pd.isna(parsed_break_units):flags.append('BREAK_UNITS_INVALID')
+            else:break_minutes=float(parsed_break_units)*60
         segs=_split(start,end,break_minutes);span_hours=sum(s['hours'] for s in segs);worked=0.0 if is_sleepover else span_hours;stype=_shift_type(start,end);expected=Decimal('0');evidence=[]
         if base is not None and conditions and emp_type in ('FULL_TIME','PART_TIME','CASUAL'):
             if not is_sleepover:
@@ -108,7 +111,8 @@ def calculate_entitlements(employees,employment_history,classifications,timeshee
                 a,ap=lib.allowance('sleepover',reference)
                 if a:expected+=money(a['amount']);evidence.append({'component':'SLEEPOVER_ALLOWANCE','amount':float(money(a['amount'])),'allowance_pack_id':ap['allowance_pack_id'],'clause':'25.7'})
                 else:flags.append('SLEEPOVER_ALLOWANCE_MISSING')
-                if float(ts.get('sleepover_active_minutes') or 0)>0:flags.append('SLEEPOVER_ACTIVE_WORK_NEEDS_SEPARATE_RECORD')
+                if bool(ts.get('_invalid_sleepover_active_minutes',False)):flags.append('SLEEPOVER_ACTIVE_MINUTES_INVALID')
+                if numeric_value(ts.get('sleepover_active_minutes'))>0:flags.append('SLEEPOVER_ACTIVE_WORK_NEEDS_SEPARATE_RECORD')
                 if conditions['sleepover'].get('surrounding_work_is_one_shift') and not ts.get('sleepover_group_id'):flags.append('SLEEPOVER_2026_CONTINUOUS_SHIFT_GROUPING_MISSING')
             if not is_sleepover and worked>float(conditions['meal_break']['review_if_shift_gt_hours_and_no_break']) and break_minutes==0:flags.append('MEAL_BREAK_REVIEW')
         rows.append({'timesheet_id':ts.get('timesheet_id'),'employee_id':eid,'employee_name':emp.get('employee_name'),'employment_type':emp_type,'classification_code':code,'work_group':work_group,'state':state,'holiday_location_key':holiday_location_key,'pay_period_start':pp_start,'pay_period_end':_dt(ts.get('pay_period_end')),'award_reference_date':reference,'shift_start':start,'shift_end':end,'worked_hours':round(worked,4),'sleepover_span_hours':round(span_hours,4) if is_sleepover else 0.0,'base_hourly_rate':base,'expected_amount':float(money(expected)) if base is not None and conditions else None,'entitlement_status':'REQUIRES_REVIEW' if flags else 'CALCULATED','review_flags':'; '.join(sorted(set(flags))),'calculation_evidence':json.dumps(evidence,default=str,separators=(',',':'))})
@@ -118,7 +122,7 @@ def reconcile_pay_periods(entitlements,payroll_lines,mapping,tolerance=.05):
     if entitlements is None or entitlements.empty:return pd.DataFrame()
     e=entitlements.copy();e['expected_amount']=pd.to_numeric(e.expected_amount,errors='coerce');cols=['employee_id','employee_name','pay_period_start','pay_period_end'];exp=e.groupby(cols,dropna=False).agg(expected_amount=('expected_amount','sum'),shift_count=('timesheet_id','count'),entitlement_review_count=('entitlement_status',lambda s:int((s=='REQUIRES_REVIEW').sum()))).reset_index()
     if payroll_lines is None or payroll_lines.empty:exp['actual_auditable_amount']=None;exp['variance_actual_minus_expected']=None;exp['unmapped_pay_categories']='ACTUAL_PAY_UNAVAILABLE';exp['status']='ENTITLEMENT_ONLY';return exp
-    p=payroll_lines.copy();p['pay_period_start']=pd.to_datetime(p.pay_period_start,errors='coerce');p['pay_period_end']=pd.to_datetime(p.pay_period_end,errors='coerce');p['amount']=pd.to_numeric(p.amount,errors='coerce').fillna(0)
+    p=payroll_lines.copy();p['pay_period_start']=p.pay_period_start.map(parse_datetime_value);p['pay_period_end']=p.pay_period_end.map(parse_datetime_value);p['amount']=pd.to_numeric(p.amount,errors='coerce').fillna(0)
     def treatment(r):
         for k in [str(r.get('pay_category_id') or ''),str(r.get('pay_category') or '')]:
             if k in mapping:return mapping[k].get('audit_treatment') if isinstance(mapping[k],dict) else mapping[k]
