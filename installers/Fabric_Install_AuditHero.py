@@ -15,12 +15,12 @@
 # Lakehouse, Environment, notebooks, pipelines, Direct Lake model and Power BI
 # report, and runs Setup and Self Test.
 #
-# Employment Hero credentials are not required. Leave key_vault_url blank when
-# you will use uploaded CSV/Excel files.
+# Employment Hero credentials are optional. Leave key_vault_url blank for
+# uploaded CSV/Excel audits.
 
 # CELL ********************
 
-# User settings. The defaults are suitable for a normal file-based installation.
+# Installation settings.
 release_ref = "main"
 lakehouse_name = "AuditHero_Lakehouse"
 environment_name = "AuditHero_Environment"
@@ -48,7 +48,7 @@ import requests
 
 
 def _runtime_context():
-    """Return Fabric runtime context without retaining a Py4J method proxy."""
+    """Return the current Fabric runtime context."""
     ctx = notebookutils.runtime.context
     if isinstance(ctx, dict):
         return ctx
@@ -63,7 +63,7 @@ def _runtime_context():
 
 
 def _context_value(name: str):
-    """Read one Fabric context value and return only a plain Python string."""
+    """Read one Fabric runtime value as a plain Python string."""
     ctx = _runtime_context()
     value = None
 
@@ -80,7 +80,7 @@ def _context_value(name: str):
                 except Exception:
                     value = None
 
-        # Compatibility fallback for runtime bridge objects exposing zero-argument methods.
+        # Read zero-argument runtime context members when available.
         if value is None:
             member = getattr(ctx, name, None)
             if callable(member):
@@ -96,8 +96,8 @@ def _context_value(name: str):
     type_name = type(value).__name__
     if module_name.startswith("py4j") or type_name == "JavaMember":
         raise RuntimeError(
-            f"Fabric runtime returned an unresolved Py4J object for {name}. "
-            "Start a fresh notebook session and rerun the current AuditHero installer."
+            f"Fabric runtime could not resolve {name} in the current notebook session. "
+            "Start a new notebook session and run the AuditHero installer again."
         )
     return str(value).strip()
 
@@ -119,8 +119,7 @@ print(f"Release: {release_ref}")
 
 # CELL ********************
 
-# Download the requested public AuditHero release into the notebook's temporary
-# working area. The repository archive is used only during installation.
+# Download the selected AuditHero release into temporary notebook storage.
 archive_url = f"https://api.github.com/repos/disocodes/audithero/zipball/{release_ref}"
 work_dir = Path(tempfile.mkdtemp(prefix="audithero-install-"))
 archive_path = work_dir / "audithero.zip"
@@ -136,10 +135,9 @@ roots = [p for p in (work_dir / "source").iterdir() if p.is_dir()]
 if len(roots) != 1:
     raise RuntimeError("The AuditHero release archive did not contain one repository root.")
 repo_root = roots[0]
-print(f"Release downloaded to temporary working area: {repo_root.name}")
+print(f"Release downloaded: {repo_root.name}")
 
-# Required support files must be present in the selected release before any
-# workspace resources are changed.
+# Verify required installer components before workspace resources are changed.
 required_release_files = [
     repo_root / "fabric" / "scripts" / "deploy_fabric.py",
     repo_root / "fabric" / "scripts" / "run_fabric_initialization.py",
@@ -158,8 +156,7 @@ if missing_release_files:
 
 # CELL ********************
 
-# Build the installation configuration. File-based auditing is enabled by
-# default; the API-related Key Vault setting may remain empty.
+# Build the installation configuration. Key Vault can remain blank for file-based audits.
 config = {
     "workspace_id": workspace_id,
     "workspace_name": str(workspace_name or workspace_id),
@@ -208,16 +205,11 @@ config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 # CELL ********************
 
-# Fabric supplies a user-scoped token to the notebook. The deployment scripts
-# use this token to create AuditHero-managed items in the current workspace.
+# Use the current notebook identity for Fabric workspace operations.
 os.environ["FABRIC_ACCESS_TOKEN"] = str(notebookutils.credentials.getToken("pbi"))
 
-# Never install bootstrap packages into Fabric's managed notebook environment.
-# Fabric preinstalls ML/runtime packages with tightly controlled versions; a
-# normal `pip install` here can upgrade shared dependencies such as packaging,
-# PyJWT or filelock and create conflicts with mlflow/nni. Install the few
-# deployment-only packages into an isolated temporary target instead and expose
-# them only to AuditHero child processes through PYTHONPATH.
+# Install deployment-only dependencies into an isolated temporary directory so
+# the managed Fabric notebook runtime remains unchanged.
 bootstrap_deps = work_dir / "bootstrap_deps"
 bootstrap_deps.mkdir(parents=True, exist_ok=True)
 subprocess.check_call([
@@ -235,13 +227,9 @@ subprocess.check_call([
     "pyyaml>=6,<7",
     "openpyxl>=3.1,<4",
 ])
-print("AuditHero bootstrap dependencies installed in an isolated temporary directory.")
+print("AuditHero installer dependencies prepared.")
 
-# Deploy every managed notebook/pipeline before running Spark validation. This is
-# intentional: a later Setup/Self Test/BI failure must never leave the operator
-# notebooks on an older definition or older Lakehouse/Environment binding.
-# deploy_fabric.py still runs with --skip-run so resource deployment and runtime
-# validation remain separate operations.
+# Deploy managed workspace resources before running the installation validation sequence.
 steps = [
     repo_root / "fabric" / "scripts" / "deploy_fabric.py",
     repo_root / "fabric" / "scripts" / "deploy_file_source.py",
@@ -252,22 +240,19 @@ steps = [
 
 
 def _run_deployment_step(step: Path) -> None:
-    """Run one deployer while preserving the real Fabric error in notebook output."""
+    """Run one deployment step and surface its output in this notebook."""
     command = [sys.executable, "-u", str(step), "--config", str(config_path)]
     if step.name == "deploy_fabric.py":
         command.append("--skip-run")
     print(f"Running {step.name} ...", flush=True)
 
-    # Keep deployment-only Python packages isolated from Fabric's managed runtime.
     child_env = os.environ.copy()
     existing_pythonpath = child_env.get("PYTHONPATH", "")
     child_env["PYTHONPATH"] = str(bootstrap_deps) + (
         os.pathsep + existing_pythonpath if existing_pythonpath else ""
     )
 
-    # Fabric notebook cells can otherwise surface only CalledProcessError from
-    # subprocess.check_call. Stream the child output live and keep a bounded
-    # tail so the underlying REST/API/runtime error is repeated in the exception.
+    # Stream deployment output and retain the final lines for any installer error.
     tail = deque(maxlen=120)
     process = subprocess.Popen(
         command,
@@ -290,8 +275,7 @@ def _run_deployment_step(step: Path) -> None:
         diagnostic = "\n".join(tail)
         raise RuntimeError(
             f"AuditHero installer step {step.name} failed with exit code {return_code}.\n"
-            "The final output from that step is repeated below so Fabric does not "
-            "hide the underlying error:\n\n"
+            "The final output from that step is included below:\n\n"
             f"{diagnostic}"
         )
 
@@ -302,21 +286,21 @@ for step in steps:
 # CELL ********************
 
 print("\nAuditHero installation completed successfully.")
-print("Open the Fabric workspace and use these items for normal operation:")
+print("Open the Fabric workspace and use:")
 print("  • AuditHero - Build Source Mapping Workbook")
 print("  • AuditHero - Convert Mapped Files and Run Audit")
 print("  • AuditHero - Uploaded Files Audit Pipeline")
 print("  • AuditHero - SCHADS Payroll Compliance (Power BI)")
-print("Administration notebooks are also installed:")
+print("Administration notebooks:")
 print("  • AuditHero - Install or Upgrade")
 print("  • AuditHero - Uninstall")
-print("\nUploaded-file auditing is ready without Employment Hero credentials.")
-print("The recurring monthly schedule remains disabled unless you enabled it above.")
+print("\nUploaded-file auditing is available without Employment Hero credentials.")
+print("The monthly schedule remains disabled unless enabled in the installation settings.")
 
 shutil.rmtree(work_dir, ignore_errors=True)
 
-# If this was the one-time imported bootstrap copy, remove it after success. The
-# managed 'AuditHero - Install or Upgrade' notebook has already been installed.
+# Remove the imported bootstrap copy after successful first-time installation when
+# the managed Install or Upgrade notebook is available.
 if current_notebook_id and current_notebook_name != "AuditHero - Install or Upgrade":
     try:
         token = os.environ["FABRIC_ACCESS_TOKEN"]
