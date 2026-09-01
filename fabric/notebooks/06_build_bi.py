@@ -3,7 +3,7 @@
 # PURPOSE
 # -------
 # Create or update AuditHero's Direct Lake semantic model, business measures and
-# Power BI report. Run after Setup and whenever the BI definition is upgraded.
+# Power BI report. Run after Setup and when the AuditHero BI definition is upgraded.
 #
 # PARAMETERS
 # workspace_name      — Fabric workspace containing AuditHero.
@@ -11,21 +11,19 @@
 # semantic_model_name — target Direct Lake semantic model.
 # report_name         — target Power BI report.
 #
-# IMPORTANT CONTROL
+# REPORTING CONTROL
 # -----------------
-# Confirmed under/over-payment measures include only rows whose reconciliation
-# status is UNDERPAID or OVERPAID. REQUIRES_REVIEW rows are deliberately excluded
-# from headline remediation totals until their evidence is resolved.
+# Confirmed underpayment and overpayment measures include only reconciliation rows
+# with UNDERPAID or OVERPAID status. REQUIRES_REVIEW rows are excluded from
+# confirmed remediation totals until the underlying evidence is resolved.
 
-import inspect
 import json
 import traceback
-from importlib.metadata import PackageNotFoundError, version
 
 stage = "bootstrap"
 
 try:
-    stage = "import Semantic Link / AuditHero BI dependencies"
+    stage = "import Semantic Link and AuditHero BI dependencies"
     import sempy.fabric as fabric
 
     from sempy_labs.directlake import (
@@ -40,18 +38,8 @@ try:
     )
     from schads_audit.fabric_powerbi import build_audithero_report_json
 
-    try:
-        sempy_labs_version = version("semantic-link-labs")
-    except PackageNotFoundError:
-        sempy_labs_version = "unknown"
-    generator_signature = str(inspect.signature(generate_direct_lake_semantic_model))
-    print(f"Semantic Link Labs version: {sempy_labs_version}")
-    print(f"generate_direct_lake_semantic_model signature: {generator_signature}")
-
     stage = "STEP 1 — Define the Lakehouse tables exposed to Power BI"
     print(stage)
-    # `gold.current_*` contains the latest successful audit snapshot. Reference/run
-    # tables remain available so reviewers can inspect rule/readiness/run context.
     TABLES = {
         "Pay Period Reconciliation": "gold.current_reconciliation",
         "Audit Detail": "gold.current_audit_detail",
@@ -79,8 +67,8 @@ try:
 
     stage = "STEP 3 — Define payroll/audit business measures"
     print(stage)
-    # Measures are kept here so the report has stable human-readable KPIs. The DAX for
-    # remediation amounts explicitly filters to definitive reconciliation statuses.
+    # Measures define the user-facing payroll and audit KPIs. Remediation measures
+    # filter to definitive reconciliation statuses.
     MEASURES = {
         "Pay Period Reconciliation": {
             "Employees Audited": ("DISTINCTCOUNT('Pay Period Reconciliation'[employee_id])", "0", "Distinct employees in the current successful audit snapshot."),
@@ -90,16 +78,16 @@ try:
             "Requires Review Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"REQUIRES_REVIEW\")", "0", "Pay periods requiring evidence review before a definitive decision."),
             "Actual Pay Unavailable Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"ACTUAL_PAY_UNAVAILABLE\")", "0", "Expected entitlement exists but usable actual payroll earnings were not available."),
             "Compliant Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"COMPLIANT\")", "0", "Pay periods within tolerance and with no unresolved review finding."),
-            "Potential Underpayment": ("SUMX(FILTER('Pay Period Reconciliation', 'Pay Period Reconciliation'[status] = \"UNDERPAID\"), -'Pay Period Reconciliation'[variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Definite underpayment variance only; review rows are excluded."),
-            "Potential Overpayment": ("SUMX(FILTER('Pay Period Reconciliation', 'Pay Period Reconciliation'[status] = \"OVERPAID\"), 'Pay Period Reconciliation'[variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Definite overpayment variance only; review rows are excluded."),
+            "Potential Underpayment": ("SUMX(FILTER('Pay Period Reconciliation', 'Pay Period Reconciliation'[status] = \"UNDERPAID\"), -'Pay Period Reconciliation'[variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Underpayment variance for definitive UNDERPAID periods."),
+            "Potential Overpayment": ("SUMX(FILTER('Pay Period Reconciliation', 'Pay Period Reconciliation'[status] = \"OVERPAID\"), 'Pay Period Reconciliation'[variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Overpayment variance for definitive OVERPAID periods."),
             "Expected Pay": ("SUM('Pay Period Reconciliation'[expected_amount])", "$#,##0.00;($#,##0.00)", "Sum of expected auditable pay."),
             "Actual Auditable Pay": ("SUM('Pay Period Reconciliation'[actual_auditable_amount])", "$#,##0.00;($#,##0.00)", "Sum of payroll earnings mapped into actual auditable pay."),
             "Net Variance": ("SUM('Pay Period Reconciliation'[variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Actual auditable pay minus expected pay."),
-            "Compliance Rate": ("DIVIDE([Compliant Periods], [Pay Periods] - [Requires Review Periods] - [Actual Pay Unavailable Periods])", "0.0%", "Compliance rate only among periods with a definitive decision."),
+            "Compliance Rate": ("DIVIDE([Compliant Periods], [Pay Periods] - [Requires Review Periods] - [Actual Pay Unavailable Periods])", "0.0%", "Compliance rate among periods with a definitive decision."),
         },
         "Audit Detail": {
             "Shifts Audited": ("COUNTROWS('Audit Detail')", "0", "Shift-level audit records in the current snapshot."),
-            "Review Shifts": ("CALCULATE(COUNTROWS('Audit Detail'), 'Audit Detail'[entitlement_status] = \"REQUIRES_REVIEW\")", "0", "Shift records requiring evidence/rule review."),
+            "Review Shifts": ("CALCULATE(COUNTROWS('Audit Detail'), 'Audit Detail'[entitlement_status] = \"REQUIRES_REVIEW\")", "0", "Shift records requiring evidence or rule review."),
             "Expected Shift Entitlements": ("SUM('Audit Detail'[expected_amount])", "$#,##0.00;($#,##0.00)", "Expected shift-level Award comparator before pay-period reconciliation."),
         },
         "Supplemental Entitlements": {
@@ -111,15 +99,13 @@ try:
         },
     }
 
-    # Do not import Microsoft.AnalysisServices.Tabular directly in the notebook.
-    # Semantic Link initializes the TOM runtime when connect_semantic_model opens;
-    # its TOMWrapper.add_measure helper then creates new .NET measure objects safely.
+    # Open the semantic model through Semantic Link and create or update the
+    # AuditHero measures.
     with connect_semantic_model(
         dataset=semantic_model_name,
         workspace=workspace_name,
         readonly=False,
     ) as tom:
-        print(f"TOM add_measure signature: {inspect.signature(tom.add_measure)}")
         for table_name, measures in MEASURES.items():
             table = tom.model.Tables[table_name]
             existing = {measure.Name: measure for measure in table.Measures}
@@ -169,7 +155,8 @@ try:
 
     stage = "STEP 4B — Rebind report to the AuditHero semantic model"
     print(stage)
-    # Rebind in case overwriting the semantic model created a new model ID.
+    # Bind the report to the current AuditHero semantic model after model creation
+    # or update.
     report_rebind(
         report=report_name,
         dataset=semantic_model_name,
@@ -184,7 +171,7 @@ try:
     if "FallbackReasonID" in fallback.columns and (fallback["FallbackReasonID"] != 0).any():
         print(
             "WARNING: one or more tables report a Direct Lake fallback reason. "
-            "Review the table before production sign-off."
+            "Review the affected table before production use."
         )
     else:
         print("Direct Lake model and Power BI report deployed successfully.")
