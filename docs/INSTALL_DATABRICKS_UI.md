@@ -1,37 +1,38 @@
 # Install AuditHero in Databricks
 
-AuditHero can be installed from the **Databricks workspace UI** with one bootstrap notebook. A separate frontend app is not required.
+AuditHero can be installed from the **Databricks workspace UI** with one bootstrap notebook.
 
 ## What the installer creates
 
 The installer creates or updates:
 
-- `/Shared/AuditHero` workspace code/notebooks;
-- managed Install/Upgrade and Uninstall notebooks;
+- `/Shared/AuditHero` workspace files and managed notebooks;
+- **AuditHero - Install or Upgrade** and **AuditHero - Uninstall**;
 - all AuditHero Jobs;
 - a SQL warehouse for AI/BI when no suitable warehouse exists and permissions allow creation;
 - the published **AuditHero - SCHADS Payroll Compliance** AI/BI dashboard;
 - the `schads_payroll` Unity Catalog, schemas and landing Volume;
+- the standard raw-import and canonical-input folders;
 - effective-dated SCHADS reference tables;
-- Silver normalized-evidence and Gold audit-result structures;
+- Silver normalized-evidence tables and Gold audit-result tables;
 - governed Unity Catalog metric views under `schads_payroll.semantic`; and
-- the **AuditHero - Payroll Compliance** Genie Agent.
+- the **AuditHero - Payroll Compliance** Genie space.
 
-It then runs **AuditHero - Setup** and the SCHADS self-test path automatically.
+The installer then runs **AuditHero - Setup** and **AuditHero - Self Test**.
 
 Employment Hero credentials are not required for installation or uploaded CSV/Excel audits.
 
 ## Requirements
 
-You need a Databricks workspace with:
+The Databricks workspace must provide:
 
 - Unity Catalog;
 - permission to run notebooks and Jobs;
 - permission to create or use the configured AuditHero catalog;
 - access to a SQL warehouse; and
-- Genie enabled if you want the natural-language analysis surface.
+- Genie if natural-language analysis will be used.
 
-The current semantic metric views require a Databricks runtime/SQL environment that supports Unity Catalog metric views (`CREATE VIEW ... WITH METRICS`).
+Unity Catalog metric views must be supported by the Databricks runtime/SQL environment used for AuditHero.
 
 ## First installation
 
@@ -42,12 +43,12 @@ In Databricks:
 1. open **Workspace**;
 2. choose **Import**;
 3. choose **URL**;
-4. use the raw GitHub URL for `installers/Databricks_Install_AuditHero.py` from the approved release;
+4. enter the raw GitHub URL for `installers/Databricks_Install_AuditHero.py` from the approved AuditHero release; and
 5. open the imported notebook.
 
-### 2. Review settings
+### 2. Review the installation settings
 
-Normal defaults are:
+Default settings are:
 
 ```python
 release_ref = "main"
@@ -58,69 +59,73 @@ create_sql_warehouse_if_missing = True
 existing_cluster_id = ""
 ```
 
-Leave `sql_warehouse_id` blank to allow AuditHero to use an available SQL warehouse or create `AuditHero SQL Warehouse` when permitted.
+Leave `sql_warehouse_id` blank to use an available SQL warehouse or create **AuditHero SQL Warehouse** when permitted.
 
-Leave `existing_cluster_id` blank to use serverless Jobs where supported.
+Leave `existing_cluster_id` blank to use serverless Jobs where supported. If serverless Jobs are not available, enter a compatible existing cluster ID.
 
-### 3. Run all
+### 3. Choose Run all
 
-The installer:
+The installer performs the following sequence:
 
-1. authenticates as the current Databricks session;
+1. authenticates with the current Databricks session;
 2. downloads the selected AuditHero release;
-3. installs workspace files/notebooks;
+3. installs the workspace files and notebooks;
 4. selects or creates the SQL warehouse;
-5. creates/publishes the AI/BI dashboard;
-6. creates or updates AuditHero Jobs;
-7. runs Setup;
-8. Setup creates the catalog, Volume, Delta structures, rule tables, Gold views and Unity Catalog metric views;
-9. Setup creates/updates the AuditHero Genie Agent after those trusted assets exist;
-10. validation/self-test tasks run; and
-11. installation state is saved for safe removal.
+5. creates or updates the AI/BI dashboard;
+6. creates or updates the AuditHero Jobs;
+7. runs **AuditHero - Setup**;
+8. Setup creates the catalog, Volume folders, Delta structures, reference rules, Gold views and metric views;
+9. Setup creates or updates the AuditHero Genie space;
+10. validation and Self Test complete; and
+11. installation state is recorded for upgrades and uninstall.
 
 Do not use production payroll data if Setup or Self Test fails.
 
-## After installation: uploaded CSV/Excel workflow
+## Uploaded CSV/Excel workflow
 
-1. Export the payroll/HR/timekeeping CSV or Excel files.
-2. In **Catalog Explorer**, upload them to:
-   `/Volumes/schads_payroll/bronze/landing/import/raw`
+After installation:
+
+1. Export the required payroll, HR, rostering and timekeeping CSV/XLSX files.
+2. In **Catalog Explorer**, upload the files to `/Volumes/schads_payroll/bronze/landing/import/raw`.
 3. For a new export layout, run **AuditHero - Build Source Mapping Workbook**.
-4. Review `source_mapping_draft.xlsx` and upload the approved mapping as:
-   `/Volumes/schads_payroll/bronze/landing/import/source_mapping.xlsx`
-5. Run **AuditHero - Convert Mapped Files and Run Audit** and enter the audit start/end dates.
-6. AuditHero converts the source files, runs File Readiness, appends normalized evidence to Silver Delta tables, runs the deterministic SCHADS engine, appends Gold audit outputs and refreshes AI/BI.
+4. Review `source_mapping_draft.xlsx` and save the approved mapping as `/Volumes/schads_payroll/bronze/landing/import/source_mapping.xlsx`.
+5. Run **AuditHero - Convert Mapped Files and Run Audit** and enter the audit start and end dates.
+6. AuditHero converts the source data, runs File Readiness, stores normalized evidence in Silver Delta tables, runs the SCHADS calculation engine, stores Gold audit results and refreshes AI/BI.
 7. Review **AuditHero - SCHADS Payroll Compliance** in AI/BI.
-8. Use **AuditHero - Payroll Compliance** in Genie for natural-language analysis of the governed results.
+8. Use **AuditHero - Payroll Compliance** in Genie to analyse the governed results.
 
-The source/mapping/output paths are already populated as Job defaults. Normal operators usually only change the audit dates.
+The source, mapping and output paths are configured as Job defaults. Routine runs normally require only the audit dates.
 
-## What goes into Databricks
+## Data stored in Databricks
 
-The original/canonical files are retained in the landing Volume. Normalized evidence is stored in Silver tables including employees, employment history, timesheets, payroll earnings and rostered shifts. Audit evidence/results are stored in Gold tables including audit detail, pay-period reconciliation, supplemental adjustments and TOIL findings. Run history is stored in `ops.audit_runs`.
+Original and canonical files are retained in the landing Volume. Normalized evidence is stored in Silver tables including employees, employment history, timesheets, payroll earnings and rostered shifts. Audit evidence and reconciliation are stored in Gold tables, with run history stored in `ops.audit_runs`.
 
-Genie queries Gold and semantic assets. It is not part of the SCHADS calculation engine and must not be used to decide entitlements itself.
+Genie queries the governed Gold and semantic layers. It does not perform SCHADS entitlement calculations.
 
 ## Employment Hero API
 
-If direct extraction is configured later:
+To enable direct extraction:
 
-1. configure Databricks Secrets;
+1. configure the required Databricks Secrets;
 2. run **AuditHero - Employment Hero Connection Test (Optional API)**;
-3. run **AuditHero - API Audit Readiness (Optional API)**;
+3. run **AuditHero - API Audit Readiness (Optional API)**; and
 4. use **AuditHero - Monthly Payroll Audit (Optional API)** or **AuditHero - Historical SCHADS Audit (Optional API)**.
 
-API and file workflows feed the same Silver/Gold/semantic layer.
+API and uploaded-file workflows feed the same Silver, Gold and semantic layers.
 
 ## Upgrade
 
-Open `/Shared/AuditHero/admin/AuditHero - Install or Upgrade` and choose **Run all**. The upgrade refreshes code, rule packs, Jobs, dashboard, metric views and Genie configuration without deleting historical evidence.
+Open `/Shared/AuditHero/admin/AuditHero - Install or Upgrade`, set `release_ref` to the approved version when required, and choose **Run all**.
+
+The upgrade refreshes code, rule packs, Jobs, dashboard, metric views and Genie configuration while preserving historical payroll and audit evidence. Validate a known payroll period after an upgrade before resuming recurring production audits.
 
 ## Uninstall
 
 Open `/Shared/AuditHero/admin/AuditHero - Uninstall` and choose **Run all**.
 
-Normal uninstall removes AuditHero Jobs, Genie, dashboard/code and an AuditHero-created SQL warehouse while preserving the catalog and evidence. Permanent catalog deletion requires:
+A standard uninstall removes AuditHero Jobs, Genie, dashboard, workspace files and an AuditHero-created SQL warehouse while preserving the AuditHero catalog and evidence.
+
+Permanent catalog deletion requires:
 
 ```python
 delete_audit_data = True
@@ -129,4 +134,4 @@ confirmation = "DELETE AUDITHERO DATA"
 
 ## CLI / bundle deployment
 
-The repository also includes `databricks.yml` for Declarative Automation Bundles. It uses the direct deployment engine and requires Databricks CLI 1.3.0 or newer. The UI bootstrap remains the simplest first-install path for a normal operator/admin.
+The repository also includes `databricks.yml` for Declarative Automation Bundle deployment. The UI bootstrap is the documented first-install method; Bundles are available for scripted deployment and CI/CD.
