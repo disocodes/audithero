@@ -234,7 +234,7 @@ if pay_categories:
     print("Also review pay_category_treatment. Each row represents a payroll earning or payroll item type found in the source payroll data.")
 print("Upload the approved workbook as source_mapping.xlsx.")
 print("Missing optional actual-pay detail does not prevent entitlement calculation; required core audit evidence is still validated by File Readiness.")
-print("NEXT: run 'AuditHero - Convert Mapped Files and Run Audit'.")
+print("Recommended next step: run 'AuditHero - Convert Mapped Files and Run Audit'.")
 print("Use 'AuditHero - Convert Source Files' when conversion and File Readiness need to be checked without running the payroll audit.")
 
 notebookutils.notebook.exit(draft_path)
