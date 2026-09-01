@@ -2,9 +2,11 @@
 # MAGIC %md
 # MAGIC # AuditHero — File Readiness
 # MAGIC
-# MAGIC **Purpose:** validate canonical uploaded workbook/CSV data before it enters the payroll audit workflow. Employment Hero credentials are not required.
+# MAGIC **Purpose:** validate canonical uploaded workbook/CSV data before it enters the payroll audit workflow.
 # MAGIC
-# MAGIC File Readiness checks required datasets and columns, classification completeness, pay-period evidence, historical instrument coverage, part-time pattern evidence and actual-pay/pay-category requirements. It does not calculate entitlements.
+# MAGIC File Readiness checks required datasets and columns, classification completeness, pay-period evidence, historical instrument coverage, part-time pattern evidence, and actual-pay/pay-category requirements. It does not calculate entitlements.
+# MAGIC
+# MAGIC **Credentials:** Employment Hero credentials are not required for this workflow.
 # COMMAND ----------
 # MAGIC %pip install "pandas>=2.0" "openpyxl>=3.1"
 # COMMAND ----------
@@ -49,4 +51,4 @@ if len(blocking):
     raise ValueError(f"{len(blocking)} blocking file-readiness finding(s); resolve them before running the audit")
 
 print("\nUploaded files are ready for audit processing.")
-print("NEXT: run 'AuditHero - Audit Uploaded CSV Excel' for the required audit dates.")
+print("Recommended next step: run 'AuditHero - Audit Uploaded CSV Excel' for the required audit dates.")
