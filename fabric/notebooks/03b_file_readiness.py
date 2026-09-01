@@ -5,7 +5,9 @@
 # Validate canonical uploaded files before they enter the payroll audit engine.
 # This workflow requires no Employment Hero credentials and does not calculate pay.
 #
-# PARAMETER: input_root — folder containing audithero_input.xlsx or canonical files.
+# PARAMETER
+# ---------
+# input_root — folder containing audithero_input.xlsx or canonical files.
 
 import pandas as pd
 from schads_audit.file_readiness import assess_file_readiness
@@ -28,5 +30,5 @@ if len(blocking):
     notebookutils.notebook.exit("review_required")
 
 print("\nUploaded files are structurally ready.")
-print("NEXT: run one known payroll period with the Uploaded Files Audit Pipeline.")
+print("Recommended next step: run one independently checked payroll period with the Uploaded Files Audit Pipeline.")
 notebookutils.notebook.exit("success")
