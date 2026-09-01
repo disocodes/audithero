@@ -3,9 +3,9 @@
 # PURPOSE
 # -------
 # Verify representative AuditHero calculations inside the deployed Fabric
-# Environment before real payroll data is used. All records below are synthetic.
-# A failed assertion is an installation/rule regression and should block use until
-# reviewed; it is not an employee payroll finding.
+# Environment before production payroll data is used. All records below are
+# synthetic. A failed assertion indicates an installation or rule regression
+# that must be reviewed before payroll audits proceed.
 
 import pandas as pd
 from schads_audit.fabric_rules import bundled_rule_library
@@ -30,7 +30,7 @@ classification = pd.DataFrame([{
 }])
 no_holidays = pd.DataFrame(columns=["state", "holiday_date", "holiday_name", "holiday_location_key"])
 
-print("STEP 2 — Check a current casual Saturday calculation")
+print("STEP 2 — Check a representative 2026 casual Saturday calculation")
 saturday = pd.DataFrame([{
     "timesheet_id": "T1", "employee_id": "E1", "start_datetime": "2026-08-08 18:00",
     "end_datetime": "2026-08-08 22:00", "break_units": 0, "work_group": "DISABILITY_SERVICES",
@@ -72,5 +72,5 @@ assert spark.table("ref.conditions").count() > 0
 assert spark.table("ref.allowances").count() > 0
 
 print("AuditHero Fabric self-test PASSED")
-print("NEXT: upload/map one known payroll period and run File Readiness.")
+print("Recommended next step: upload and map one independently checked payroll period, then run File Readiness.")
 notebookutils.notebook.exit("success")
