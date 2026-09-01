@@ -2,10 +2,9 @@
 #
 # PURPOSE
 # -------
-# Convert arbitrary payroll/HR/timekeeping CSV/XLSX exports into AuditHero's
-# canonical input files using an operator-approved source_mapping.xlsx or JSON.
-# The notebook also runs File Readiness so a successful conversion is not confused
-# with a payroll-ready dataset.
+# Convert payroll, HR, roster and timekeeping CSV/XLSX exports into AuditHero's
+# canonical input files using an approved source_mapping.xlsx or JSON mapping.
+# The notebook also runs File Readiness. It does not calculate payroll.
 
 from pathlib import Path
 
@@ -16,26 +15,23 @@ try:
 except ModuleNotFoundError as exc:
     if exc.name == "schads_audit" or str(exc.name or "").startswith("schads_audit."):
         raise RuntimeError(
-            "AuditHero runtime package is not available in this Fabric Spark session. "
-            "This managed notebook must use the published AuditHero_Environment. "
-            "If this notebook was already open while AuditHero was installed/upgraded, "
-            "stop the current session and start a new one; Fabric environment changes "
-            "only take effect in the next session. If the Environment selector does not "
-            "show AuditHero_Environment, attach it and then start a new session."
+            "AuditHero is not available in the current Fabric Spark session. "
+            "Confirm that AuditHero_Environment is attached to this notebook, then "
+            "start a new Spark session and run the notebook again."
         ) from exc
     raise
 
 
 def _normalize_fabric_lakehouse_path(value: str) -> str:
-    """Translate legacy Fabric notebook mount paths to the current default mount."""
+    """Normalize Fabric Lakehouse paths to the default notebook mount."""
     text = str(value or "").strip()
-    for legacy, current in (
+    for source, target in (
         ("/lakehouse/Files", "/lakehouse/default/Files"),
         ("/lakehouse/Tables", "/lakehouse/default/Tables"),
     ):
-        if text == legacy or text.startswith(legacy + "/"):
-            normalized = current + text[len(legacy):]
-            print(f"Normalized legacy Fabric Lakehouse path: {text} -> {normalized}")
+        if text == source or text.startswith(source + "/"):
+            normalized = target + text[len(source):]
+            print(f"Normalized Fabric Lakehouse path: {text} -> {normalized}")
             return normalized
     return text
 
@@ -48,7 +44,7 @@ print("STEP 1 — Load the approved source mapping")
 mapping_file = Path(mapping_path)
 if not mapping_file.exists():
     raise FileNotFoundError(
-        f"Mapping file not found: {mapping_path}. Run 'AuditHero - Build Source Mapping Workbook', edit the draft, and upload it as source_mapping.xlsx."
+        f"Mapping file not found: {mapping_path}. Run 'AuditHero - Build Source Mapping Workbook', review the draft, and upload it as source_mapping.xlsx."
     )
 mapping = load_mapping(mapping_file)
 enabled = [name for name, cfg in mapping.get("datasets", {}).items() if cfg.get("enabled")]
@@ -57,11 +53,11 @@ print("Datasets enabled for conversion:", ", ".join(enabled) or "NONE")
 source_dir = Path(source_root)
 if not source_dir.exists():
     raise FileNotFoundError(
-        f"Source folder not found: {source_root}. Upload the approved raw exports to the AuditHero Lakehouse Files import/raw folder first."
+        f"Source folder not found: {source_root}. Upload the raw exports to the AuditHero Lakehouse Files import/raw folder first."
     )
 Path(output_root).mkdir(parents=True, exist_ok=True)
 
-print("STEP 2 — Convert source fields to AuditHero fields")
+print("STEP 2 — Convert source fields to AuditHero canonical fields")
 result = convert_source_files(
     source_root=source_root,
     mapping=mapping,
@@ -73,16 +69,14 @@ display(result["report"])
 print(f"Canonical workbook written to: {result['workbook']}")
 
 print("STEP 3 — Validate the converted canonical files")
-# Passing output_root as both arguments allows a self-contained canonical workbook
-# to provide its own control-register sheets. Sidecar control files are also
-# supported if an administrator chooses that layout.
+# Readiness uses the canonical output folder for data and optional sidecar control files.
 readiness = assess_file_readiness(output_root, output_root)
 display(readiness)
 blocking = readiness[readiness["status"] == "BLOCKING"] if not readiness.empty else readiness
 if len(blocking):
     display(blocking)
     raise ValueError(
-        f"Conversion completed, but {len(blocking)} blocking File Readiness item(s) remain. Correct the source mapping/data and rerun this pipeline."
+        f"Conversion completed, but {len(blocking)} blocking File Readiness item(s) remain. Correct the source mapping or source data and rerun conversion."
     )
 
 print("Source conversion and File Readiness completed successfully.")
