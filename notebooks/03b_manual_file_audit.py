@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # AuditHero — Audit Uploaded CSV / Excel
 # MAGIC
-# MAGIC **Purpose:** run a file-based AuditHero audit from canonical CSV files or `audithero_input.xlsx`.
+# MAGIC **Purpose:** run a file-based AuditHero payroll audit from canonical CSV files or `audithero_input.xlsx`.
 # MAGIC
 # MAGIC The standard uploaded-file Job runs File Readiness before invoking this notebook. The audit calculates expected entitlements, applies supported event and TOIL controls, reconciles actual payroll when sufficient earning-line evidence is available, stores normalized evidence and audit results, and refreshes the latest-successful reporting views.
 # COMMAND ----------
@@ -21,7 +21,7 @@ from schads_audit.manual_audit import run_manual_audit
 from schads_audit.databricks_io import write_df, create_views
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 1. Select the input folder and audit dates
+# MAGIC ## 1. Set the input folder and audit dates
 # MAGIC
 # MAGIC If `input_root` is blank, AuditHero reads `/Volumes/<catalog>/bronze/landing/input`. The start and end dates define the timesheet evidence included in this audit run.
 # COMMAND ----------
@@ -41,7 +41,7 @@ print(f"Audit window: {start_date} to {end_date}")
 # MAGIC %md
 # MAGIC ## 2. Run the file-based audit engine
 # MAGIC
-# MAGIC `run_manual_audit` loads canonical evidence, assigns pay periods where supported, applies the effective-dated SCHADS modules and returns detailed and reconciled results. Missing optional actual-pay detail does not prevent expected entitlement calculation. A new run ID is assigned to the stored evidence and results.
+# MAGIC `run_manual_audit` loads canonical evidence, assigns pay periods where supported, applies the effective-dated SCHADS modules, and returns detailed and reconciled results. Missing optional actual-pay detail does not prevent expected entitlement calculation. A new run ID is assigned to the stored evidence and results.
 # COMMAND ----------
 run_id = str(uuid.uuid4())
 started = datetime.now(timezone.utc)
@@ -70,7 +70,7 @@ for frame in (
 # MAGIC %md
 # MAGIC ## 4. Store normalized evidence and audit results
 # MAGIC
-# MAGIC Silver tables retain normalized source evidence. Gold tables retain calculated entitlement, event, TOIL and reconciliation results. Historical runs are appended rather than overwritten.
+# MAGIC Silver tables retain normalized source evidence. Gold tables retain calculated entitlement, event, TOIL, and reconciliation results. Historical runs are appended rather than overwritten.
 # COMMAND ----------
 for name, frame in (
     ("employees", result["employees"]),
@@ -95,7 +95,7 @@ write_df(spark, result["reconciliation"], f"{catalog}.gold.pay_period_reconcilia
 # MAGIC %md
 # MAGIC ## 5. Record audit-run status and refresh reporting views
 # MAGIC
-# MAGIC `actual_pay_source` is `FILES` only when the supplied payroll earnings contain the fields and treatment mapping required for safe reconciliation. Otherwise the run records `NONE` and retains the supplied payroll file as Silver evidence.
+# MAGIC `actual_pay_source` is recorded as `FILES` only when the supplied payroll earnings contain the fields and approved treatment mapping required for reliable reconciliation. Otherwise the run records `NONE` and retains the supplied payroll file as Silver evidence.
 # COMMAND ----------
 reconciliation = result["reconciliation"]
 actual_source = "FILES" if result.get("actual_pay_usable", False) else "NONE"
@@ -127,4 +127,4 @@ print(f"Uploaded-file audit complete: {run_id}")
 if not reconciliation.empty:
     print(reconciliation["status"].value_counts(dropna=False).to_string())
     display(reconciliation.sort_values(["status", "employee_name"]).head(200))
-print("NEXT: review the AuditHero - SCHADS Payroll Compliance dashboard and the AuditHero - Payroll Compliance Genie space.")
+print("Recommended next step: review the AuditHero - SCHADS Payroll Compliance dashboard, Genie analysis, and detailed audit evidence.")
