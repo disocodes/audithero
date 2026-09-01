@@ -20,9 +20,6 @@ variables:
     default: "0 0 9 25 * ?"
   timezone:
     default: Australia/Perth
-  genie_parent_path:
-    description: Workspace folder where the AuditHero Genie Agent is created
-    default: /Shared/AuditHero
 
 workspace:
   root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
@@ -33,6 +30,7 @@ sync:
     - src/**
     - rules/**
     - config/**
+    - genie/**
 
 targets:
   dev:
