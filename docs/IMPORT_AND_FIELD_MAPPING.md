@@ -1,252 +1,176 @@
-# Importing and mapping CSV/Excel files
+# Importing and mapping CSV / Excel files
 
-AuditHero does not require payroll, HR, rostering or timekeeping exports to use predefined column names. The source-mapping workflow converts organisation-specific CSV/Excel exports into the canonical datasets used by the audit engine.
+AuditHero can audit source exports that do not already use its canonical field names. The source-mapping workflow converts payroll, HR, roster and timekeeping exports into stable AuditHero datasets before File Readiness and SCHADS calculation.
 
-This mapping layer is deliberately separate from the SCHADS calculation engine. Changing payroll systems should normally mean changing the source mapping, not changing Award calculation code.
+Source mapping is independent of the SCHADS calculation engine. Changes to a source system or export layout are handled by updating the mapping while the Award calculation rules remain unchanged.
 
-## The operator workflow
+## Standard workflow
 
-For most organisations the process is:
+```text
+Raw source exports
+      ↓
+Build Source Mapping Workbook
+      ↓
+source_mapping_draft.xlsx
+      ↓
+review and approve
+      ↓
+source_mapping.xlsx
+      ↓
+Convert Mapped Files and Run Audit
+      ↓
+canonical files
+      ↓
+File Readiness
+      ↓
+SCHADS audit
+```
 
-1. upload the original source exports;
-2. run **AuditHero - Build Source Mapping Workbook**;
-3. review the suggested mapping in Excel;
-4. save the approved workbook as `source_mapping.xlsx`; and
-5. run **AuditHero - Convert Mapped Files and Run Audit**.
-
-After the mapping has been approved once, steps 2-4 normally only need to be repeated when a source system/export layout changes.
-
-## When you need mapping
-
-Use the mapping workflow when source files contain fields such as:
-
-- `Employee Number` instead of `employee_id`;
-- `Clock In` instead of `start_datetime`;
-- first and last name in separate columns;
-- shift date and start/end time in separate columns;
-- employment values such as `Permanent PT` instead of `PART_TIME`; or
-- payroll categories/amount fields with system-specific names.
-
-You do **not** need mapping when the source already uses `audithero_input.xlsx` or the canonical AuditHero CSV layout.
-
-## Standard folders
+## Raw source locations
 
 ### Microsoft Fabric
 
-- raw exports: `AuditHero_Lakehouse / Files / import / raw`
-- generated draft: `Files/import/source_mapping_draft.xlsx`
-- approved mapping: `Files/import/source_mapping.xlsx`
-- converted canonical files: `Files/input`
+Upload files to:
+
+`/lakehouse/default/Files/import/raw`
 
 ### Databricks
 
-- raw exports: `/Volumes/<catalog>/bronze/landing/import/raw`
-- generated draft: `/Volumes/<catalog>/bronze/landing/import/source_mapping_draft.xlsx`
-- approved mapping: `/Volumes/<catalog>/bronze/landing/import/source_mapping.xlsx`
-- converted canonical files: `/Volumes/<catalog>/bronze/landing/input`
+Upload files to:
 
-## Step 1 — upload the original exports
+`/Volumes/schads_payroll/bronze/landing/import/raw`
 
-Upload the files as they came from the source systems. CSV and Excel files may be mixed, and an Excel workbook may contain multiple sheets.
+CSV and XLSX files can be used together. Excel workbooks can contain multiple sheets.
 
-Do not manually rename or rearrange columns merely to make AuditHero accept the file. Keeping the original export intact makes the evidence trail easier to understand and reproduce.
+Keep the original exports unchanged. Source file names and sheet names can be referenced by the mapping workbook.
 
-AuditHero deliberately restricts mapping references to files under the configured raw source folder.
+## Build the mapping workbook
 
-## Step 2 — build a draft mapping workbook
+Run **AuditHero - Build Source Mapping Workbook**.
 
-Run **AuditHero - Build Source Mapping Workbook** from the platform UI.
+AuditHero scans each supported source file/sheet, samples its headings and proposes matches to canonical datasets such as:
 
-The job/pipeline scans:
+- employees;
+- pay details / classifications;
+- employment history;
+- timesheets;
+- rostered shifts;
+- payroll earnings;
+- public holidays; and
+- controlled evidence datasets where configured.
 
-- source filenames;
-- Excel sheet names;
-- column headings; and
-- a small sample of rows needed to understand the structure.
+The generated `source_mapping_draft.xlsx` is a proposal and must be reviewed before conversion.
 
-It then creates `source_mapping_draft.xlsx` with suggested dataset and field matches.
+## `field_mapping` sheet
 
-Suggestions are not approvals. Required fields should always be checked by someone who understands the source exports.
-
-## Step 3 — edit the mapping workbook
-
-The workbook is intended to be edited in Excel by an administrator or payroll data owner.
-
-### `README` sheet
-
-Explains the supported mapping operations and how the workbook is used.
-
-### `field_mapping` sheet
-
-Each row defines how one AuditHero target field is produced. Important columns include:
-
-- `dataset` — target dataset, such as `employees`, `timesheets` or `payroll_earnings`;
-- `enabled` — whether AuditHero should build the dataset;
-- `source_file` — source file relative to the raw folder;
-- `source_sheet` — Excel sheet name; blank for CSV;
-- `target_field` — AuditHero canonical field;
-- `required` — whether the field is required for that dataset;
-- `source_field` — direct source-column match;
-- `coalesce_fields` — semicolon-separated alternatives; first non-blank value wins;
-- `concat_fields` — semicolon-separated fields to join;
-- `separator` — text inserted between joined fields;
-- `date_source` and `time_source` — combine separate date and time fields;
-- `constant` — fixed value used for every row;
-- `default` — value used when the mapped value is blank;
-- `data_type` — optional conversion such as string, number, integer, date, datetime or boolean; and
-- `confidence` — informational confidence of the original suggestion.
-
-### `value_mapping` sheet
-
-Use this sheet when source values themselves need translation.
+Each enabled mapping row identifies the AuditHero dataset/field and the corresponding source location.
 
 Example:
 
-| dataset | target_field | source_value | target_value |
-|---|---|---|---|
-| employees | employment_type_current | Permanent Full Time | FULL_TIME |
-| employees | employment_type_current | Permanent Part Time | PART_TIME |
-| employees | employment_type_current | Casual Employee | CASUAL |
+| Dataset | AuditHero field | Source file | Source sheet | Source field |
+|---|---|---|---|---|
+| employees | employee_id | employees.xlsx | Employees | Employee Number |
+| employees | employee_name | employees.xlsx | Employees | Full Name |
+| timesheets | start_datetime | timesheets.xlsx | Timesheets | Clock In |
+| timesheets | end_datetime | timesheets.xlsx | Timesheets | Clock Out |
+| payroll_earnings | amount | payroll.xlsx | Earnings | Gross Amount |
 
-## Common mapping examples
+Review all required identifiers, dates, employment types, classification values, hours and amounts before approving the mapping.
 
-### Direct field
+## Supported mapping operations
 
-Source:
+The converter supports controlled field transformations such as:
 
-`Employee Number`
+- direct source-column copy;
+- coalesce from multiple possible source columns;
+- concatenate source values;
+- combine separate date and time columns;
+- constant values;
+- defaults;
+- value translation; and
+- basic data-type conversion.
 
-Target:
+The mapping workbook does not execute arbitrary Python expressions.
 
-`employee_id`
+## `value_mapping` sheet
 
-Set `source_field = Employee Number`.
+Use `value_mapping` when source values need translation into AuditHero canonical values.
 
-### Combine first and last name
+Examples:
 
-Set:
+| Source value | Canonical value |
+|---|---|
+| Permanent FT | FULL_TIME |
+| Permanent PT | PART_TIME |
+| Casual Employee | CASUAL |
 
-`concat_fields = First Name;Last Name`
+Value mappings can also be used for known work types, service groups and other controlled source terminology.
 
-and set `separator` to a single space.
+## Classifications
 
-### Combine a shift date and time
+Classification mapping is a payroll-compliance control. Do not map an employee to a SCHADS classification only because a job title appears similar.
 
-For target `start_datetime`:
+The mapping must reflect the applicable classification evidence for the audit period. Historical classification changes should be supplied as effective-dated evidence where required.
 
-- `date_source = Shift Date`
-- `time_source = Start Time`
-- `data_type = datetime`
+## Pay categories
 
-Repeat for `end_datetime`.
+Payroll earnings must be classified for reconciliation. Typical treatment values are:
 
-### Use whichever employee identifier is populated
+- `AUDITABLE_WORK` — included in actual auditable pay;
+- `ALLOWANCE` — treated as a separately controlled allowance where supported; and
+- `EXCLUDE` — excluded from the auditable-pay comparator.
 
-If one export contains both `Employee Number` and `Payroll ID` but only one is populated on some rows:
+Unmapped pay categories can prevent a reliable actual-versus-expected conclusion.
 
-`coalesce_fields = Employee Number;Payroll ID`
+## Work locations and public holidays
 
-### Add a constant
+Location data should provide the state used for public-holiday analysis. Where a local public holiday applies, configure a `holiday_location_key` that identifies the relevant local area.
 
-If all rows in a source file belong to one known work stream, set for example:
+Do not treat a local public holiday as statewide unless that is supported by the source evidence.
 
-`constant = DISABILITY_SERVICES`
+## Separate date and time fields
 
-for the target `work_group`.
+If an export provides dates and times in separate columns, configure the mapping to combine them into the canonical datetime field.
 
-### Convert values
+For example:
 
-Use `value_mapping` rather than editing the raw source file. Examples:
+```text
+Shift Date + Start Time → start_datetime
+Shift Date + End Time   → end_datetime
+```
 
-- `Permanent PT` → `PART_TIME`
-- `Y` → `true`
-- `Western Australia` → `WA`
+Review overnight shifts to confirm the end date is represented correctly.
 
-### Boolean fields
+## Multiple files and sheets
 
-Set `data_type = boolean`. AuditHero accepts common values such as true/false, yes/no and 1/0.
+A canonical dataset can be sourced from a specific CSV file or Excel sheet. If data is split across source files, use the configured mapping/join capabilities only where a stable source key is available.
 
-## Step 4 — approve the mapping
+Employee identifiers are the preferred key for linking employee, employment-history, pay-detail, timesheet and payroll records.
 
-Save the reviewed mapping workbook as:
+## Approve the mapping
 
-`source_mapping.xlsx`
+After review:
 
-Treat this file as controlled configuration. It determines how source evidence enters the audit and should therefore be retained with the payroll-audit records for the period/version in which it was used.
+1. save the workbook as `source_mapping.xlsx`;
+2. upload it to the platform import folder; and
+3. run **AuditHero - Convert Mapped Files and Run Audit**.
 
-Do not accept a suggested mapping solely because its confidence score is high.
+Use **AuditHero - Convert Source Files** when conversion and File Readiness need to be checked without starting the payroll audit.
 
-## Step 5 — convert and audit
+## Conversion outputs
 
-For normal operation, run:
+The converter writes canonical CSV files and `audithero_input.xlsx` to the platform canonical input folder. It also writes conversion information such as `mapping_used.json` and `conversion_report.csv` where supported.
 
-**AuditHero - Convert Mapped Files and Run Audit**
+The conversion report should be reviewed for row counts, blank required fields and unexpected source omissions.
 
-The combined pipeline/job:
+## File Readiness
 
-1. loads the approved mapping;
-2. converts the raw exports into canonical AuditHero datasets;
-3. creates individual canonical CSV files;
-4. creates `audithero_input.xlsx`;
-5. writes `mapping_used.json` and `conversion_report.csv`;
-6. runs File Readiness checks;
-7. stops if blocking data/evidence problems remain;
-8. runs the SCHADS audit if readiness passes; and
-9. refreshes Power BI or Databricks AI/BI after a successful audit.
+Successful field conversion does not by itself confirm that the data is audit-ready. File Readiness checks the resulting canonical data for required datasets, columns, classifications, pay-period evidence and controlled historical evidence.
 
-If you only want to test the mapping/conversion without running payroll calculations, run:
+Blocking findings must be resolved before the audit proceeds.
 
-**AuditHero - Convert Source Files**
+## Reusing a mapping
 
-## Understanding the conversion report
+An approved mapping can be reused for later exports from the same stable source layout. Re-run the mapping review when the source system, report template, sheet name, column name, value coding or file structure changes.
 
-`conversion_report.csv` shows, by dataset/field where available:
-
-- source selected;
-- mapping rule used;
-- rows converted;
-- blanks in required fields; and
-- conversion/readiness issues.
-
-Conversion success means the files were structurally converted. It does **not** by itself prove the payroll evidence is sufficient for a reliable Award result; File Readiness performs that separate check.
-
-## File Readiness checks
-
-Typical blocking findings include:
-
-- a required canonical dataset was not created;
-- required columns are missing;
-- canonical classification codes are blank;
-- historical industrial-instrument evidence is missing; or
-- part-time employment exists without the required effective-dated part-time pattern evidence.
-
-Correct either the source data or the mapping and rerun the pipeline.
-
-## Payroll category mapping
-
-If actual payroll earnings are supplied, AuditHero must know which earnings lines belong in auditable pay. Common treatment values are:
-
-- `AUDITABLE_WORK`
-- `ALLOWANCE`
-- `EXCLUDE`
-
-The mapping layer can build the canonical `pay_category_mapping` dataset from a payroll export or separate mapping sheet.
-
-## JSON mapping option for administrators
-
-Excel is the preferred human-editable mapping interface. Administrators who manage mappings in source control can use the equivalent JSON structure demonstrated in `config/source_mapping.example.json`.
-
-Both formats describe the same source-to-canonical transformation and use the same safe conversion operations. The mapper does not execute arbitrary Python or formulas supplied by the mapping file.
-
-## When a source system changes
-
-When an organisation changes payroll/timekeeping systems or the export layout changes:
-
-1. retain the old approved mapping with the old audit records;
-2. upload a representative new export;
-3. build a new mapping draft;
-4. approve a new `source_mapping.xlsx` version;
-5. convert and audit one known payroll period; and
-6. only then use the new mapping for normal/historical runs.
-
-This keeps source-system changes separate from the Award rules and calculation engine.
+Keep approved mapping versions with the payroll/audit evidence for controlled historical work.
