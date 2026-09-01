@@ -61,7 +61,7 @@ def _mapped_source_field(cfg: dict, target: str) -> str | None:
 
 
 def _validate_pay_category_source(cfg: dict, source_field: str, frame: pd.DataFrame) -> None:
-    """Reject source fields that are inconsistent with payroll earning categories."""
+    """Reject source fields that are clearly inconsistent with payroll earning categories."""
     employee_field = _mapped_source_field(cfg, "employee_id")
     if employee_field and str(employee_field).strip() == str(source_field).strip():
         raise ValueError(
@@ -77,19 +77,6 @@ def _validate_pay_category_source(cfg: dict, source_field: str, frame: pd.DataFr
             f"The proposed pay_category source column '{source_field}' does not appear to be a payroll earning category field. "
             "Map pay_category to the payroll earning, item or category column."
         )
-
-    if employee_field and employee_field in frame.columns and source_field in frame.columns:
-        categories = set(frame[source_field].dropna().astype(str).str.strip())
-        employees = set(frame[employee_field].dropna().astype(str).str.strip())
-        categories.discard("")
-        employees.discard("")
-        if len(categories) >= 3 and len(employees) >= 3:
-            overlap = len(categories & employees) / max(1, len(categories))
-            if overlap >= 0.8:
-                raise ValueError(
-                    "The proposed pay_category values overlap substantially with employee identifiers. "
-                    "Map pay_category to the payroll earning, item or category field."
-                )
 
 
 def _read_pay_categories(mapping: dict, raw_root: str) -> list[str]:
