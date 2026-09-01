@@ -2,17 +2,17 @@
 #
 # PURPOSE
 # -------
-# Prepare the attached AuditHero Lakehouse for use. Run this notebook after the
-# first installation and after an approved AuditHero upgrade.
+# Prepare the attached AuditHero Lakehouse after installation or an approved
+# upgrade.
 #
 # WHAT IT DOES
-# 1. Creates the Lakehouse schemas and stable output tables.
+# 1. Creates the Lakehouse schemas and output tables.
 # 2. Validates and loads the effective-dated SCHADS rule reference tables.
-# 3. Creates latest-successful-run views and Direct Lake snapshot tables.
-# 4. Creates blank administrator control/mapping files when they do not exist.
-# 5. Writes a small deployment manifest for support/audit traceability.
+# 3. Creates reporting views and Direct Lake snapshot tables.
+# 4. Creates administrator control and mapping templates when they do not exist.
+# 5. Records deployment context for traceability.
 #
-# It does NOT read employee payroll data and does NOT calculate an audit.
+# Setup does not read employee payroll data and does not calculate an audit.
 
 from pathlib import Path
 import json
@@ -23,7 +23,7 @@ lib = None
 
 
 def _runtime_context_value(name):
-    """Resolve one Fabric runtime-context value to a JSON-safe Python string."""
+    """Resolve one Fabric runtime-context value to a JSON-safe string."""
     ctx = notebookutils.runtime.context
     if callable(ctx):
         try:
@@ -63,9 +63,7 @@ def _runtime_context_value(name):
     module_name = type(value).__module__
     type_name = type(value).__name__
     if module_name.startswith("py4j") or type_name == "JavaMember":
-        # An unresolved Py4J member is not a usable context value. The manifest is
-        # support metadata only, so record null rather than fail an otherwise
-        # successful installation.
+        # Only serializable runtime context values are written to the deployment manifest.
         return None
 
     try:
@@ -93,8 +91,6 @@ try:
 
     stage = "STEP 2 — Validate and load the SCHADS rule library"
     print(stage)
-    # The Fabric package contains the same effective-dated rule packs used by the
-    # Databricks deployment. Setup stops rather than loading incomplete/malformed rules.
     lib = bundled_rule_library()
     errors = lib.validate()
     if errors:
@@ -103,8 +99,7 @@ try:
 
     stage = "STEP 3 — Create latest-successful audit views"
     print(stage)
-    # These views are used by reporting/review so a failed rerun does not silently
-    # replace the last successful audit result.
+    # Reporting views expose successful audit results.
     create_views(spark)
 
     stage = "STEP 4 — Create administrator configuration templates"
@@ -112,8 +107,8 @@ try:
     CONFIG = Path("/lakehouse/default/Files/config")
     CONFIG.mkdir(parents=True, exist_ok=True)
 
-    # JSON mapping files are primarily used by optional Employment Hero API mode.
-    # Existing files are never overwritten by Setup.
+    # JSON mappings support optional Employment Hero API normalization. Existing
+    # administrator-managed files are preserved.
     json_templates = {
         "classification_mapping.json": {
             "_instructions": "Source classification name/pay-detail ID -> canonical AuditHero SCHADS classification code"
@@ -136,8 +131,8 @@ try:
         if not path.exists():
             path.write_text(json.dumps(body, indent=2), encoding="utf-8")
 
-    # CSV registers hold evidence for conditions that may not exist in basic payroll
-    # exports. Blank templates are created once and then maintained by the customer.
+    # CSV registers store evidence for conditions that may not be available in
+    # standard payroll exports. Existing administrator-managed registers are preserved.
     csv_headers = {
         "public_holiday_overrides.csv": "state,holiday_date,holiday_name,holiday_location_key,holiday_scope,source\n",
         "supplemental_events.csv": "event_id,employee_id,event_type,start_datetime,end_datetime,hours,pay_period_start,pay_period_end,state,holiday_location_key,on_call,training_or_meeting,classification_code,work_group\n",
