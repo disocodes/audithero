@@ -2,11 +2,11 @@
 # MAGIC %md
 # MAGIC # AuditHero — Setup
 # MAGIC
-# MAGIC **Purpose:** prepare the Databricks catalog for AuditHero. Run this after first deployment and again after an approved upgrade.
+# MAGIC **Purpose:** prepare the Databricks catalog for AuditHero after installation or an approved upgrade.
 # MAGIC
-# MAGIC This notebook validates SCHADS rules, creates Unity Catalog storage/tables/views,
-# MAGIC creates the governed semantic metric views and provisions the AuditHero Genie Agent.
-# MAGIC It does **not** read employee payroll data and does not calculate an audit.
+# MAGIC Setup validates the SCHADS rule library, creates Unity Catalog storage and audit structures, loads reference rules, creates governed metric views and creates or updates the AuditHero Genie space.
+# MAGIC
+# MAGIC Setup does not read employee payroll data and does not calculate an audit.
 # COMMAND ----------
 # MAGIC %pip install "holidays>=0.75" "requests>=2.32" "pandas>=2.0" "databricks-sdk>=0.20"
 # COMMAND ----------
@@ -101,17 +101,16 @@ spark.sql(
 )
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 4. Create latest-successful views and governed Unity Catalog metric views
+# MAGIC ## 4. Create reporting views and governed Unity Catalog metric views
 # COMMAND ----------
 create_views(spark, catalog)
 create_metric_views(spark, catalog)
 print(f"Created semantic metric views in {catalog}.semantic")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 5. Create or update the AuditHero Genie Agent
+# MAGIC ## 5. Create or update the AuditHero Genie space
 # MAGIC
-# MAGIC Setup uses the warehouse selected by the installer/bundle when supplied. If Setup
-# MAGIC is run directly without that parameter, it falls back to an available warehouse.
+# MAGIC `sql_warehouse_id` selects the warehouse used by AI/BI and Genie. If it is blank, Setup selects an available SQL warehouse.
 # COMMAND ----------
 warehouse_id = configured_warehouse_id
 if not warehouse_id:
@@ -139,5 +138,5 @@ print(f"Raw import folder:       {raw_import_root}")
 print(f"Canonical input folder:  {canonical_input_root}")
 print(f"Payroll metric view:     {catalog}.semantic.payroll_compliance")
 print(f"Audit detail metric view:{catalog}.semantic.audit_detail")
-print(f"Genie Agent ID:          {genie_space_id}")
+print(f"Genie space ID:          {genie_space_id}")
 print("NEXT: upload CSV/XLSX files to the raw import folder and run 'AuditHero - Build Source Mapping Workbook', or configure Employment Hero API credentials.")
