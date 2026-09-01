@@ -28,7 +28,9 @@
     "tables": [
       {"identifier": "__CATALOG__.gold.v_audit_runs"},
       {"identifier": "__CATALOG__.gold.v_readiness_findings"},
-      {"identifier": "__CATALOG__.gold.v_rule_coverage"},
+      {"identifier": "__CATALOG__.gold.v_rule_coverage"}
+    ],
+    "metric_views": [
       {"identifier": "__CATALOG__.semantic.audit_detail"},
       {"identifier": "__CATALOG__.semantic.payroll_compliance"}
     ]
