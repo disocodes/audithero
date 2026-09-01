@@ -6,7 +6,7 @@
 # MAGIC
 # MAGIC The notebook scans CSV and Excel files in the raw import folder, compares file/sheet names and column headings with AuditHero's canonical fields, and creates `source_mapping_draft.xlsx`. When payroll earnings are detected, it also lists the payroll earning categories that must be assigned an audit treatment before actual-pay reconciliation can run.
 # MAGIC
-# MAGIC A **pay category is a payroll line type** such as Ordinary Hours, Saturday, Overtime, Sleepover Allowance or Annual Leave. It is **not** an employee, and it is **not** the employee's Full Time / Part Time / Casual employment type. One employee can have many pay categories in the same pay run.
+# MAGIC A **pay category** is a payroll earning or payroll item type such as Ordinary Hours, Saturday, Overtime, Sleepover Allowance or Annual Leave.
 # MAGIC
 # MAGIC **Workflow:** upload raw exports → run this notebook → review and save `source_mapping.xlsx` → run **AuditHero - Convert Mapped Files and Run Audit**.
 # COMMAND ----------
@@ -64,7 +64,7 @@ display(inventory[["file", "sheet", "item_name", "sample_rows", "columns"]])
 # MAGIC
 # MAGIC AuditHero compares source headings with the canonical schema and proposes dataset and field matches. Review every required field before conversion, especially classifications, employment type, dates and payroll amounts.
 # MAGIC
-# MAGIC If payroll earnings are supplied, review the `pay_category_treatment` sheet as well. Each row must represent a **payroll earning type**, not an employee. The same employee may have Ordinary Hours, Saturday, Overtime, Allowances and Leave in the same pay run.
+# MAGIC If payroll earnings are supplied, review the `pay_category_treatment` sheet as well. Each row represents a payroll earning or payroll item type found in the source payroll data.
 # MAGIC
 # MAGIC Treatment meanings:
 # MAGIC - `AUDITABLE_WORK` — pay for worked hours, penalties or overtime that should count toward actual worked pay.
@@ -109,12 +109,12 @@ def _mapped_source_field(cfg: dict, target: str) -> str | None:
 
 
 def _validate_pay_category_source(cfg: dict, source_field: str, frame: pd.DataFrame) -> None:
-    """Reject obvious employee fields being mistaken for payroll earning categories."""
+    """Reject source fields that are inconsistent with payroll earning categories."""
     employee_field = _mapped_source_field(cfg, "employee_id")
     if employee_field and str(employee_field).strip() == str(source_field).strip():
         raise ValueError(
             "The payroll pay_category field has been mapped to the same source column as employee_id. "
-            "A pay category must be a payroll earning type such as Ordinary Hours, Overtime or Annual Leave, not an employee."
+            "Map pay_category to the payroll earning, item or category column."
         )
 
     field_name = str(source_field).strip().lower()
@@ -122,8 +122,8 @@ def _validate_pay_category_source(cfg: dict, source_field: str, frame: pd.DataFr
     payroll_words = ("pay", "earning", "category", "item", "allowance", "hours", "rate")
     if any(word in field_name for word in employee_words) and not any(word in field_name for word in payroll_words):
         raise ValueError(
-            f"The proposed pay_category source column '{source_field}' looks like an employee field. "
-            "Map pay_category to the payroll earning/item/category column instead."
+            f"The proposed pay_category source column '{source_field}' does not appear to be a payroll earning category field. "
+            "Map pay_category to the payroll earning, item or category column."
         )
 
     if employee_field and employee_field in frame.columns and source_field in frame.columns:
@@ -135,8 +135,8 @@ def _validate_pay_category_source(cfg: dict, source_field: str, frame: pd.DataFr
             overlap = len(categories & employees) / max(1, len(categories))
             if overlap >= 0.8:
                 raise ValueError(
-                    "The values proposed as pay categories mostly match employee identifiers. "
-                    "A pay category must be a payroll earning type such as Ordinary Hours, Saturday, Overtime, Allowance or Leave."
+                    "The proposed pay_category values overlap substantially with employee identifiers. "
+                    "Map pay_category to the payroll earning, item or category field."
                 )
 
 
@@ -185,13 +185,13 @@ def _add_pay_category_sheet(workbook_path: Path, pay_categories: list[str]) -> N
     if "pay_category_treatment" in wb.sheetnames:
         del wb["pay_category_treatment"]
     ws = wb.create_sheet("pay_category_treatment")
-    ws.append(["pay_category", "treatment", "suggested_treatment", "what_this_row_means", "notes"])
+    ws.append(["pay_category", "treatment", "suggested_treatment", "definition", "notes"])
     for value in pay_categories:
         ws.append([
             value,
             "",
             _suggest_pay_treatment(value),
-            "Payroll earning type. This is not an employee or Full Time / Part Time / Casual employment type.",
+            "Payroll earning or payroll item type used for actual-pay reconciliation.",
             "Review and approve the treatment before conversion.",
         ])
 
@@ -200,7 +200,7 @@ def _add_pay_category_sheet(workbook_path: Path, pay_categories: list[str]) -> N
     ws.column_dimensions["A"].width = 42
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 24
-    ws.column_dimensions["D"].width = 78
+    ws.column_dimensions["D"].width = 72
     ws.column_dimensions["E"].width = 56
     treatment_validation = DataValidation(
         type="list",
@@ -212,7 +212,7 @@ def _add_pay_category_sheet(workbook_path: Path, pay_categories: list[str]) -> N
 
     readme = wb["README"]
     guidance = [
-        ("pay_category_treatment", "A pay category is a payroll earning/item type, not an employee and not Full Time / Part Time / Casual. One employee can have many pay categories in one pay run."),
+        ("pay_category_treatment", "Classifies each payroll earning or payroll item type for actual-pay reconciliation."),
         ("AUDITABLE_WORK", "Use for pay for worked hours, penalties or overtime that should count toward actual worked pay."),
         ("ALLOWANCE", "Use for a separate allowance payment that should count in the relevant entitlement comparison."),
         ("EXCLUDE", "Use for payroll items that should not count in the worked-pay comparison, such as leave or reimbursements."),
@@ -286,7 +286,7 @@ if pay_categories:
 # MAGIC
 # MAGIC In **Catalog Explorer**, download `source_mapping_draft.xlsx`, review the `field_mapping` sheet and add source-value translations on `value_mapping` where required.
 # MAGIC
-# MAGIC If payroll earnings are supplied, also review `pay_category_treatment`. The rows must be payroll earning types such as Ordinary Hours, Overtime, Allowance or Leave — not employee names. One employee can have several of these categories in the same pay run.
+# MAGIC If payroll earnings are supplied, also review `pay_category_treatment`. Each row represents a payroll earning or payroll item type found in the source payroll data.
 # MAGIC
 # MAGIC Upload the approved workbook as `source_mapping.xlsx`. The conversion workflow stops when required canonical fields or pay-category treatments are incomplete.
 # COMMAND ----------
