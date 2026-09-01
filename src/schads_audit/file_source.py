@@ -2,6 +2,8 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 
+from .canonical_normalization import parse_datetime_series, parse_datetime_value
+
 CORE_INPUTS = {
     "employees":"employees",
     "pay_details":"pay_details",
@@ -72,10 +74,14 @@ def load_file_source(input_root: str|Path,start_date=None,end_date=None)->dict[s
     if start_date or end_date:
         ts=frames["timesheets"].copy()
         if "start_datetime" not in ts.columns: raise ValueError("timesheets input must contain start_datetime")
-        d=pd.to_datetime(ts["start_datetime"],errors="coerce")
+        d=parse_datetime_series(ts["start_datetime"])
         if start_date:
-            ts=ts[d>=pd.to_datetime(start_date)]; d=pd.to_datetime(ts["start_datetime"],errors="coerce")
-        if end_date: ts=ts[d<pd.to_datetime(end_date)+pd.Timedelta(days=1)]
+            lower=parse_datetime_value(start_date)
+            ts=ts[d>=lower]
+            d=parse_datetime_series(ts["start_datetime"])
+        if end_date:
+            upper=parse_datetime_value(end_date)
+            ts=ts[d<upper+pd.Timedelta(days=1)]
         frames["timesheets"]=ts
     return frames
 
