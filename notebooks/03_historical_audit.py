@@ -2,12 +2,14 @@
 # MAGIC %md
 # MAGIC # AuditHero — Historical SCHADS Audit (Optional API)
 # MAGIC
-# MAGIC **Purpose:** run a date-range audit using Employment Hero HR/Payroll API extraction. This is optional; the uploaded-file audit uses the same calculation engine without API credentials.
+# MAGIC **Purpose:** run a date-range audit using Employment Hero HR/Payroll API extraction.
 # MAGIC
-# MAGIC The notebook delegates ingestion/normalization and SCHADS calculation to the shared AuditHero package, then refreshes latest-successful views and shows a reconciliation summary.
+# MAGIC The audit uses the shared AuditHero ingestion, normalization, effective-dated SCHADS calculation and reconciliation pipeline. Results are stored in the AuditHero Delta tables and exposed through the reporting layer.
 # COMMAND ----------
 # MAGIC %pip install "holidays>=0.75" "requests>=2.32" "pandas>=2.0"
 # COMMAND ----------
+from pathlib import Path
+
 exec(open(str(Path.cwd() / "_common.py")).read())
 
 from schads_audit.config import AuditConfig
@@ -18,7 +20,7 @@ from schads_audit.databricks_io import create_views
 # MAGIC %md
 # MAGIC ## 1. Audit parameters
 # MAGIC
-# MAGIC `start_date`/`end_date` define the extraction/audit window. `PAYROLL_API` asks AuditHero to reconcile expected pay with Employment Hero Payroll earnings; `NONE` calculates expected entitlements only.
+# MAGIC `start_date` and `end_date` define the extraction and audit window. `PAYROLL_API` reconciles expected pay with Employment Hero Payroll earnings; `NONE` calculates expected entitlements without actual-pay reconciliation.
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("secret_scope", "audithero")
@@ -34,9 +36,9 @@ cfg = AuditConfig(
 lib = RuleLibrary(ROOT / "rules/MA000100")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 2. Run the complete shared audit pipeline
+# MAGIC ## 2. Run the historical audit
 # MAGIC
-# MAGIC The shared pipeline pulls employee/pay/employment history, timesheets, rosters and optional payroll earnings; applies mappings; executes the same rule modules used by FILES mode; persists Silver/Gold evidence; and records the audit run. This notebook intentionally does not reimplement those formulas.
+# MAGIC The shared pipeline extracts employee, pay, employment-history, timesheet, roster and optional payroll-earnings data; applies the configured mappings and evidence controls; calculates expected entitlements; persists Silver and Gold records; and records the audit run.
 # COMMAND ----------
 result = run_databricks_audit_v2(
     spark,
@@ -51,12 +53,11 @@ result = run_databricks_audit_v2(
 )
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 3. Refresh operator views and show the result summary
-# MAGIC
-# MAGIC The summary is useful for immediate review; the detailed evidence remains in the Gold tables and AI/BI dashboard.
+# MAGIC ## 3. Refresh reporting views and show the result summary
 # COMMAND ----------
 create_views(spark, cfg.catalog)
 print(f"Historical audit complete: {result['run_id']}")
 if not result["reconciliation"].empty:
     print(result["reconciliation"]["status"].value_counts(dropna=False).to_string())
     display(result["reconciliation"].sort_values(["status", "employee_name"]).head(500))
+print("NEXT: review the AuditHero - SCHADS Payroll Compliance dashboard and the AuditHero - Payroll Compliance Genie space.")
