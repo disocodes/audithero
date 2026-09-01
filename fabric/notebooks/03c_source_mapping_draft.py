@@ -4,8 +4,12 @@
 # -------
 # Build an editable Excel mapping workbook from CSV/XLSX payroll, HR, roster and
 # timekeeping exports. The notebook proposes matches to AuditHero's canonical
-# input model and, when payroll earnings are supplied, lists the pay categories
-# that require an approved audit treatment. It does not calculate payroll.
+# input model and, when payroll earnings are supplied, lists the payroll earning
+# categories that require an approved audit treatment. A pay category is a
+# payroll line type such as Ordinary Hours, Overtime, Allowance or Leave. It is
+# not an employee and not a Full Time / Part Time / Casual employment type.
+# One employee can have many pay categories in the same pay run.
+# The notebook does not calculate payroll.
 
 from pathlib import Path
 import pandas as pd
@@ -51,14 +55,53 @@ def _suggest_pay_treatment(value: str) -> str:
     return ""
 
 
+def _mapped_source_field(cfg: dict, target: str) -> str | None:
+    rule = (cfg.get("columns") or {}).get(target) or {}
+    if isinstance(rule, str):
+        return rule
+    return rule.get("source")
+
+
+def _validate_pay_category_source(cfg: dict, source_field: str, frame: pd.DataFrame) -> None:
+    """Reject obvious employee fields being mistaken for payroll earning categories."""
+    employee_field = _mapped_source_field(cfg, "employee_id")
+    if employee_field and str(employee_field).strip() == str(source_field).strip():
+        raise ValueError(
+            "The payroll pay_category field has been mapped to the same source column as employee_id. "
+            "A pay category must be a payroll earning type such as Ordinary Hours, Overtime or Annual Leave, not an employee."
+        )
+
+    field_name = str(source_field).strip().lower()
+    employee_words = ("employee", "staff", "worker", "person")
+    payroll_words = ("pay", "earning", "category", "item", "allowance", "hours", "rate")
+    if any(word in field_name for word in employee_words) and not any(word in field_name for word in payroll_words):
+        raise ValueError(
+            f"The proposed pay_category source column '{source_field}' looks like an employee field. "
+            "Map pay_category to the payroll earning/item/category column instead."
+        )
+
+    if employee_field and employee_field in frame.columns and source_field in frame.columns:
+        categories = set(frame[source_field].dropna().astype(str).str.strip())
+        employees = set(frame[employee_field].dropna().astype(str).str.strip())
+        categories.discard("")
+        employees.discard("")
+        if len(categories) >= 3 and len(employees) >= 3:
+            overlap = len(categories & employees) / max(1, len(categories))
+            if overlap >= 0.8:
+                raise ValueError(
+                    "The values proposed as pay categories mostly match employee identifiers. "
+                    "A pay category must be a payroll earning type such as Ordinary Hours, Saturday, Overtime, Allowance or Leave."
+                )
+
+
 def _read_pay_categories(mapping: dict, raw_root: str) -> list[str]:
     """Read unique pay-category values from the detected payroll-earnings source."""
     cfg = (mapping.get("datasets") or {}).get("payroll_earnings") or {}
     if not cfg.get("enabled"):
         return []
     source = cfg.get("source") or {}
-    rule = (cfg.get("columns") or {}).get("pay_category") or {}
-    source_field = rule if isinstance(rule, str) else rule.get("source")
+    source_field = _mapped_source_field(cfg, "pay_category")
+    employee_field = _mapped_source_field(cfg, "employee_id")
     source_file = source.get("file")
     if not source_file or not source_field:
         return []
@@ -66,17 +109,23 @@ def _read_pay_categories(mapping: dict, raw_root: str) -> list[str]:
     source_path = Path(raw_root) / str(source_file)
     if not source_path.exists():
         return []
+    usecols = [source_field]
+    if employee_field and employee_field != source_field:
+        usecols.append(employee_field)
     try:
         if source_path.suffix.lower() == ".csv":
-            frame = pd.read_csv(source_path, usecols=[source_field])
+            frame = pd.read_csv(source_path, usecols=lambda c: c in set(usecols))
         elif source_path.suffix.lower() in {".xlsx", ".xlsm"}:
-            frame = pd.read_excel(source_path, sheet_name=source.get("sheet", 0), usecols=[source_field])
+            frame = pd.read_excel(source_path, sheet_name=source.get("sheet", 0), usecols=lambda c: c in set(usecols))
         else:
             return []
     except Exception as exc:
         print(f"Pay-category values could not be sampled automatically: {exc}")
         return []
 
+    if source_field not in frame.columns:
+        return []
+    _validate_pay_category_source(cfg, source_field, frame)
     values = frame[source_field].dropna().astype(str).str.strip()
     return sorted(v for v in values.unique().tolist() if v)
 
@@ -90,16 +139,23 @@ def _add_pay_category_sheet(workbook_path: Path, pay_categories: list[str]) -> N
     if "pay_category_treatment" in wb.sheetnames:
         del wb["pay_category_treatment"]
     ws = wb.create_sheet("pay_category_treatment")
-    ws.append(["pay_category", "treatment", "suggested_treatment", "notes"])
+    ws.append(["pay_category", "treatment", "suggested_treatment", "what_this_row_means", "notes"])
     for value in pay_categories:
-        ws.append([value, "", _suggest_pay_treatment(value), "Review and approve the treatment before conversion."])
+        ws.append([
+            value,
+            "",
+            _suggest_pay_treatment(value),
+            "Payroll earning type. This is not an employee or Full Time / Part Time / Casual employment type.",
+            "Review and approve the treatment before conversion.",
+        ])
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
     ws.column_dimensions["A"].width = 42
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 24
-    ws.column_dimensions["D"].width = 56
+    ws.column_dimensions["D"].width = 78
+    ws.column_dimensions["E"].width = 56
     validation = DataValidation(
         type="list",
         formula1='"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"',
@@ -109,13 +165,16 @@ def _add_pay_category_sheet(workbook_path: Path, pay_categories: list[str]) -> N
     validation.add(f"B2:B{max(2, ws.max_row)}")
 
     readme = wb["README"]
-    next_row = readme.max_row + 1
-    readme.cell(next_row, 1, "pay_category_treatment")
-    readme.cell(
-        next_row,
-        2,
-        "When payroll earnings are supplied, assign every listed pay category an approved treatment: AUDITABLE_WORK, ALLOWANCE or EXCLUDE. Suggested treatments are guidance only.",
-    )
+    guidance = [
+        ("pay_category_treatment", "A pay category is a payroll earning/item type, not an employee and not Full Time / Part Time / Casual. One employee can have many pay categories in one pay run."),
+        ("AUDITABLE_WORK", "Use for pay for worked hours, penalties or overtime that should count toward actual worked pay."),
+        ("ALLOWANCE", "Use for a separate allowance payment that should count in the relevant entitlement comparison."),
+        ("EXCLUDE", "Use for payroll items that should not count in the worked-pay comparison, such as leave or reimbursements."),
+    ]
+    for label, explanation in guidance:
+        next_row = readme.max_row + 1
+        readme.cell(next_row, 1, label)
+        readme.cell(next_row, 2, explanation)
     wb.save(workbook_path)
 
 
@@ -148,8 +207,6 @@ if draft_file.exists() and str(overwrite).lower() not in {"true", "1", "yes"}:
     )
 
 draft = generate_mapping_draft(source_root)
-# Pay-category treatment is controlled through the dedicated workbook sheet,
-# rather than through the generic source-dataset mapping.
 if "pay_category_mapping" in (draft.get("datasets") or {}):
     draft["datasets"]["pay_category_mapping"]["enabled"] = False
     draft["datasets"]["pay_category_mapping"]["source"] = None
@@ -178,13 +235,14 @@ if pay_categories:
         "pay_category": pay_categories,
         "suggested_treatment": [_suggest_pay_treatment(value) for value in pay_categories],
     }))
-    print(f"Detected {len(pay_categories)} unique payroll pay category value(s). Complete the pay_category_treatment sheet before conversion.")
+    print(f"Detected {len(pay_categories)} unique payroll earning category value(s). Complete the pay_category_treatment sheet before conversion.")
 
 print("STEP 3 — Review and approve the mapping")
 print(f"Mapping draft created: {draft_path}")
 print("Download the workbook from the Lakehouse Files area and review field_mapping and value_mapping as required.")
 if pay_categories:
-    print("Also review pay_category_treatment and approve every payroll category as AUDITABLE_WORK, ALLOWANCE or EXCLUDE.")
+    print("Also review pay_category_treatment. Rows must be payroll earning types such as Ordinary Hours, Overtime, Allowance or Leave — not employee names.")
+    print("One employee can have several pay categories in the same pay run.")
 print("Upload the approved workbook as source_mapping.xlsx.")
 print("NEXT: run 'AuditHero - Convert Mapped Files and Run Audit'.")
 print("Use 'AuditHero - Convert Source Files' when conversion and File Readiness need to be checked without running the payroll audit.")
