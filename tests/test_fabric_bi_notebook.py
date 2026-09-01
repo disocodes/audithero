@@ -19,12 +19,11 @@ def test_fabric_build_bi_returns_structured_failure_details():
     assert "traceback.format_exc" in text
 
 
-def test_fabric_build_bi_exposes_semantic_link_runtime_contract():
+def test_fabric_build_bi_normal_output_does_not_expose_runtime_signatures():
     text = BUILD_BI.read_text(encoding="utf-8")
-    assert 'version("semantic-link-labs")' in text
-    assert "inspect.signature(generate_direct_lake_semantic_model)" in text
-    assert "Semantic Link Labs version:" in text
-    assert "generate_direct_lake_semantic_model signature:" in text
+    assert "generate_direct_lake_semantic_model signature:" not in text
+    assert "TOM add_measure signature:" not in text
+    assert "inspect.signature(" not in text
 
 
 def test_fabric_build_bi_names_each_external_api_stage():
@@ -44,4 +43,3 @@ def test_fabric_build_bi_uses_semantic_link_tom_wrapper_for_measures():
     assert "import Microsoft.AnalysisServices.Tabular" not in text
     assert "tom.add_measure(" in text
     assert "TOM.Measure()" not in text
-    assert "inspect.signature(tom.add_measure)" in text
