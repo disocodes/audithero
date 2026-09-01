@@ -2,9 +2,9 @@
 # MAGIC %md
 # MAGIC # AuditHero — Historical SCHADS Audit (Optional API)
 # MAGIC
-# MAGIC **Purpose:** run a date-range audit using Employment Hero HR/Payroll API extraction.
+# MAGIC **Purpose:** run an Employment Hero API-sourced payroll audit for a selected historical date range.
 # MAGIC
-# MAGIC The audit uses the shared AuditHero ingestion, normalization, effective-dated SCHADS calculation and reconciliation pipeline. Results are stored in the AuditHero Delta tables and exposed through the reporting layer.
+# MAGIC The workflow performs extraction, normalization, evidence checks, effective-dated SCHADS calculation, reconciliation, and persistence. Results are stored in the AuditHero Delta tables and exposed through the governed reporting layer.
 # COMMAND ----------
 # MAGIC %pip install "holidays>=0.75" "requests>=2.32" "pandas>=2.0"
 # COMMAND ----------
@@ -18,7 +18,7 @@ from schads_audit.databricks_pipeline_v2 import run_databricks_audit_v2
 from schads_audit.databricks_io import create_views
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 1. Audit parameters
+# MAGIC ## 1. Set the audit parameters
 # MAGIC
 # MAGIC `start_date` and `end_date` define the extraction and audit window. `PAYROLL_API` reconciles expected pay with Employment Hero Payroll earnings; `NONE` calculates expected entitlements without actual-pay reconciliation.
 # COMMAND ----------
@@ -38,7 +38,7 @@ lib = RuleLibrary(ROOT / "rules/MA000100")
 # MAGIC %md
 # MAGIC ## 2. Run the historical audit
 # MAGIC
-# MAGIC The shared pipeline extracts employee, pay, employment-history, timesheet, roster and optional payroll-earnings data; applies the configured mappings and evidence controls; calculates expected entitlements; persists Silver and Gold records; and records the audit run.
+# MAGIC The shared pipeline extracts employee, pay, employment-history, timesheet, roster, and optional payroll-earnings data; applies configured mappings and evidence controls; calculates expected entitlements; persists Silver and Gold records; and records the audit run.
 # COMMAND ----------
 result = run_databricks_audit_v2(
     spark,
@@ -53,11 +53,11 @@ result = run_databricks_audit_v2(
 )
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 3. Refresh reporting views and show the result summary
+# MAGIC ## 3. Refresh reporting views and display the audit summary
 # COMMAND ----------
 create_views(spark, cfg.catalog)
 print(f"Historical audit complete: {result['run_id']}")
 if not result["reconciliation"].empty:
     print(result["reconciliation"]["status"].value_counts(dropna=False).to_string())
     display(result["reconciliation"].sort_values(["status", "employee_name"]).head(500))
-print("NEXT: review the AuditHero - SCHADS Payroll Compliance dashboard and the AuditHero - Payroll Compliance Genie space.")
+print("Recommended next step: review the AuditHero - SCHADS Payroll Compliance dashboard, Genie analysis, and detailed audit evidence.")
