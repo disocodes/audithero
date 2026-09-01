@@ -63,13 +63,16 @@ def assess_file_readiness(input_root,config_root):
 
     payroll=frames["payroll_earnings"]
     if payroll.empty:
-        add("ACTUAL_PAY","payroll_earnings","REVIEW","Expected entitlements can be calculated; under/over-payment status needs actual payroll earnings")
+        add("ACTUAL_PAY","payroll_earnings","REVIEW","Expected entitlements can be calculated; actual-pay reconciliation is unavailable because payroll earnings were not supplied")
     else:
         needed={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}; miss=sorted(needed-set(payroll.columns))
-        add("ACTUAL_PAY","payroll_earnings","BLOCKING" if miss else "READY",("Missing: "+", ".join(miss)) if miss else "Actual payroll earnings available")
-        mapping=frames.get("pay_category_mapping",pd.DataFrame())
-        sidecar=(root/"pay_category_mapping.json").exists()
-        if (mapping is None or mapping.empty) and not sidecar:
-            add("ACTUAL_PAY","pay_category_mapping","BLOCKING","Payroll earnings are supplied but no pay-category treatment mapping exists")
-        else: add("ACTUAL_PAY","pay_category_mapping","READY","Pay-category treatment mapping available")
+        if miss:
+            add("ACTUAL_PAY","payroll_earnings","REVIEW","Payroll earnings were supplied but actual-pay reconciliation is unavailable. Missing: "+", ".join(miss))
+        else:
+            add("ACTUAL_PAY","payroll_earnings","READY","Actual payroll earnings available")
+            mapping=frames.get("pay_category_mapping",pd.DataFrame())
+            sidecar=(root/"pay_category_mapping.json").exists()
+            if (mapping is None or mapping.empty) and not sidecar:
+                add("ACTUAL_PAY","pay_category_mapping","REVIEW","Payroll earnings are available but no pay-category treatment mapping exists; expected entitlements can still be calculated")
+            else: add("ACTUAL_PAY","pay_category_mapping","READY","Pay-category treatment mapping available")
     return pd.DataFrame(findings)
