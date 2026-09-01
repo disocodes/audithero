@@ -1,45 +1,61 @@
 # AuditHero on Databricks
 
-AuditHero is operated through **Databricks Jobs & Pipelines, Catalog Explorer, AI/BI dashboards and Genie**. The SCHADS calculation engine, rule library, source data, audit evidence and reporting assets remain inside the Databricks environment.
+AuditHero is operated through **Jobs & Pipelines, Catalog Explorer, AI/BI and Genie**. No separate application is required.
 
-## First installation
+## Install
 
-In **Workspace → Import → URL**, import the public raw URL for `installers/Databricks_Install_AuditHero.py`, open the notebook and choose **Run all**.
+Import `installers/Databricks_Install_AuditHero.py` into the target workspace and choose **Run all**.
 
-The installer creates or updates:
+A successful installation creates the AuditHero workspace files, Jobs, Unity Catalog structures, landing Volume, Silver and Gold Delta tables, semantic metric views, AI/BI dashboard and Genie space, then runs Setup and Self Test.
 
-- `/Shared/AuditHero` workspace files and managed notebooks;
-- AuditHero Jobs;
-- the Unity Catalog `schads_payroll` catalog, schemas and landing Volume;
-- effective-dated SCHADS reference tables;
-- Silver normalized-evidence tables and Gold audit-result tables;
-- `schads_payroll.semantic.payroll_compliance` and `schads_payroll.semantic.audit_detail` metric views;
-- the published **AuditHero - SCHADS Payroll Compliance** AI/BI dashboard; and
-- the **AuditHero - Payroll Compliance** Genie space.
-
-Setup and Self Test run during installation. The administration notebooks are installed at:
+Administration notebooks are installed at:
 
 - `/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
 - `/Shared/AuditHero/admin/AuditHero - Uninstall`
 
-Employment Hero credentials are optional. Uploaded-file auditing works without them.
+Employment Hero credentials are optional.
 
-## CSV / Excel audit workflow
+## First CSV/Excel audit
 
-1. Export CSV/XLSX files from the payroll, HR, rostering or timekeeping systems.
-2. In **Catalog Explorer**, upload them to `/Volumes/schads_payroll/bronze/landing/import/raw`.
-3. For a new export layout, run **AuditHero - Build Source Mapping Workbook**.
-4. Review `source_mapping_draft.xlsx` and save the approved mapping as `source_mapping.xlsx` in `/Volumes/schads_payroll/bronze/landing/import`.
-5. Run **AuditHero - Convert Mapped Files and Run Audit** and enter the required audit start and end dates.
-6. The Job converts the source files to canonical AuditHero data, runs File Readiness, stores normalized evidence in Silver Delta tables, executes the SCHADS audit, stores the results in Gold Delta tables and refreshes AI/BI.
-7. Review **AuditHero - SCHADS Payroll Compliance** in AI/BI.
-8. Open **AuditHero - Payroll Compliance** in Genie for natural-language analysis of the governed results.
+1. Export payroll, HR, rostering and timekeeping CSV/XLSX files.
+2. Upload them to `/Volumes/schads_payroll/bronze/landing/import/raw`.
+3. Run **AuditHero - Build Source Mapping Workbook** for a new source layout.
+4. Review `source_mapping_draft.xlsx`.
+5. Save the approved mapping as `/Volumes/schads_payroll/bronze/landing/import/source_mapping.xlsx`.
+6. Run **AuditHero - Convert Mapped Files and Run Audit**.
+7. Enter the audit start and end dates.
+8. Review **AuditHero - SCHADS Payroll Compliance** in AI/BI.
+9. Use **AuditHero - Payroll Compliance** in Genie for governed analysis of completed results.
 
-The standard Volume paths are already configured as Job defaults. Routine runs normally require only the audit dates.
+The Job already contains the standard Volume paths. Routine file audits normally require only the audit dates.
 
-### Data retained in Databricks
+## What happens during a file audit
 
-Original and canonical files remain in the Unity Catalog Volume. Normalized evidence is appended to tables such as:
+```text
+Raw CSV/XLSX files
+        ↓
+Approved source mapping
+        ↓
+Canonical conversion
+        ↓
+File Readiness
+        ↓
+Silver normalized evidence
+        ↓
+SCHADS calculation engine
+        ↓
+Gold audit results
+        ↓
+Metric views
+        ↓
+AI/BI and Genie
+```
+
+If File Readiness identifies a blocking issue, the audit stops before a payroll conclusion is produced.
+
+## Stored data
+
+Normalized source evidence is appended to Silver tables such as:
 
 - `schads_payroll.silver.employees`
 - `schads_payroll.silver.employment_history`
@@ -47,7 +63,7 @@ Original and canonical files remain in the Unity Catalog Volume. Normalized evid
 - `schads_payroll.silver.payroll_earnings`
 - `schads_payroll.silver.rostered_shifts`
 
-Audit results are appended to:
+Audit outputs are appended to:
 
 - `schads_payroll.gold.audit_detail`
 - `schads_payroll.gold.pay_period_reconciliation`
@@ -55,44 +71,60 @@ Audit results are appended to:
 - `schads_payroll.gold.toil_findings`
 - `schads_payroll.ops.audit_runs`
 
-Genie queries governed Gold and semantic assets. SCHADS entitlement calculations are performed by the AuditHero calculation engine before the results are made available to Genie.
+Governed reporting uses:
 
-## Subsequent monthly file audits
+- `schads_payroll.semantic.payroll_compliance`
+- `schads_payroll.semantic.audit_detail`
 
-After a source mapping has been approved, the recurring workflow is:
+Genie reads governed result and semantic assets. It does not calculate SCHADS entitlements.
+
+## Routine monthly file audit
+
+After a mapping has been approved:
 
 `upload new exports → run Convert Mapped Files and Run Audit → review AI/BI and Genie`
 
-Run **AuditHero - File Readiness** separately when canonical files need to be checked without starting the audit.
+Rebuild the source mapping only when the source-system export structure changes.
 
-## Employment Hero API workflow
+## Canonical files
+
+If source files already use the AuditHero canonical format, upload them to:
+
+`/Volumes/schads_payroll/bronze/landing/input`
+
+Then run:
+
+**AuditHero - Audit Uploaded CSV Excel**
+
+## Employment Hero API
 
 After Databricks Secrets are configured:
 
 1. run **AuditHero - Employment Hero Connection Test (Optional API)**;
 2. run **AuditHero - API Audit Readiness (Optional API)**;
-3. run **AuditHero - Monthly Payroll Audit (Optional API)** for recurring API audits; or
-4. run **AuditHero - Historical SCHADS Audit (Optional API)** with a start and end date for historical audits.
+3. use **AuditHero - Monthly Payroll Audit (Optional API)** for recurring audits; or
+4. use **AuditHero - Historical SCHADS Audit (Optional API)** for a selected historical range.
 
-API and uploaded-file workflows write to the same Silver, Gold and semantic layers, so they use the same dashboard and Genie experience.
+API and uploaded-file workflows use the same governed result layers.
 
 ## Upgrade
 
-Open `/Shared/AuditHero/admin/AuditHero - Install or Upgrade` and choose **Run all**. The upgrade refreshes AuditHero code, rule packs, Jobs, dashboard, metric views and Genie configuration while preserving historical payroll and audit evidence.
+Open `/Shared/AuditHero/admin/AuditHero - Install or Upgrade` and choose **Run all**.
+
+Validate a known payroll period after an upgrade before resuming recurring production audits.
 
 ## Uninstall
 
 Open `/Shared/AuditHero/admin/AuditHero - Uninstall` and choose **Run all**.
 
-A standard uninstall removes AuditHero Jobs, Genie, dashboard, workspace files and any SQL warehouse created specifically by AuditHero while preserving the AuditHero catalog and evidence. Permanent data removal requires the exact confirmation phrase `DELETE AUDITHERO DATA`.
+A standard uninstall preserves the AuditHero catalog and stored evidence. Permanent data removal requires the exact confirmation phrase `DELETE AUDITHERO DATA`.
 
-## Main documentation
+## Documentation
 
 - [Quick start](../QUICKSTART.md)
-- [Install, upgrade and remove](../docs/INSTALL_DATABRICKS_UI.md)
+- [Databricks installation](../docs/INSTALL_DATABRICKS_UI.md)
 - [Import and field mapping](../docs/IMPORT_AND_FIELD_MAPPING.md)
 - [Audit data requirements](../docs/AUDIT_DATA_REQUIREMENTS.md)
 - [Running audits](../docs/RUNNING_AUDITS.md)
 - [Understanding results](../docs/UNDERSTANDING_RESULTS.md)
 - [Troubleshooting](../docs/TROUBLESHOOTING.md)
-- [Optional CLI/automation](../docs/CLI_AND_AUTOMATION.md)
