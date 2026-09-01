@@ -2,13 +2,9 @@
 # MAGIC %md
 # MAGIC # AuditHero — Install or Upgrade
 # MAGIC
-# MAGIC Import this notebook into the Databricks workspace where AuditHero should be
-# MAGIC installed and choose **Run all**. It downloads the selected AuditHero release,
-# MAGIC installs the workspace files/notebooks, creates or updates the AI/BI dashboard
-# MAGIC and AuditHero jobs, then runs Setup and Self Test.
+# MAGIC Import this notebook into the Databricks workspace where AuditHero will be installed and choose **Run all**. The notebook downloads the selected AuditHero release, installs or updates AuditHero workspace files and Jobs, prepares the AI/BI reporting assets, and runs Setup and Self Test.
 # MAGIC
-# MAGIC Employment Hero credentials are optional and are not required for installation
-# MAGIC or uploaded CSV/Excel audits.
+# MAGIC Employment Hero credentials are optional and are not required for installation or uploaded CSV/Excel audits.
 
 # COMMAND ----------
 # MAGIC %pip install -q "databricks-sdk>=0.20" "pyyaml>=6.0" "requests>=2.32"
@@ -17,10 +13,7 @@
 # MAGIC %md
 # MAGIC ## Installation settings
 # MAGIC
-# MAGIC The defaults are intended to work for a normal Unity Catalog workspace with
-# MAGIC serverless jobs enabled. `sql_warehouse_id` may stay blank; AuditHero will use
-# MAGIC an existing SQL warehouse or create a small serverless warehouse when your
-# MAGIC permissions allow it.
+# MAGIC Default settings target a Unity Catalog workspace with serverless Jobs enabled. `sql_warehouse_id` can remain blank; AuditHero uses an available SQL warehouse or creates **AuditHero SQL Warehouse** when permissions allow it.
 
 # COMMAND ----------
 release_ref = "main"
@@ -32,8 +25,8 @@ secret_scope = "audithero"
 monthly_cron = "0 0 9 25 * ?"
 timezone = "Australia/Perth"
 
-# Leave blank to use serverless compute for AuditHero notebook jobs.
-# If serverless jobs are unavailable in the workspace, enter an existing cluster ID.
+# Leave blank to use serverless compute for AuditHero notebook Jobs. If serverless
+# Jobs are unavailable, enter a compatible existing cluster ID.
 existing_cluster_id = ""
 
 # COMMAND ----------
@@ -60,9 +53,7 @@ print(f"Release: {release_ref}")
 # MAGIC %md
 # MAGIC ## Download the AuditHero release
 # MAGIC
-# MAGIC The public repository archive is downloaded into temporary driver storage. Only
-# MAGIC the application files required by the deployed notebooks/jobs are copied into
-# MAGIC `/Shared/AuditHero`.
+# MAGIC The selected public repository release is downloaded into temporary driver storage for installation.
 
 # COMMAND ----------
 archive_url = f"https://api.github.com/repos/disocodes/audithero/zipball/{release_ref}"
@@ -81,10 +72,9 @@ print(f"Release downloaded: {repo_root.name}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Workspace API helpers
+# MAGIC ## Workspace access
 # MAGIC
-# MAGIC These helpers use Databricks notebook authentication. No personal access token
-# MAGIC needs to be copied into this notebook.
+# MAGIC Installation uses the current Databricks notebook identity. A personal access token does not need to be entered in this notebook.
 
 # COMMAND ----------
 def call(method: str, path: str, body=None, query=None):
@@ -120,12 +110,9 @@ mkdirs(install_root)
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Install AuditHero code, notebooks and administration notebooks
+# MAGIC ## Install AuditHero workspace files and notebooks
 # MAGIC
-# MAGIC Audit notebooks are imported as runnable Databricks notebooks. Shared Python,
-# MAGIC rule packs and configuration templates remain workspace files so every job uses
-# MAGIC the same source-controlled calculation package. The installer also keeps managed
-# MAGIC Install/Upgrade and Uninstall notebooks under `/Shared/AuditHero/admin`.
+# MAGIC Audit notebooks are installed as runnable Databricks notebooks. Shared Python code, rule packs and configuration files are installed under `/Shared/AuditHero`. Managed administration notebooks are installed under `/Shared/AuditHero/admin`.
 
 # COMMAND ----------
 for name in ("databricks.yml", "pyproject.toml", "README.md"):
@@ -167,11 +154,9 @@ print("AuditHero workspace files and administration notebooks installed.")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Select the SQL warehouse used by AI/BI
+# MAGIC ## Select the SQL warehouse
 # MAGIC
-# MAGIC AuditHero first uses the warehouse ID entered above. If it is blank, an existing
-# MAGIC warehouse is selected. If none exists and you allowed automatic creation, the
-# MAGIC installer attempts to create a small serverless `AuditHero SQL Warehouse`.
+# MAGIC AuditHero uses the configured warehouse ID when supplied. Otherwise it selects **AuditHero SQL Warehouse**, a running warehouse, or another available warehouse. If no warehouse exists and automatic creation is enabled, the installer creates one when permitted.
 
 # COMMAND ----------
 def list_warehouses():
@@ -208,20 +193,18 @@ def resolve_warehouse(requested: str):
     except Exception as exc:
         raise RuntimeError(
             "No SQL warehouse is available and AuditHero could not create one automatically. "
-            "Create/select a SQL warehouse in Databricks, enter its ID in sql_warehouse_id, and rerun."
+            "Create or select a SQL warehouse, enter its ID in sql_warehouse_id, and rerun the installer."
         ) from exc
 
 
 warehouse_id, warehouse_created_by_installer = resolve_warehouse(sql_warehouse_id)
-print(f"AI/BI SQL warehouse: {warehouse_id}")
+print(f"AuditHero SQL warehouse: {warehouse_id}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Create, publish or update the AuditHero AI/BI dashboard
+# MAGIC ## Create or update the AI/BI dashboard
 # MAGIC
-# MAGIC Dashboard tasks can refresh only a published dashboard. The installer publishes
-# MAGIC the current draft with embedded credentials disabled, so dashboard queries run
-# MAGIC with the viewer/run identity rather than storing the installer's credentials.
+# MAGIC The dashboard is published with embedded credentials disabled and uses the selected AuditHero SQL warehouse.
 
 # COMMAND ----------
 dashboard_name = "AuditHero - SCHADS Payroll Compliance"
@@ -269,11 +252,9 @@ print(f"AI/BI dashboard published: {dashboard_id}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Create or update AuditHero jobs
+# MAGIC ## Create or update AuditHero Jobs
 # MAGIC
-# MAGIC The installer uses the same job definitions as the repository bundle. Relative
-# MAGIC notebook paths and deployment variables are resolved to the installed workspace
-# MAGIC folder. Notebook tasks use serverless jobs unless `existing_cluster_id` is set.
+# MAGIC AuditHero Job definitions are loaded from `resources/jobs.yml`. Deployment variables and notebook paths are resolved for the installed workspace. Notebook tasks use serverless Jobs unless `existing_cluster_id` is configured.
 
 # COMMAND ----------
 jobs_doc = yaml.safe_load((repo_root / "resources" / "jobs.yml").read_text(encoding="utf-8"))
@@ -341,9 +322,7 @@ for resource_key, raw_settings in job_defs.items():
 # MAGIC %md
 # MAGIC ## Run Setup and Self Test
 # MAGIC
-# MAGIC Setup creates the Unity Catalog schemas, landing Volume, rule reference tables and
-# MAGIC audit result structures. Self Test then runs representative SCHADS calculations.
-# MAGIC Installation stops if either job fails.
+# MAGIC Setup prepares the Unity Catalog structures, rule references, semantic metric views and Genie space. Self Test validates representative SCHADS calculations. Installation stops if either validation step fails.
 
 # COMMAND ----------
 def run_job_and_wait(job_id: int, label: str):
@@ -371,8 +350,7 @@ run_job_and_wait(installed_jobs["self_test"], "AuditHero Self Test")
 # MAGIC %md
 # MAGIC ## Save installation state
 # MAGIC
-# MAGIC This small state file lets the uninstaller distinguish resources created by this
-# MAGIC installer from workspace resources that already existed.
+# MAGIC Resource IDs and installation settings are saved for upgrades and uninstall.
 
 # COMMAND ----------
 state = {
@@ -394,18 +372,20 @@ call("POST", "/api/2.0/workspace/import", {
 })
 
 print("\nAuditHero installation completed successfully.")
-print("Open Jobs & Pipelines and use:")
+print("For uploaded CSV/Excel audits, use:")
 print("  • AuditHero - Build Source Mapping Workbook")
 print("  • AuditHero - Convert Mapped Files and Run Audit")
 print("  • AuditHero - Audit Uploaded CSV Excel")
-print("Then review AuditHero - SCHADS Payroll Compliance in AI/BI.")
+print("Review results in:")
+print("  • AuditHero - SCHADS Payroll Compliance (AI/BI)")
+print("  • AuditHero - Payroll Compliance (Genie)")
 print("Administration notebooks are installed under /Shared/AuditHero/admin:")
 print("  • AuditHero - Install or Upgrade")
 print("  • AuditHero - Uninstall")
 print("Employment Hero credentials are optional.")
 
-# Remove the one-time imported bootstrap copy after a successful installation.
-# The managed installer has already been installed under /Shared/AuditHero/admin.
+# Remove the imported bootstrap copy after successful first-time installation when
+# the managed Install or Upgrade notebook is available.
 try:
     context = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
     current_path = context.notebookPath().get()
