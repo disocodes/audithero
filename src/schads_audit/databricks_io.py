@@ -36,11 +36,14 @@ def overwrite_rule_tables(spark, lib, catalog):
 
 
 def create_views(spark, catalog):
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_latest_audit_runs` AS SELECT * FROM `{catalog}`.`ops`.`audit_runs` QUALIFY ROW_NUMBER() OVER (PARTITION BY audit_window_start,audit_window_end ORDER BY finished_at DESC)=1''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_detail_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_detail` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id WHERE r.status='SUCCESS' ''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_event_adjustments_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_event_adjustments` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id WHERE r.status='SUCCESS' ''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_toil_findings_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`toil_findings` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id WHERE r.status='SUCCESS' ''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_reconciliation_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`pay_period_reconciliation` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id WHERE r.status='SUCCESS' ''')
+    # Reporting views always retain the latest successful audit for each window.
+    # A later failed attempt remains visible in v_audit_runs but must not hide the
+    # previous successful Gold snapshot.
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_latest_audit_runs` AS SELECT * FROM `{catalog}`.`ops`.`audit_runs` WHERE status='SUCCESS' QUALIFY ROW_NUMBER() OVER (PARTITION BY audit_window_start,audit_window_end ORDER BY finished_at DESC)=1''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_detail_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_detail` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_event_adjustments_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_event_adjustments` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_toil_findings_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`toil_findings` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_reconciliation_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`pay_period_reconciliation` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_rule_coverage` AS SELECT * FROM `{catalog}`.`ref`.`rule_coverage` ''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_runs` AS SELECT * FROM `{catalog}`.`ops`.`audit_runs` ''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_readiness_findings` AS SELECT * FROM `{catalog}`.`ops`.`readiness_findings` ''')
