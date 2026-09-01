@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC **Purpose:** create an editable source-mapping workbook when payroll, HR, roster or timekeeping exports do not already use AuditHero's canonical field names.
 # MAGIC
-# MAGIC The notebook scans CSV and Excel files in the raw import folder, compares file/sheet names and column headings with AuditHero's canonical fields, and creates `source_mapping_draft.xlsx`. No payroll calculations are performed.
+# MAGIC The notebook scans CSV and Excel files in the raw import folder, compares file/sheet names and column headings with AuditHero's canonical fields, and creates `source_mapping_draft.xlsx`. When payroll earnings are detected, it also lists the source pay categories that must be assigned an audit treatment before actual-pay reconciliation can run.
 # MAGIC
 # MAGIC **Workflow:** upload raw exports → run this notebook → review and save `source_mapping.xlsx` → run **AuditHero - Convert Mapped Files and Run Audit**.
 # COMMAND ----------
@@ -19,6 +19,8 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+
+import pandas as pd
 
 ROOT = Path.cwd()
 for candidate in (ROOT, *ROOT.parents):
@@ -59,6 +61,8 @@ display(inventory[["file", "sheet", "item_name", "sample_rows", "columns"]])
 # MAGIC ## 3. Generate mapping suggestions
 # MAGIC
 # MAGIC AuditHero compares source headings with the canonical schema and proposes dataset and field matches. Review every required field before conversion, especially classifications, employment type, dates and payroll amounts.
+# MAGIC
+# MAGIC If payroll earnings are supplied, review the `pay_category_treatment` sheet as well. Every source pay category must be assigned one of `AUDITABLE_WORK`, `ALLOWANCE` or `EXCLUDE`. Suggested treatments are guidance only; the `treatment` column is the approved control used by the audit.
 # COMMAND ----------
 def _volume_uri(path: str) -> str:
     return f"dbfs:{path}" if path.startswith("/Volumes/") else path
@@ -74,21 +78,105 @@ def _path_exists(path: str) -> bool:
     return Path(path).exists()
 
 
-def _write_mapping_draft(mapping: dict, destination: str) -> None:
+def _suggest_pay_treatment(value: str) -> str:
+    """Provide non-binding guidance for common pay-category labels."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if any(term in text for term in ("annual leave", "personal leave", "sick leave", "long service leave", "leave without pay")):
+        return "EXCLUDE"
+    if any(term in text for term in ("allowance", "sleepover", "on call", "on-call", "meal allowance", "vehicle allowance")):
+        return "ALLOWANCE"
+    if any(term in text for term in ("ordinary", "overtime", "saturday", "sunday", "public holiday", "weekend", "penalty", "shift", "night", "afternoon")):
+        return "AUDITABLE_WORK"
+    return ""
+
+
+def _read_pay_categories(mapping: dict) -> list[str]:
+    """Read unique source pay categories from the detected payroll-earnings source."""
+    cfg = (mapping.get("datasets") or {}).get("payroll_earnings") or {}
+    if not cfg.get("enabled"):
+        return []
+    source = cfg.get("source") or {}
+    rule = (cfg.get("columns") or {}).get("pay_category") or {}
+    if isinstance(rule, str):
+        source_field = rule
+    else:
+        source_field = rule.get("source")
+    source_file = source.get("file")
+    if not source_file or not source_field:
+        return []
+
+    source_path = Path(source_root) / str(source_file)
+    if not source_path.exists():
+        return []
+    try:
+        if source_path.suffix.lower() == ".csv":
+            frame = pd.read_csv(source_path, usecols=[source_field])
+        elif source_path.suffix.lower() in {".xlsx", ".xlsm"}:
+            frame = pd.read_excel(source_path, sheet_name=source.get("sheet", 0), usecols=[source_field])
+        else:
+            return []
+    except Exception as exc:
+        print(f"Pay-category values could not be sampled automatically: {exc}")
+        return []
+
+    values = frame[source_field].dropna().astype(str).str.strip()
+    return sorted(v for v in values.unique().tolist() if v)
+
+
+def _add_pay_category_sheet(workbook_path: Path, pay_categories: list[str]) -> None:
+    """Add the controlled pay-category treatment table to the mapping workbook."""
+    from openpyxl import load_workbook
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = load_workbook(workbook_path)
+    if "pay_category_treatment" in wb.sheetnames:
+        del wb["pay_category_treatment"]
+    ws = wb.create_sheet("pay_category_treatment")
+    ws.append(["pay_category", "treatment", "suggested_treatment", "notes"])
+    for value in pay_categories:
+        ws.append([value, "", _suggest_pay_treatment(value), "Review and approve the treatment before conversion."])
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    ws.column_dimensions["A"].width = 42
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 24
+    ws.column_dimensions["D"].width = 56
+    treatment_validation = DataValidation(
+        type="list",
+        formula1='"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"',
+        allow_blank=True,
+    )
+    ws.add_data_validation(treatment_validation)
+    treatment_validation.add(f"B2:B{max(2, ws.max_row)}")
+
+    readme = wb["README"]
+    next_row = readme.max_row + 1
+    readme.cell(next_row, 1, "pay_category_treatment")
+    readme.cell(
+        next_row,
+        2,
+        "When payroll earnings are supplied, assign every listed pay category an approved treatment: AUDITABLE_WORK, ALLOWANCE or EXCLUDE. Suggested treatments are guidance only.",
+    )
+    wb.save(workbook_path)
+
+
+def _write_mapping_draft(mapping: dict, destination: str, pay_categories: list[str]) -> None:
     """Create the Excel workbook locally, then publish it to the configured destination."""
     if not destination.startswith("/Volumes/"):
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)
         write_mapping_workbook(mapping, target)
+        _add_pay_category_sheet(target, pay_categories)
         return
 
     temp_dir = Path(tempfile.mkdtemp(prefix="audithero-mapping-"))
     local_file = temp_dir / Path(destination).name
     try:
-        # OpenPyXL creates the XLSX on local driver storage. The completed file is
-        # then copied sequentially to the Unity Catalog Volume. This avoids random
-        # access writes against the Volume and avoids dbutils.fs access to /tmp.
         write_mapping_workbook(mapping, local_file)
+        _add_pay_category_sheet(local_file, pay_categories)
         destination_parent = destination.rsplit("/", 1)[0]
         dbutils.fs.mkdirs(_volume_uri(destination_parent))
         shutil.copyfile(local_file, destination)
@@ -104,7 +192,8 @@ if _path_exists(draft_path) and not overwrite:
     )
 
 draft = generate_mapping_draft(source_root)
-_write_mapping_draft(draft, draft_path)
+pay_categories = _read_pay_categories(draft)
+_write_mapping_draft(draft, draft_path, pay_categories)
 
 summary_rows = []
 for dataset, cfg in draft["datasets"].items():
@@ -118,16 +207,23 @@ for dataset, cfg in draft["datasets"].items():
         "mapped_fields": len(cfg.get("columns") or {}),
     })
 
-import pandas as pd
 summary = pd.DataFrame(summary_rows)
 display(summary.sort_values(["suggested", "confidence"], ascending=[False, False]))
+if pay_categories:
+    display(pd.DataFrame({
+        "pay_category": pay_categories,
+        "suggested_treatment": [_suggest_pay_treatment(value) for value in pay_categories],
+    }))
+    print(f"Detected {len(pay_categories)} unique payroll pay category value(s). Complete the pay_category_treatment sheet before conversion.")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 4. Review and approve the mapping
 # MAGIC
-# MAGIC In **Catalog Explorer**, download `source_mapping_draft.xlsx`, review the `field_mapping` sheet, add source-value translations on `value_mapping` where required, and upload the approved workbook as `source_mapping.xlsx`.
+# MAGIC In **Catalog Explorer**, download `source_mapping_draft.xlsx`, review the `field_mapping` sheet and add source-value translations on `value_mapping` where required.
 # MAGIC
-# MAGIC The conversion workflow stops when required AuditHero fields are not mapped. Mapping workbooks cannot execute arbitrary Python or formulas.
+# MAGIC If payroll earnings are supplied, also review `pay_category_treatment` and select an approved treatment for every listed pay category. Do not copy the suggested value without confirming that it matches how the category is used in your payroll system.
+# MAGIC
+# MAGIC Upload the approved workbook as `source_mapping.xlsx`. The conversion workflow stops when required canonical fields or pay-category treatments are incomplete.
 # COMMAND ----------
 print("Mapping draft created successfully.")
 print(draft_path)
