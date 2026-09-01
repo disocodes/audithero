@@ -24,7 +24,9 @@ from schads_audit.databricks_io import (
 )
 
 dbutils.widgets.text("catalog", "schads_payroll")
+dbutils.widgets.text("sql_warehouse_id", "")
 catalog = dbutils.widgets.get("catalog")
+configured_warehouse_id = dbutils.widgets.get("sql_warehouse_id").strip()
 raw_import_root = f"/Volumes/{catalog}/bronze/landing/import/raw"
 canonical_input_root = f"/Volumes/{catalog}/bronze/landing/input"
 # COMMAND ----------
@@ -108,18 +110,19 @@ print(f"Created semantic metric views in {catalog}.semantic")
 # MAGIC %md
 # MAGIC ## 5. Create or update the AuditHero Genie Agent
 # MAGIC
-# MAGIC Setup selects the same AuditHero SQL warehouse when present, otherwise another
-# MAGIC available SQL warehouse. The managed child notebook runs only after the trusted
-# MAGIC Gold views and metric views exist, avoiding broken Genie deployments on a clean install.
+# MAGIC Setup uses the warehouse selected by the installer/bundle when supplied. If Setup
+# MAGIC is run directly without that parameter, it falls back to an available warehouse.
 # COMMAND ----------
-w = WorkspaceClient()
-payload = w.api_client.do("GET", "/api/2.0/sql/warehouses") or {}
-warehouses = payload.get("warehouses", []) or []
-preferred = next((x for x in warehouses if x.get("name") == "AuditHero SQL Warehouse"), None)
-selected = preferred or next((x for x in warehouses if x.get("state") == "RUNNING"), None) or (warehouses[0] if warehouses else None)
-if selected is None:
-    raise RuntimeError("AuditHero Setup requires a SQL warehouse for AI/BI and Genie. Create or select a SQL warehouse and rerun Setup.")
-warehouse_id = selected["id"]
+warehouse_id = configured_warehouse_id
+if not warehouse_id:
+    w = WorkspaceClient()
+    payload = w.api_client.do("GET", "/api/2.0/sql/warehouses") or {}
+    warehouses = payload.get("warehouses", []) or []
+    preferred = next((x for x in warehouses if x.get("name") == "AuditHero SQL Warehouse"), None)
+    selected = preferred or next((x for x in warehouses if x.get("state") == "RUNNING"), None) or (warehouses[0] if warehouses else None)
+    if selected is None:
+        raise RuntimeError("AuditHero Setup requires a SQL warehouse for AI/BI and Genie. Create or select a SQL warehouse and rerun Setup.")
+    warehouse_id = selected["id"]
 
 genie_space_id = dbutils.notebook.run(
     "./00c_setup_genie",
