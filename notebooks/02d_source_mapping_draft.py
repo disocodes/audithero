@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC **Purpose:** create an editable source-mapping workbook when payroll, HR, roster or timekeeping exports do not already use AuditHero's canonical field names.
 # MAGIC
-# MAGIC The notebook scans CSV and Excel files in the raw import folder, compares file/sheet names and column headings with AuditHero's canonical fields, and creates `source_mapping_draft.xlsx`. When payroll earnings are detected, it also lists the payroll earning categories that must be assigned an audit treatment before actual-pay reconciliation can run.
+# MAGIC The notebook scans CSV and Excel files in the raw import folder, compares file/sheet names and column headings with AuditHero's canonical fields, and creates `source_mapping_draft.xlsx`. When usable payroll earning-line detail is detected, it also lists the payroll earning categories that require an approved treatment before actual-pay reconciliation can run.
 # MAGIC
 # MAGIC A **pay category** is a payroll earning or payroll item type such as Ordinary Hours, Saturday, Overtime, Sleepover Allowance or Annual Leave.
 # MAGIC
@@ -31,6 +31,7 @@ for candidate in (ROOT, *ROOT.parents):
         break
 
 from schads_audit.source_mapping import scan_source_items, generate_mapping_draft
+from schads_audit.source_mapping_hardening import harden_payroll_earnings_draft
 from schads_audit.mapping_workbook import write_mapping_workbook
 
 # Job parameters. `catalog` determines the default Volume paths.
@@ -64,7 +65,9 @@ display(inventory[["file", "sheet", "item_name", "sample_rows", "columns"]])
 # MAGIC
 # MAGIC AuditHero compares source headings with the canonical schema and proposes dataset and field matches. Review every required field before conversion, especially classifications, employment type, dates and payroll amounts.
 # MAGIC
-# MAGIC If payroll earnings are supplied, review the `pay_category_treatment` sheet as well. Each row represents a payroll earning or payroll item type found in the source payroll data.
+# MAGIC Payroll earning-line detection uses stricter header rules than the general mapper. Actual-pay reconciliation is enabled only when a source exposes a trustworthy employee identifier, pay-period start/end, payroll earning category and amount. If those fields are not available, the entitlement audit can still run without actual-pay reconciliation.
+# MAGIC
+# MAGIC If payroll earnings are available, review the `pay_category_treatment` sheet as well. Each row represents a payroll earning or payroll item type found in the source payroll data.
 # MAGIC
 # MAGIC Treatment meanings:
 # MAGIC - `AUDITABLE_WORK` — pay for worked hours, penalties or overtime that should count toward actual worked pay.
@@ -239,7 +242,7 @@ if _path_exists(draft_path) and not overwrite:
         f"{draft_path} already exists. Set overwrite=true if the existing draft should be replaced."
     )
 
-draft = generate_mapping_draft(source_root)
+draft = harden_payroll_earnings_draft(generate_mapping_draft(source_root), source_root)
 if "pay_category_mapping" in (draft.get("datasets") or {}):
     draft["datasets"]["pay_category_mapping"]["enabled"] = False
     draft["datasets"]["pay_category_mapping"]["source"] = None
@@ -267,15 +270,19 @@ if pay_categories:
         "suggested_treatment": [_suggest_pay_treatment(value) for value in pay_categories],
     }))
     print(f"Detected {len(pay_categories)} unique payroll earning category value(s). Complete the pay_category_treatment sheet before conversion.")
+else:
+    payroll_cfg = (draft.get("datasets") or {}).get("payroll_earnings") or {}
+    if payroll_cfg.get("_actual_pay_status") == "UNAVAILABLE":
+        print("Actual-pay earning-line detail was not detected with sufficient confidence. Entitlement calculation can continue without actual-pay reconciliation.")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 4. Review and approve the mapping
 # MAGIC
 # MAGIC In **Catalog Explorer**, download `source_mapping_draft.xlsx`, review the `field_mapping` sheet and add source-value translations on `value_mapping` where required.
 # MAGIC
-# MAGIC If payroll earnings are supplied, also review `pay_category_treatment`. Each row represents a payroll earning or payroll item type found in the source payroll data.
+# MAGIC If payroll earnings are available, also review `pay_category_treatment`. Each row represents a payroll earning or payroll item type found in the source payroll data.
 # MAGIC
-# MAGIC Upload the approved workbook as `source_mapping.xlsx`. The conversion workflow stops when required canonical fields or pay-category treatments are incomplete.
+# MAGIC Upload the approved workbook as `source_mapping.xlsx`. Missing optional actual-pay detail does not prevent entitlement calculation; missing required core audit evidence still stops conversion or readiness.
 # COMMAND ----------
 print("Mapping draft created successfully.")
 print(draft_path)
