@@ -4,23 +4,15 @@
 # MAGIC
 # MAGIC **Purpose:** prepare the Databricks catalog for AuditHero. Run this after first deployment and again after an approved upgrade.
 # MAGIC
-# MAGIC This notebook:
-# MAGIC 1. validates the effective-dated SCHADS rule library;
-# MAGIC 2. creates the Unity Catalog schemas and landing Volume used by AuditHero;
-# MAGIC 3. loads reference rates/conditions/allowances;
-# MAGIC 4. creates operational and audit output Delta tables;
-# MAGIC 5. creates latest-successful-run views; and
-# MAGIC 6. creates governed Unity Catalog metric views for AI/BI and Genie.
-# MAGIC
+# MAGIC This notebook validates SCHADS rules, creates Unity Catalog storage/tables/views,
+# MAGIC creates the governed semantic metric views and provisions the AuditHero Genie Agent.
 # MAGIC It does **not** read employee payroll data and does not calculate an audit.
 # COMMAND ----------
-# MAGIC %pip install "holidays>=0.75" "requests>=2.32" "pandas>=2.0"
-# COMMAND ----------
-# MAGIC %md
-# MAGIC ## 1. Load the shared AuditHero package and choose the catalog
+# MAGIC %pip install "holidays>=0.75" "requests>=2.32" "pandas>=2.0" "databricks-sdk>=0.20"
 # COMMAND ----------
 exec(open(str(Path.cwd() / "_common.py")).read())
 
+from databricks.sdk import WorkspaceClient
 from schads_audit.rules import RuleLibrary
 from schads_audit.databricks_io import (
     create_catalog_objects,
@@ -33,23 +25,22 @@ dbutils.widgets.text("catalog", "schads_payroll")
 catalog = dbutils.widgets.get("catalog")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 2. Validate the SCHADS rule library
+# MAGIC ## 1. Validate the effective-dated SCHADS rule library
 # COMMAND ----------
 lib = RuleLibrary(ROOT / "rules/MA000100")
 errors = lib.validate()
 if errors:
     raise ValueError("\n".join(errors))
-
 print("SCHADS rule library validated")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 3. Create schemas, landing Volume and reference tables
+# MAGIC ## 2. Create Unity Catalog structures and load reference rules
 # COMMAND ----------
 create_catalog_objects(spark, catalog)
 overwrite_rule_tables(spark, lib, catalog)
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 4. Ensure operational and result tables exist
+# MAGIC ## 3. Ensure operational and Gold result tables exist
 # COMMAND ----------
 spark.sql(
     f"CREATE TABLE IF NOT EXISTS `{catalog}`.`ops`.`audit_runs` ("
@@ -102,17 +93,42 @@ spark.sql(
 )
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 5. Create latest-successful views and Unity Catalog metric views
-# MAGIC
-# MAGIC `gold.v_*` views expose the latest successful runs. `semantic.payroll_compliance`
-# MAGIC and `semantic.audit_detail` define governed business measures for AI/BI and Genie.
+# MAGIC ## 4. Create latest-successful views and governed Unity Catalog metric views
 # COMMAND ----------
 create_views(spark, catalog)
 create_metric_views(spark, catalog)
+print(f"Created semantic metric views in {catalog}.semantic")
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## 5. Create or update the AuditHero Genie Agent
+# MAGIC
+# MAGIC Setup selects the same AuditHero SQL warehouse when present, otherwise another
+# MAGIC available SQL warehouse. The managed child notebook runs only after the trusted
+# MAGIC Gold views and metric views exist, avoiding broken Genie deployments on a clean install.
+# COMMAND ----------
+w = WorkspaceClient()
+payload = w.api_client.do("GET", "/api/2.0/sql/warehouses") or {}
+warehouses = payload.get("warehouses", []) or []
+preferred = next((x for x in warehouses if x.get("name") == "AuditHero SQL Warehouse"), None)
+selected = preferred or next((x for x in warehouses if x.get("state") == "RUNNING"), None) or (warehouses[0] if warehouses else None)
+if selected is None:
+    raise RuntimeError("AuditHero Setup requires a SQL warehouse for AI/BI and Genie. Create or select a SQL warehouse and rerun Setup.")
+warehouse_id = selected["id"]
+
+genie_space_id = dbutils.notebook.run(
+    "./00c_setup_genie",
+    600,
+    {
+        "catalog": catalog,
+        "sql_warehouse_id": warehouse_id,
+        "parent_path": "/Workspace/Shared/AuditHero",
+    },
+)
 
 print("AuditHero Databricks setup complete")
 print(f"Raw import folder:       /Volumes/{catalog}/bronze/landing/import/raw")
 print(f"Canonical input folder:  /Volumes/{catalog}/bronze/landing/input")
 print(f"Payroll metric view:     {catalog}.semantic.payroll_compliance")
 print(f"Audit detail metric view:{catalog}.semantic.audit_detail")
-print("NEXT: upload CSV/XLSX files to the raw import folder, or configure Employment Hero API credentials.")
+print(f"Genie Agent ID:          {genie_space_id}")
+print("NEXT: upload CSV/XLSX files to the raw import folder and run 'AuditHero - Build Source Mapping', or configure Employment Hero API credentials.")
