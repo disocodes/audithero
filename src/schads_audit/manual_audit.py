@@ -4,6 +4,7 @@ import json
 import pandas as pd
 
 from .file_source import load_file_source
+from .canonical_normalization import normalize_canonical_frames
 from .public_holidays import australian_public_holidays
 from .engine import calculate_entitlements, reconcile_pay_periods
 from .roster_overtime import attach_rosters, apply_rostered_and_daily_overtime, allocate_period_overtime, flag_period_overtime
@@ -59,7 +60,12 @@ def _usable_actual_pay(payroll: pd.DataFrame, mapping: dict) -> bool:
     if payroll is None or payroll.empty or not mapping:
         return False
     required={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}
-    return required.issubset(payroll.columns)
+    if not required.issubset(payroll.columns):
+        return False
+    for field in required:
+        if payroll[field].isna().any():
+            return False
+    return True
 
 
 def _assign_manual_pay_periods(timesheets: pd.DataFrame,pay_runs: pd.DataFrame):
@@ -76,14 +82,14 @@ def _assign_manual_pay_periods(timesheets: pd.DataFrame,pay_runs: pd.DataFrame):
         if pd.isna(shift): continue
         hits=runs[(runs["_s"].dt.date<=shift.date())&(runs["_e"].dt.date>=shift.date())]
         if len(hits)==1:
-            r=hits.iloc[0]; out.at[idx,"pay_period_start"]=r["pay_period_start"]; out.at[idx,"pay_period_end"]=r["pay_period_end"]
+            r=runs.loc[hits.index[0]]; out.at[idx,"pay_period_start"]=r["pay_period_start"]; out.at[idx,"pay_period_end"]=r["pay_period_end"]
             if "pay_run_id" in r: out.at[idx,"pay_run_id"]=r.get("pay_run_id")
     return out
 
 
 def run_manual_audit(input_root,config_root,start_date,end_date,rule_library,variance_tolerance=0.05):
     """Run AuditHero from a self-contained workbook or canonical CSV/XLSX inputs."""
-    frames=load_file_source(input_root,start_date,end_date); root=Path(config_root)
+    frames=normalize_canonical_frames(load_file_source(input_root,start_date,end_date)); root=Path(config_root)
     employees=frames["employees"].copy(); pay_details=frames["pay_details"].copy(); employment_history=frames["employment_history"].copy()
     timesheets=_assign_manual_pay_periods(frames["timesheets"].copy(),frames["pay_runs"].copy()); rosters=frames["rostered_shifts"].copy(); payroll=frames["payroll_earnings"].copy()
     if not rosters.empty: timesheets=attach_rosters(timesheets,rosters)
