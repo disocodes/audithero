@@ -3,9 +3,9 @@
 # PURPOSE
 # -------
 # Build an editable Excel mapping workbook from CSV/XLSX payroll, HR, roster and
-# timekeeping exports. The notebook inspects file names, Excel sheet names and
-# column headings and proposes matches to AuditHero's canonical input model. It
-# does not calculate payroll.
+# timekeeping exports. The notebook proposes matches to AuditHero's canonical
+# input model and, when payroll earnings are supplied, lists the pay categories
+# that require an approved audit treatment. It does not calculate payroll.
 
 from pathlib import Path
 import pandas as pd
@@ -37,11 +37,90 @@ def _normalize_fabric_lakehouse_path(value: str) -> str:
     return text
 
 
+def _suggest_pay_treatment(value: str) -> str:
+    """Provide non-binding guidance for common pay-category labels."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if any(term in text for term in ("annual leave", "personal leave", "sick leave", "long service leave", "leave without pay")):
+        return "EXCLUDE"
+    if any(term in text for term in ("allowance", "sleepover", "on call", "on-call", "meal allowance", "vehicle allowance")):
+        return "ALLOWANCE"
+    if any(term in text for term in ("ordinary", "overtime", "saturday", "sunday", "public holiday", "weekend", "penalty", "shift", "night", "afternoon")):
+        return "AUDITABLE_WORK"
+    return ""
+
+
+def _read_pay_categories(mapping: dict, raw_root: str) -> list[str]:
+    """Read unique pay-category values from the detected payroll-earnings source."""
+    cfg = (mapping.get("datasets") or {}).get("payroll_earnings") or {}
+    if not cfg.get("enabled"):
+        return []
+    source = cfg.get("source") or {}
+    rule = (cfg.get("columns") or {}).get("pay_category") or {}
+    source_field = rule if isinstance(rule, str) else rule.get("source")
+    source_file = source.get("file")
+    if not source_file or not source_field:
+        return []
+
+    source_path = Path(raw_root) / str(source_file)
+    if not source_path.exists():
+        return []
+    try:
+        if source_path.suffix.lower() == ".csv":
+            frame = pd.read_csv(source_path, usecols=[source_field])
+        elif source_path.suffix.lower() in {".xlsx", ".xlsm"}:
+            frame = pd.read_excel(source_path, sheet_name=source.get("sheet", 0), usecols=[source_field])
+        else:
+            return []
+    except Exception as exc:
+        print(f"Pay-category values could not be sampled automatically: {exc}")
+        return []
+
+    values = frame[source_field].dropna().astype(str).str.strip()
+    return sorted(v for v in values.unique().tolist() if v)
+
+
+def _add_pay_category_sheet(workbook_path: Path, pay_categories: list[str]) -> None:
+    """Add the controlled pay-category treatment table to the mapping workbook."""
+    from openpyxl import load_workbook
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = load_workbook(workbook_path)
+    if "pay_category_treatment" in wb.sheetnames:
+        del wb["pay_category_treatment"]
+    ws = wb.create_sheet("pay_category_treatment")
+    ws.append(["pay_category", "treatment", "suggested_treatment", "notes"])
+    for value in pay_categories:
+        ws.append([value, "", _suggest_pay_treatment(value), "Review and approve the treatment before conversion."])
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    ws.column_dimensions["A"].width = 42
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 24
+    ws.column_dimensions["D"].width = 56
+    validation = DataValidation(
+        type="list",
+        formula1='"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"',
+        allow_blank=True,
+    )
+    ws.add_data_validation(validation)
+    validation.add(f"B2:B{max(2, ws.max_row)}")
+
+    readme = wb["README"]
+    next_row = readme.max_row + 1
+    readme.cell(next_row, 1, "pay_category_treatment")
+    readme.cell(
+        next_row,
+        2,
+        "When payroll earnings are supplied, assign every listed pay category an approved treatment: AUDITABLE_WORK, ALLOWANCE or EXCLUDE. Suggested treatments are guidance only.",
+    )
+    wb.save(workbook_path)
+
+
 # Parameters supplied by the Fabric pipeline. They can also be set when the
 # notebook is run directly.
-# source_root: folder containing the original exports.
-# draft_path: location for the editable mapping workbook.
-# overwrite: whether an existing draft can be replaced.
 source_root = _normalize_fabric_lakehouse_path(source_root)
 draft_path = _normalize_fabric_lakehouse_path(draft_path)
 
@@ -69,7 +148,16 @@ if draft_file.exists() and str(overwrite).lower() not in {"true", "1", "yes"}:
     )
 
 draft = generate_mapping_draft(source_root)
+# Pay-category treatment is controlled through the dedicated workbook sheet,
+# rather than through the generic source-dataset mapping.
+if "pay_category_mapping" in (draft.get("datasets") or {}):
+    draft["datasets"]["pay_category_mapping"]["enabled"] = False
+    draft["datasets"]["pay_category_mapping"]["source"] = None
+    draft["datasets"]["pay_category_mapping"]["columns"] = {}
+
+pay_categories = _read_pay_categories(draft, source_root)
 write_mapping_workbook(draft, draft_file)
+_add_pay_category_sheet(draft_file, pay_categories)
 
 summary_rows = []
 for dataset, cfg in draft["datasets"].items():
@@ -85,9 +173,19 @@ for dataset, cfg in draft["datasets"].items():
 summary = pd.DataFrame(summary_rows)
 display(summary.sort_values(["suggested", "confidence"], ascending=[False, False]))
 
+if pay_categories:
+    display(pd.DataFrame({
+        "pay_category": pay_categories,
+        "suggested_treatment": [_suggest_pay_treatment(value) for value in pay_categories],
+    }))
+    print(f"Detected {len(pay_categories)} unique payroll pay category value(s). Complete the pay_category_treatment sheet before conversion.")
+
 print("STEP 3 — Review and approve the mapping")
 print(f"Mapping draft created: {draft_path}")
-print("Download the workbook from the Lakehouse Files area, review field_mapping, add value translations if required, and upload the approved workbook as source_mapping.xlsx.")
+print("Download the workbook from the Lakehouse Files area and review field_mapping and value_mapping as required.")
+if pay_categories:
+    print("Also review pay_category_treatment and approve every payroll category as AUDITABLE_WORK, ALLOWANCE or EXCLUDE.")
+print("Upload the approved workbook as source_mapping.xlsx.")
 print("NEXT: run 'AuditHero - Convert Mapped Files and Run Audit'.")
 print("Use 'AuditHero - Convert Source Files' when conversion and File Readiness need to be checked without running the payroll audit.")
 
