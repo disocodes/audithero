@@ -32,17 +32,7 @@ def _control(frames, name, root):
 
 
 def _pay_category_mapping(frames, root):
-    """Return pay-category treatments from either supported workbook layout.
-
-    The original AuditHero canonical workbook uses:
-      pay_category_id, pay_category, audit_treatment
-
-    The generic source-mapping converter may produce the neutral form:
-      source_key, source_label, treatment
-
-    Supporting both keeps existing workbooks backward compatible while allowing
-    non-Employment-Hero payroll exports to use the same reconciliation engine.
-    """
+    """Return pay-category treatments from either supported workbook layout."""
     df=frames.get("pay_category_mapping")
     if df is None or df.empty:
         return _json(Path(root)/"pay_category_mapping.json")
@@ -62,6 +52,14 @@ def _pay_category_mapping(frames, root):
             if pd.notna(key) and str(key).strip():
                 mapping[str(key).strip()]=value
     return mapping
+
+
+def _usable_actual_pay(payroll: pd.DataFrame, mapping: dict) -> bool:
+    """Return True only when payroll has enough evidence for safe reconciliation."""
+    if payroll is None or payroll.empty or not mapping:
+        return False
+    required={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}
+    return required.issubset(payroll.columns)
 
 
 def _assign_manual_pay_periods(timesheets: pd.DataFrame,pay_runs: pd.DataFrame):
@@ -105,6 +103,27 @@ def run_manual_audit(input_root,config_root,start_date,end_date,rule_library,var
     events=aggregate_remote_work_events(_control(frames,"supplemental_events",root)); adjustments=calculate_supplemental_events(events,employees,pay_details,holidays,rule_library)
     recon_input=merge_event_adjustments_into_entitlements(detail,adjustments)
     toil=audit_toil_register(_control(frames,"toil_register",root),employees,pay_details,holidays,rule_library,audit_end_date=end_date); recon_input=merge_toil_adjustments(recon_input,toil)
-    reconciliation=reconcile_pay_periods(recon_input,payroll,_pay_category_mapping(frames,root),variance_tolerance)
 
-    return {"employees":employees,"pay_details":pay_details,"employment_history":employment_history,"timesheets":timesheets,"rostered_shifts":rosters,"payroll_earnings":payroll,"public_holidays":holidays,"detail":detail,"event_adjustments":adjustments,"toil_findings":toil,"reconciliation":reconciliation}
+    pay_mapping=_pay_category_mapping(frames,root)
+    actual_pay_usable=_usable_actual_pay(payroll,pay_mapping)
+    reconciliation=reconcile_pay_periods(
+        recon_input,
+        payroll if actual_pay_usable else pd.DataFrame(),
+        pay_mapping if actual_pay_usable else {},
+        variance_tolerance,
+    )
+
+    return {
+        "employees":employees,
+        "pay_details":pay_details,
+        "employment_history":employment_history,
+        "timesheets":timesheets,
+        "rostered_shifts":rosters,
+        "payroll_earnings":payroll,
+        "actual_pay_usable":actual_pay_usable,
+        "public_holidays":holidays,
+        "detail":detail,
+        "event_adjustments":adjustments,
+        "toil_findings":toil,
+        "reconciliation":reconciliation,
+    }
