@@ -6,10 +6,11 @@
 # MAGIC
 # MAGIC This notebook:
 # MAGIC 1. validates the effective-dated SCHADS rule library;
-# MAGIC 2. creates the Unity Catalog schemas used by AuditHero;
+# MAGIC 2. creates the Unity Catalog schemas and landing Volume used by AuditHero;
 # MAGIC 3. loads reference rates/conditions/allowances;
-# MAGIC 4. creates operational and audit output Delta tables; and
-# MAGIC 5. creates the latest-successful-run views used by jobs and AI/BI.
+# MAGIC 4. creates operational and audit output Delta tables;
+# MAGIC 5. creates latest-successful-run views; and
+# MAGIC 6. creates governed Unity Catalog metric views for AI/BI and Genie.
 # MAGIC
 # MAGIC It does **not** read employee payroll data and does not calculate an audit.
 # COMMAND ----------
@@ -17,8 +18,6 @@
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 1. Load the shared AuditHero package and choose the catalog
-# MAGIC
-# MAGIC The `catalog` parameter defaults to `schads_payroll`. If your deployment uses another catalog, the job passes it here through a Databricks widget.
 # COMMAND ----------
 exec(open(str(Path.cwd() / "_common.py")).read())
 
@@ -27,6 +26,7 @@ from schads_audit.databricks_io import (
     create_catalog_objects,
     overwrite_rule_tables,
     create_views,
+    create_metric_views,
 )
 
 dbutils.widgets.text("catalog", "schads_payroll")
@@ -34,8 +34,6 @@ catalog = dbutils.widgets.get("catalog")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 2. Validate the SCHADS rule library
-# MAGIC
-# MAGIC `RuleLibrary.validate()` checks that the manifest and effective-dated rate, condition and allowance packs are internally usable. Setup stops if the rule library is invalid rather than creating a workspace with incomplete rules.
 # COMMAND ----------
 lib = RuleLibrary(ROOT / "rules/MA000100")
 errors = lib.validate()
@@ -45,17 +43,13 @@ if errors:
 print("SCHADS rule library validated")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 3. Create schemas and load reference tables
-# MAGIC
-# MAGIC AuditHero uses separate schemas for source/normalized data, rule references, audit results and operational run status. `overwrite_rule_tables` refreshes only the reference tables from the source-controlled rule packs; it does not overwrite payroll results.
+# MAGIC ## 3. Create schemas, landing Volume and reference tables
 # COMMAND ----------
 create_catalog_objects(spark, catalog)
 overwrite_rule_tables(spark, lib, catalog)
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 4. Ensure operational and result tables exist
-# MAGIC
-# MAGIC `CREATE TABLE IF NOT EXISTS` makes this step safe to rerun. These tables store audit run history, readiness findings, shift-level entitlement evidence, event/TOIL adjustments and pay-period reconciliation.
 # COMMAND ----------
 spark.sql(
     f"CREATE TABLE IF NOT EXISTS `{catalog}`.`ops`.`audit_runs` ("
@@ -108,13 +102,17 @@ spark.sql(
 )
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 5. Create operator-facing views
+# MAGIC ## 5. Create latest-successful views and Unity Catalog metric views
 # MAGIC
-# MAGIC These views select the latest successful audit data for dashboards and review. A failed rerun therefore does not automatically replace the last successful result.
+# MAGIC `gold.v_*` views expose the latest successful runs. `semantic.payroll_compliance`
+# MAGIC and `semantic.audit_detail` define governed business measures for AI/BI and Genie.
 # COMMAND ----------
 create_views(spark, catalog)
+create_metric_views(spark, catalog)
 
 print("AuditHero Databricks setup complete")
 print(f"Raw import folder:       /Volumes/{catalog}/bronze/landing/import/raw")
 print(f"Canonical input folder:  /Volumes/{catalog}/bronze/landing/input")
-print("NEXT: run 'AuditHero - Self Test'.")
+print(f"Payroll metric view:     {catalog}.semantic.payroll_compliance")
+print(f"Audit detail metric view:{catalog}.semantic.audit_detail")
+print("NEXT: upload CSV/XLSX files to the raw import folder, or configure Employment Hero API credentials.")
