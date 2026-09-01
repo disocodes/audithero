@@ -2,32 +2,32 @@
 
 Use this index to find the guide for the task being performed.
 
-## Installation, upgrade and removal
+## Install, upgrade, or remove AuditHero
 
-- [Microsoft Fabric installation, upgrade and removal](INSTALL_FABRIC_UI.md)
-- [Databricks installation, upgrade and removal](INSTALL_DATABRICKS_UI.md)
+- [Microsoft Fabric installation, upgrade, and removal](INSTALL_FABRIC_UI.md)
+- [Databricks installation, upgrade, and removal](INSTALL_DATABRICKS_UI.md)
 
-The first installation uses a platform-specific installer notebook. After installation, managed **Install or Upgrade** and **Uninstall** notebooks are available inside the target platform.
+The first installation uses the platform-specific installer notebook. After installation, managed **Install or Upgrade** and **Uninstall** notebooks are available inside the target platform.
 
 A standard uninstall preserves payroll and audit storage. Permanent data deletion requires explicit confirmation in the uninstaller notebook.
 
-## Prepare and run audits
+## Prepare and run payroll audits
 
 1. [Quick start](../QUICKSTART.md)
-2. [Importing and mapping CSV/Excel files](IMPORT_AND_FIELD_MAPPING.md)
+2. [Import and field mapping](IMPORT_AND_FIELD_MAPPING.md)
 3. [Audit data requirements](AUDIT_DATA_REQUIREMENTS.md)
 4. [Running audits](RUNNING_AUDITS.md)
 5. [Understanding results](UNDERSTANDING_RESULTS.md)
 6. [Troubleshooting](TROUBLESHOOTING.md)
 
-## Administration
+## Administration and technical reference
 
 - [Administration and security](ADMINISTRATION.md)
 - [Notebook reference](NOTEBOOK_REFERENCE.md)
-- [Optional CLI and automation](CLI_AND_AUTOMATION.md)
+- [CLI and automation](CLI_AND_AUTOMATION.md)
 - [Architecture](ARCHITECTURE.md)
 
-## Payroll governance and compliance review
+## Payroll governance and evidence
 
 - [SCHADS rules and evidence](SCHADS_RULES_AND_EVIDENCE.md)
 - [Audit data requirements](AUDIT_DATA_REQUIREMENTS.md)
@@ -37,10 +37,10 @@ A standard uninstall preserves payroll and audit storage. Permanent data deletio
 
 ### Microsoft Fabric
 
-Routine operation uses the deployed Fabric pipelines, Lakehouse and Power BI report.
+Routine operation uses the deployed Fabric pipelines, AuditHero Lakehouse, and **AuditHero - SCHADS Payroll Compliance** Power BI report.
 
 ### Databricks
 
-Routine operation uses **Jobs & Pipelines**, **Catalog Explorer**, the **AuditHero - SCHADS Payroll Compliance** AI/BI dashboard and the **AuditHero - Payroll Compliance** Genie space.
+Routine operation uses **Jobs & Pipelines**, **Catalog Explorer**, the **AuditHero - SCHADS Payroll Compliance** AI/BI dashboard, and the **AuditHero - Payroll Compliance** Genie space.
 
-> AuditHero is compliance-support software, not legal advice. Validate Award coverage, classifications, historical industrial instruments and representative calculations before using results for remediation, recovery or payroll-change decisions.
+> AuditHero is compliance-support software, not legal advice. Validate Award coverage, classifications, historical industrial instruments, source mappings, and representative calculations before using results for remediation, recovery, or payroll changes.
