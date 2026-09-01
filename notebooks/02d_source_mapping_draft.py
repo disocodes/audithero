@@ -16,7 +16,9 @@
 # MAGIC The parameters are exposed by the Databricks Job and can also be set when this notebook is run directly. Blank path values use the standard AuditHero Unity Catalog Volume locations.
 # COMMAND ----------
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 ROOT = Path.cwd()
 for candidate in (ROOT, *ROOT.parents):
@@ -58,14 +60,48 @@ display(inventory[["file", "sheet", "item_name", "sample_rows", "columns"]])
 # MAGIC
 # MAGIC AuditHero compares source headings with the canonical schema and proposes dataset and field matches. Review every required field before conversion, especially classifications, employment type, dates and payroll amounts.
 # COMMAND ----------
-draft_file = Path(draft_path)
-if draft_file.exists() and not overwrite:
+def _volume_uri(path: str) -> str:
+    return f"dbfs:{path}" if path.startswith("/Volumes/") else path
+
+
+def _path_exists(path: str) -> bool:
+    if path.startswith("/Volumes/"):
+        try:
+            dbutils.fs.ls(_volume_uri(path))
+            return True
+        except Exception:
+            return False
+    return Path(path).exists()
+
+
+def _write_mapping_draft(mapping: dict, destination: str) -> None:
+    """Create the Excel workbook locally, then publish it to the configured destination."""
+    if not destination.startswith("/Volumes/"):
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_mapping_workbook(mapping, target)
+        return
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="audithero-mapping-"))
+    local_file = temp_dir / Path(destination).name
+    try:
+        write_mapping_workbook(mapping, local_file)
+        destination_parent = destination.rsplit("/", 1)[0]
+        dbutils.fs.mkdirs(_volume_uri(destination_parent))
+        copied = dbutils.fs.cp(local_file.as_uri(), _volume_uri(destination), True)
+        if copied is False:
+            raise OSError(f"Databricks could not copy the mapping workbook to {destination}")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+if _path_exists(draft_path) and not overwrite:
     raise FileExistsError(
         f"{draft_path} already exists. Set overwrite=true if the existing draft should be replaced."
     )
 
 draft = generate_mapping_draft(source_root)
-write_mapping_workbook(draft, draft_file)
+_write_mapping_draft(draft, draft_path)
 
 summary_rows = []
 for dataset, cfg in draft["datasets"].items():
