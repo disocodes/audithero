@@ -19,6 +19,14 @@ resources:
             - task_key: validate_rules
           notebook_task:
             notebook_path: ../notebooks/01b_self_test.py
+        - task_key: verify_dashboard
+          depends_on:
+            - task_key: self_test
+          notebook_task:
+            notebook_path: ../notebooks/00d_verify_dashboard.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              sql_warehouse_id: "${var.sql_warehouse_id}"
 
     self_test:
       name: "AuditHero - Self Test"
