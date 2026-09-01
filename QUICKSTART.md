@@ -1,6 +1,6 @@
 # AuditHero quick start
 
-Use this guide for a first installation and a first CSV/Excel audit. Employment Hero credentials are optional.
+Use this guide to complete a first installation and a first CSV/Excel payroll audit. Employment Hero credentials are required only for Employment Hero API workflows.
 
 ## 1. Install AuditHero
 
@@ -12,7 +12,7 @@ Import `installers/Fabric_Install_AuditHero.py` into the target Fabric workspace
 
 Import `installers/Databricks_Install_AuditHero.py` into the target Databricks workspace and choose **Run all**.
 
-The installer prepares the required storage, tables, jobs, reporting assets and administration notebooks, then runs Setup and Self Test.
+The installer prepares the required storage, tables, operational jobs or pipelines, reporting assets, and administration notebooks, then runs Setup and Self Test.
 
 Detailed installation guides:
 
@@ -23,7 +23,7 @@ Do not use production payroll data until installation and Self Test complete suc
 
 ## 2. Export the source data
 
-Export the payroll, HR, rostering and timekeeping files required for the audit. Keep the original source column names and file structure.
+Export the payroll, HR, rostering, and timekeeping files required for the audit. Keep the original source column names and file structure.
 
 CSV and Excel files can be used together. Excel workbooks may contain multiple sheets.
 
@@ -41,17 +41,17 @@ Upload source files to:
 
 `/Volumes/schads_payroll/bronze/landing/import/raw`
 
-If the files already use the AuditHero canonical format, skip the source-mapping steps and use the canonical uploaded-file audit.
+If the files already use the AuditHero canonical format, skip source mapping and use the canonical uploaded-file audit workflow.
 
 ## 4. Build a source mapping
 
-For a new export layout, run:
+For a new or changed export layout, run:
 
 **AuditHero - Build Source Mapping Workbook**
 
 AuditHero inspects the uploaded files and creates `source_mapping_draft.xlsx`.
 
-The draft proposes how source fields should map to AuditHero fields. It does not calculate payroll.
+The draft proposes how source fields should map to AuditHero canonical fields. It does not calculate payroll.
 
 ## 5. Approve the mapping
 
@@ -71,9 +71,9 @@ Example value mapping:
 
 `Permanent FT` → `FULL_TIME`
 
-Save the approved workbook as **`source_mapping.xlsx`** in the import folder.
+Save the approved workbook as **`source_mapping.xlsx`** in the platform import folder.
 
-See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md) for joins, defaults, constants, separate date/time fields and value translations.
+See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md) for joins, defaults, constants, separate date/time fields, and value translations.
 
 ## 6. Run the audit
 
@@ -85,22 +85,22 @@ Enter the required audit start and end dates.
 
 The workflow:
 
-1. reads `source_mapping.xlsx`;
-2. converts the source files to AuditHero canonical datasets;
+1. reads the approved `source_mapping.xlsx`;
+2. converts source files to AuditHero canonical datasets;
 3. runs File Readiness;
 4. stops if blocking data or evidence issues remain;
 5. calculates expected SCHADS entitlements;
-6. reconciles expected pay with actual auditable payroll where available;
-7. stores audit evidence and results; and
+6. reconciles expected pay with actual auditable payroll where sufficient payroll earnings are available;
+7. stores normalized evidence and audit results; and
 8. refreshes the reporting layer.
 
-Use **AuditHero - Convert Source Files** when conversion and readiness need to be checked before running payroll calculations.
+Use **AuditHero - Convert Source Files** when conversion and File Readiness need to be checked without running payroll calculations.
 
 ## 7. Review results
 
 ### Microsoft Fabric
 
-Review the AuditHero Power BI report.
+Review the **AuditHero - SCHADS Payroll Compliance** Power BI report.
 
 ### Databricks
 
@@ -121,11 +121,11 @@ A `REQUIRES_REVIEW` result is not a confirmed underpayment.
 
 See [Understanding results](docs/UNDERSTANDING_RESULTS.md).
 
-## 8. Validate before broader use
+## 8. Validate a representative payroll period
 
-Before running a large historical audit, validate one completed payroll period that can be independently checked.
+Before expanding to a large historical audit or enabling recurring schedules, validate one completed payroll period that can be independently checked.
 
-Review representative cases such as:
+Review representative cases that apply to the workforce, such as:
 
 - Saturday and Sunday penalties;
 - public holidays;
@@ -133,21 +133,21 @@ Review representative cases such as:
 - broken shifts;
 - sleepovers;
 - part-time agreed patterns; and
-- allowances or TOIL where applicable.
+- allowances or TOIL.
 
-## 9. Repeat the monthly process
+## 9. Repeat the monthly file workflow
 
-After the source layout has an approved mapping, the routine file workflow is:
+After the source layout has an approved mapping:
 
 1. export the latest source files;
 2. upload them to the raw import folder;
 3. run **AuditHero - Convert Mapped Files and Run Audit**;
 4. enter the audit dates; and
-5. review the dashboard, Genie and detailed evidence.
+5. review the reporting layer and detailed audit evidence.
 
-The approved source mapping is reused unless the source-system layout changes.
+Reuse the approved source mapping while the source-system layout remains unchanged.
 
-## 10. Optional Employment Hero API
+## 10. Employment Hero API workflow
 
 Employment Hero API connectivity can be configured for direct extraction and recurring monthly or historical audits.
 
