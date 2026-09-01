@@ -56,9 +56,11 @@ serialized = {
             {"identifier": f"{catalog}.gold.v_audit_runs"},
             {"identifier": f"{catalog}.gold.v_readiness_findings"},
             {"identifier": f"{catalog}.gold.v_rule_coverage"},
+        ],
+        "metric_views": [
             {"identifier": f"{catalog}.semantic.audit_detail"},
             {"identifier": f"{catalog}.semantic.payroll_compliance"},
-        ]
+        ],
     },
     "instructions": {
         "example_question_sqls": [
@@ -95,7 +97,7 @@ def list_spaces():
     spaces = []
     token = None
     while True:
-        query = {}
+        query = {"page_size": 100}
         if token:
             query["page_token"] = token
         payload = call("GET", "/api/2.0/genie/spaces", query=query) or {}
