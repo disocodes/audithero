@@ -15,9 +15,10 @@ def test_databricks_bundle_uses_direct_engine_for_modern_resources():
     text = DATABRICKS_YML.read_text(encoding="utf-8")
     assert "engine: direct" in text
     assert "databricks_cli_version: '>= 1.3.0'" in text
+    assert "- genie/**" in text
 
 
-def test_setup_creates_semantic_schema_metric_views_and_genie():
+def test_setup_creates_semantic_schema_metric_views_genie_and_upload_folders():
     io_text = DB_IO.read_text(encoding="utf-8")
     setup_text = SETUP.read_text(encoding="utf-8")
 
@@ -26,6 +27,8 @@ def test_setup_creates_semantic_schema_metric_views_and_genie():
     assert "semantic`.`payroll_compliance" in io_text
     assert "semantic`.`audit_detail" in io_text
     assert "create_metric_views(spark, catalog)" in setup_text
+    assert 'dbutils.fs.mkdirs(raw_import_root)' in setup_text
+    assert 'dbutils.fs.mkdirs(canonical_input_root)' in setup_text
     assert 'dbutils.notebook.run(' in setup_text
     assert '"./00c_setup_genie"' in setup_text
     assert "from pathlib import Path" in setup_text
