@@ -83,6 +83,16 @@ def test_databricks_mapping_workbook_is_published_without_dbutils_tmp_access():
     assert "dbfs:{path}" in text
 
 
+def test_databricks_conversion_outputs_are_staged_before_volume_publish():
+    text = _text(ROOT / "notebooks" / "02e_convert_source_files.py")
+    assert "tempfile.mkdtemp(prefix=\"audithero-convert-\")" in text
+    assert "conversion_output_root = str(staging_dir / \"canonical\")" in text
+    assert "output_root=conversion_output_root" in text
+    assert "strict=False" in text
+    assert "shutil.copyfile(source_file, target_root / source_file.name)" in text
+    assert "assess_file_readiness(output_root, output_root)" in text
+
+
 def test_readiness_success_messages_do_not_report_blocking_items_present():
     for path in (
         ROOT / "notebooks" / "02b_audit_readiness.py",
