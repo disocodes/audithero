@@ -1,34 +1,32 @@
 # AuditHero
 
-AuditHero is a payroll audit solution for the **Social, Community, Home Care and Disability Services Industry Award 2010 (SCHADS / MA000100)**. It reconstructs expected Award entitlements from employment, roster, timekeeping and payroll evidence, compares expected pay with actual auditable pay, and separates confirmed reconciliation results from items that require human review.
+AuditHero is a payroll audit solution for the **Social, Community, Home Care and Disability Services Industry Award 2010 (SCHADS / MA000100)**. It reconstructs expected Award entitlements from employment, roster, timekeeping, payroll, and controlled evidence; compares expected pay with actual auditable pay; and keeps confirmed reconciliation results separate from findings that require human review.
 
-AuditHero can run in **Microsoft Fabric** or **Databricks**.
+AuditHero supports **Microsoft Fabric** and **Databricks** deployments.
 
-> AuditHero is compliance-support software, not legal advice. Validate Award coverage, classifications, industrial-instrument history and representative calculations before using results for remediation, recovery or payroll changes.
+> AuditHero is compliance-support software, not legal advice. Validate Award coverage, classifications, industrial-instrument history, source mappings, and representative calculations before using results for remediation, recovery, or payroll changes.
 
-## Typical workflow
+## Typical CSV/Excel workflow
 
-### CSV / Excel
+1. Export the required payroll, HR, rostering, and timekeeping files.
+2. Upload the original source files to the AuditHero raw landing area.
+3. Run **AuditHero - Build Source Mapping Workbook** for a new or changed source layout.
+4. Review and approve the generated source mapping.
+5. Run **AuditHero - Convert Mapped Files and Run Audit** for the required audit dates.
+6. Review `COMPLIANT`, `UNDERPAID`, `OVERPAID`, `REQUIRES_REVIEW`, and `ACTUAL_PAY_UNAVAILABLE` results.
+7. Review detailed calculation and source evidence before using any result for remediation.
 
-1. Export payroll, HR, rostering and timekeeping files.
-2. Upload the files to the AuditHero landing area.
-3. Run **AuditHero - Build Source Mapping Workbook** for a new source layout.
-4. Review and approve the generated mapping workbook.
-5. Run **AuditHero - Convert Mapped Files and Run Audit** for the required dates.
-6. Review `COMPLIANT`, `UNDERPAID`, `OVERPAID`, `REQUIRES_REVIEW` and `ACTUAL_PAY_UNAVAILABLE` results.
-7. Review detailed evidence before using any result for remediation.
+An approved source mapping can normally be reused for later payroll periods while the source-system export structure remains unchanged.
 
-After a source layout has been mapped once, later payroll periods normally reuse the same approved mapping.
+## Employment Hero API workflow
 
-### Employment Hero API
-
-When Employment Hero API access is configured, AuditHero can extract source data directly for monthly and historical audits. Uploaded-file auditing remains available without Employment Hero credentials.
+Employment Hero API extraction is optional. When configured, AuditHero can extract source data directly for recurring monthly audits and selected historical date ranges. Uploaded-file auditing remains available without Employment Hero credentials.
 
 ## Microsoft Fabric
 
 Import `installers/Fabric_Install_AuditHero.py` into the target Fabric workspace and choose **Run all**.
 
-The installer creates or updates the AuditHero Lakehouse, Environment, notebooks, pipelines, semantic model and Power BI report, then runs Setup and Self Test.
+The installer creates or updates the AuditHero Lakehouse, Environment, notebooks, pipelines, semantic model, and Power BI report, then runs Setup and Self Test.
 
 See [Install AuditHero in Microsoft Fabric](docs/INSTALL_FABRIC_UI.md).
 
@@ -53,13 +51,13 @@ See [Install AuditHero in Databricks](docs/INSTALL_DATABRICKS_UI.md).
 
 After installation:
 
-1. Upload source files to `/Volumes/schads_payroll/bronze/landing/import/raw`.
-2. For a new source layout, run **AuditHero - Build Source Mapping Workbook**.
-3. Save the approved workbook as `/Volumes/schads_payroll/bronze/landing/import/source_mapping.xlsx`.
-4. Run **AuditHero - Convert Mapped Files and Run Audit** and enter the audit start and end dates.
-5. Review the AI/BI dashboard and use Genie for governed analysis of completed audit results.
+1. upload source files to `/Volumes/schads_payroll/bronze/landing/import/raw`;
+2. for a new or changed source layout, run **AuditHero - Build Source Mapping Workbook**;
+3. save the approved workbook as `/Volumes/schads_payroll/bronze/landing/import/source_mapping.xlsx`;
+4. run **AuditHero - Convert Mapped Files and Run Audit** and enter the audit start and end dates; and
+5. review the AI/BI dashboard, Genie analysis, and detailed audit evidence.
 
-AuditHero stores normalized source evidence in Silver Delta tables and audit outputs in Gold Delta tables. Genie reads the governed result and semantic layers; it does not calculate SCHADS entitlements.
+AuditHero stores normalized source evidence in Silver Delta tables and calculated audit outputs in Gold Delta tables. Genie queries governed results and semantic measures; SCHADS entitlement calculations are performed by the AuditHero calculation engine.
 
 ## Data requirements
 
@@ -70,7 +68,7 @@ Minimum audit data normally includes:
 - employment history; and
 - timesheets.
 
-Rostered shifts, payroll earnings, leave, public-holiday data and other evidence improve the completeness of the audit. Some SCHADS conditions require evidence that may not exist in a standard payroll export.
+Rostered shifts, payroll earnings, leave, public-holiday data, and other controlled evidence improve audit completeness. Some SCHADS conditions require evidence that may not exist in a standard payroll export.
 
 See [Audit data requirements](docs/AUDIT_DATA_REQUIREMENTS.md) and [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md).
 
