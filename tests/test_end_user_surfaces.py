@@ -99,6 +99,10 @@ def test_databricks_pay_category_treatment_is_explicit_and_complete():
     assert '"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"' in mapping
     assert "Suggested treatments are guidance only" in mapping
     assert 'draft["datasets"]["pay_category_mapping"]["enabled"] = False' in mapping
+    assert "not an employee" in mapping
+    assert "Full Time / Part Time / Casual" in mapping
+    assert "same source column as employee_id" in mapping
+    assert "values proposed as pay categories mostly match employee identifiers" in mapping
     assert "pay_category_treatment" in conversion
     assert "Complete the pay_category_treatment sheet before conversion" in conversion
     assert "pay_category_mapping.csv" in conversion
@@ -110,7 +114,10 @@ def test_fabric_pay_category_treatment_matches_databricks_control():
     conversion = _text(ROOT / "fabric" / "notebooks" / "03d_convert_source_files.py")
     assert "pay_category_treatment" in mapping
     assert '"AUDITABLE_WORK,ALLOWANCE,EXCLUDE"' in mapping
-    assert "Suggested treatments are guidance only" in mapping
+    assert "not an employee" in mapping
+    assert "Full Time / Part Time / Casual" in mapping
+    assert "same source column as employee_id" in mapping
+    assert "values proposed as pay categories mostly match employee identifiers" in mapping
     assert 'draft["datasets"]["pay_category_mapping"]["enabled"] = False' in mapping
     assert "pay_category_treatment" in conversion
     assert "Complete the pay_category_treatment sheet before conversion" in conversion
