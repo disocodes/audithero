@@ -1,6 +1,6 @@
 # Install AuditHero in Microsoft Fabric
 
-AuditHero can be installed from the **Microsoft Fabric user interface** with a single bootstrap notebook. You do not need to create the Lakehouse, Environment, pipelines, semantic model or report manually.
+AuditHero can be installed from the **Microsoft Fabric user interface** with one bootstrap notebook. The installer creates the required Lakehouse, Environment, pipelines, semantic model and report.
 
 ## What the installer creates
 
@@ -15,116 +15,109 @@ The installer creates or updates the AuditHero application in the current Fabric
 - uploaded-file audit notebooks;
 - historical and monthly API notebooks;
 - Data Factory pipelines;
-- a disabled-by-default monthly schedule;
+- the configured monthly schedule;
 - the Direct Lake semantic model; and
-- the AuditHero Power BI report.
+- the **AuditHero - SCHADS Payroll Compliance** Power BI report.
 
-Employment Hero credentials are **not** required for installation or uploaded-file audits.
+Employment Hero credentials are not required for installation or uploaded-file audits.
 
-## Before you begin
+## Requirements
 
-You need:
+The Fabric workspace must provide:
 
-- a Microsoft Fabric workspace on active capacity;
-- permission in that workspace to create and manage Fabric items; and
-- permission to run a Fabric notebook.
+- active Fabric capacity;
+- permission to create and manage workspace items; and
+- permission to run Fabric notebooks.
 
-The installer detects the current workspace ID and workspace name automatically.
+The installer detects the current workspace ID and workspace name from the notebook session.
 
 ## First installation
 
-### 1. Download the bootstrap notebook
+### 1. Import the bootstrap notebook
 
-From the AuditHero repository, download:
-
-`installers/Fabric_Install_AuditHero.py`
-
-You need this external bootstrap only for the first installation. AuditHero installs its own managed Install/Upgrade notebook into the workspace for future use.
-
-### 2. Import it into Fabric
+Download `installers/Fabric_Install_AuditHero.py` from the approved AuditHero release.
 
 In the target Fabric workspace:
 
 1. choose **Import**;
 2. choose **Notebook**;
-3. upload `Fabric_Install_AuditHero.py`;
+3. upload `Fabric_Install_AuditHero.py`; and
 4. open the imported notebook.
 
-### 3. Review the installation settings
+The bootstrap installs managed administration notebooks for later upgrades and removal.
 
-At the top of the notebook you can change the release or item names if required. For a normal installation, the defaults can remain unchanged.
+### 2. Review installation settings
 
-The main settings are:
+The default settings are:
 
-- `release_ref = "main"`
-- `lakehouse_name = "AuditHero_Lakehouse"`
-- `environment_name = "AuditHero_Environment"`
-- `key_vault_url = ""`
-- `monthly_schedule_enabled = False`
+```python
+release_ref = "main"
+lakehouse_name = "AuditHero_Lakehouse"
+environment_name = "AuditHero_Environment"
+key_vault_url = ""
+monthly_schedule_enabled = False
+```
 
-Leave `key_vault_url` blank when you are using CSV/Excel uploads only.
+Leave `key_vault_url` blank for uploaded-file audits. Keep `monthly_schedule_enabled = False` until a representative payroll period has been validated.
 
-### 4. Choose Run all
+### 3. Choose Run all
 
-The notebook then:
+The installer performs the following sequence:
 
 1. detects the current Fabric workspace;
 2. downloads the selected AuditHero release;
 3. creates or updates the schema-enabled Lakehouse;
-4. builds and publishes the AuditHero Fabric Environment;
-5. installs the AuditHero operational notebooks;
-6. installs **AuditHero - Install or Upgrade** and **AuditHero - Uninstall**;
-7. creates the Data Factory pipelines;
-8. creates the monthly schedule in the configured disabled/enabled state;
-9. runs AuditHero Setup;
-10. runs AuditHero Self Test; and
-11. creates or refreshes the Direct Lake model and Power BI report.
+4. builds and publishes the AuditHero Environment;
+5. installs the operational and administration notebooks;
+6. creates or updates the Data Factory pipelines;
+7. creates the monthly schedule in the configured state;
+8. runs AuditHero Setup;
+9. runs AuditHero Self Test; and
+10. creates or refreshes the Direct Lake semantic model and Power BI report.
 
-After a successful first installation, the temporary bootstrap notebook attempts to remove itself because the managed administration notebooks are already installed.
+After successful first installation, the imported bootstrap copy can be removed because **AuditHero - Install or Upgrade** is installed in the workspace.
 
-Do not use production payroll data if the installer reports that Setup or Self Test failed.
+Do not use production payroll data if Setup or Self Test fails.
 
-## After installation
+## CSV / Excel audit workflow
 
-Normal payroll users work from the Fabric UI. The usual file-based workflow is:
+1. Upload source exports to `AuditHero_Lakehouse / Files / import / raw`.
+2. For a new or changed source layout, run **AuditHero - Build Source Mapping Workbook**.
+3. Review the generated workbook and upload the approved mapping as `source_mapping.xlsx`.
+4. Run **AuditHero - Convert Mapped Files and Run Audit** for the required dates.
+5. Review **AuditHero - SCHADS Payroll Compliance** in Power BI.
 
-1. upload source exports to `AuditHero_Lakehouse / Files / import / raw`;
-2. run **AuditHero - Build Source Mapping Workbook**;
-3. review the generated mapping workbook and upload the approved `source_mapping.xlsx`;
-4. run **AuditHero - Convert Mapped Files and Run Audit**; and
-5. review **AuditHero - SCHADS Payroll Compliance** in Power BI.
+If the source files already use the AuditHero canonical format, place them under `Files/input` and run **AuditHero - Uploaded Files Audit Pipeline**.
 
-If the source files already use AuditHero canonical columns, run **AuditHero - Uploaded Files Audit Pipeline** instead.
+Run **AuditHero - Convert Source Files** when conversion and File Readiness need to be checked without calculating payroll.
 
 ## Upgrade AuditHero
 
-Open **AuditHero - Install or Upgrade** in the Fabric workspace. Change `release_ref` to the approved version if required and choose **Run all**.
+Open **AuditHero - Install or Upgrade**, set `release_ref` to the approved release when required and choose **Run all**.
 
-The installer updates the existing AuditHero application and reruns Setup and Self Test. Validate one known payroll period before relying on an upgraded version for production decisions.
+The installer refreshes the existing AuditHero application and reruns the installation validation sequence. Validate a known payroll period after an upgrade before resuming recurring production audits.
 
 ## Uninstall AuditHero
 
-Open **AuditHero - Uninstall** in the Fabric workspace and choose **Run all**.
+Open **AuditHero - Uninstall** and choose **Run all**.
 
-A normal uninstall removes AuditHero-managed pipelines, reporting objects, operational notebooks, Environment and administration notebooks. The running uninstaller removes itself as its last application-cleanup step.
+A standard uninstall removes AuditHero-managed pipelines, reporting objects, operational notebooks, Environment and administration notebooks while preserving the Lakehouse and payroll/audit data.
 
-The Lakehouse and payroll/audit data are preserved by default.
-
-To permanently remove the AuditHero Lakehouse and all data, set both values before running the uninstaller:
+To permanently remove the AuditHero Lakehouse and all data, set:
 
 ```python
 delete_audit_data = True
 confirmation = "DELETE AUDITHERO DATA"
 ```
 
-This extra confirmation prevents an ordinary application uninstall from deleting payroll source files, audit evidence and tables.
+Permanent deletion removes payroll source files, audit evidence and Lakehouse tables.
 
 ## Reinstall against preserved data
 
-If AuditHero was uninstalled without deleting the Lakehouse, import the bootstrap installer again. The installer can recreate the application resources against the preserved AuditHero storage.
+If AuditHero was removed without deleting the Lakehouse, import the bootstrap installer again. Installation can recreate the application resources while retaining the preserved AuditHero storage.
 
 ## Optional Employment Hero API
 
-If API automation is enabled later, configure Azure Key Vault and the required Employment Hero secrets. Uploaded-file workflows continue to work without API credentials.
+To enable API extraction, configure Azure Key Vault and the required Employment Hero secrets. Uploaded-file workflows remain available without API credentials.
 
 See [Administration](ADMINISTRATION.md) for permissions, schedules, source mappings and API configuration.
