@@ -3,6 +3,7 @@ import json
 import pandas as pd
 
 from schads_audit.source_mapping import generate_mapping_draft, convert_source_files
+from schads_audit.source_mapping_hardening import harden_payroll_earnings_draft
 
 
 def test_generate_mapping_draft_and_convert(tmp_path: Path):
@@ -90,3 +91,43 @@ def test_mapping_rejects_source_outside_root(tmp_path: Path):
     }
     result = convert_source_files(tmp_path, mapping, tmp_path / "out", strict=False)
     assert result["errors"]
+
+
+def test_payroll_hardening_never_uses_employee_name_as_pay_category(tmp_path: Path):
+    pd.DataFrame([
+        {
+            "Employee Number": "E1",
+            "Employee Name": "Ada Example",
+            "Pay Period Start": "2026-08-01",
+            "Pay Period End": "2026-08-14",
+            "Amount": 1200.0,
+        }
+    ]).to_csv(tmp_path / "payroll.csv", index=False)
+
+    draft = harden_payroll_earnings_draft(generate_mapping_draft(tmp_path), tmp_path)
+    payroll = draft["datasets"]["payroll_earnings"]
+
+    assert payroll["enabled"] is False
+    assert payroll["_actual_pay_status"] == "UNAVAILABLE"
+    assert payroll["_suggestions"]["pay_category"]["suggested_source"] is None
+
+
+def test_payroll_hardening_accepts_explicit_earning_description(tmp_path: Path):
+    pd.DataFrame([
+        {
+            "Employee Number": "E1",
+            "Employee Name": "Ada Example",
+            "Pay Period Start": "2026-08-01",
+            "Pay Period End": "2026-08-14",
+            "Earnings Description": "Ordinary Hours",
+            "Earnings Amount": 1200.0,
+        }
+    ]).to_csv(tmp_path / "payroll_earnings.csv", index=False)
+
+    draft = harden_payroll_earnings_draft(generate_mapping_draft(tmp_path), tmp_path)
+    payroll = draft["datasets"]["payroll_earnings"]
+
+    assert payroll["enabled"] is True
+    assert payroll["columns"]["pay_category"]["source"] == "Earnings Description"
+    assert payroll["columns"]["employee_id"]["source"] == "Employee Number"
+    assert payroll["columns"]["amount"]["source"] == "Earnings Amount"
