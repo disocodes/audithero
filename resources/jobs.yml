@@ -8,6 +8,7 @@ resources:
             notebook_path: ../notebooks/00_setup.py
             base_parameters:
               catalog: "${var.catalog}"
+              sql_warehouse_id: "${var.sql_warehouse_id}"
         - task_key: validate_rules
           depends_on:
             - task_key: setup
