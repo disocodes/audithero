@@ -40,7 +40,7 @@ def _normalize_fabric_lakehouse_path(value: str) -> str:
 
 
 def _load_pay_category_treatments(path: Path) -> pd.DataFrame | None:
-    """Load and validate operator-approved payroll category treatments."""
+    """Load and validate approved payroll category treatments."""
     if path.suffix.lower() not in {".xlsx", ".xlsm"}:
         return None
     try:
@@ -175,5 +175,5 @@ if len(blocking):
     )
 
 print("Source conversion and File Readiness completed successfully.")
-print("NEXT: run 'AuditHero - Uploaded Files Audit Pipeline' and choose the audit date range.")
+print("Recommended next step: run 'AuditHero - Uploaded Files Audit Pipeline' and choose the audit date range.")
 notebookutils.notebook.exit(result["workbook"] or output_root)
