@@ -4,16 +4,17 @@
 # -------
 # Build an editable Excel mapping workbook from CSV/XLSX payroll, HR, roster and
 # timekeeping exports. The notebook proposes matches to AuditHero's canonical
-# input model and, when payroll earnings are supplied, lists the payroll earning
-# categories that require an approved audit treatment. A pay category is a
-# payroll earning or payroll item type such as Ordinary Hours, Overtime,
-# Allowance or Leave. The notebook does not calculate payroll.
+# input model and, when usable payroll earning-line detail is detected, lists
+# payroll earning categories that require an approved audit treatment. A pay
+# category is a payroll earning or payroll item type such as Ordinary Hours,
+# Overtime, Allowance or Leave. The notebook does not calculate payroll.
 
 from pathlib import Path
 import pandas as pd
 
 try:
     from schads_audit.source_mapping import scan_source_items, generate_mapping_draft
+    from schads_audit.source_mapping_hardening import harden_payroll_earnings_draft
     from schads_audit.mapping_workbook import write_mapping_workbook
 except ModuleNotFoundError as exc:
     if exc.name == "schads_audit" or str(exc.name or "").startswith("schads_audit."):
@@ -191,7 +192,7 @@ if draft_file.exists() and str(overwrite).lower() not in {"true", "1", "yes"}:
         f"{draft_path} already exists. Set overwrite=true only when the existing draft should be replaced."
     )
 
-draft = generate_mapping_draft(source_root)
+draft = harden_payroll_earnings_draft(generate_mapping_draft(source_root), source_root)
 if "pay_category_mapping" in (draft.get("datasets") or {}):
     draft["datasets"]["pay_category_mapping"]["enabled"] = False
     draft["datasets"]["pay_category_mapping"]["source"] = None
@@ -221,6 +222,10 @@ if pay_categories:
         "suggested_treatment": [_suggest_pay_treatment(value) for value in pay_categories],
     }))
     print(f"Detected {len(pay_categories)} unique payroll earning category value(s). Complete the pay_category_treatment sheet before conversion.")
+else:
+    payroll_cfg = (draft.get("datasets") or {}).get("payroll_earnings") or {}
+    if payroll_cfg.get("_actual_pay_status") == "UNAVAILABLE":
+        print("Actual-pay earning-line detail was not detected with sufficient confidence. Entitlement calculation can continue without actual-pay reconciliation.")
 
 print("STEP 3 — Review and approve the mapping")
 print(f"Mapping draft created: {draft_path}")
@@ -228,6 +233,7 @@ print("Download the workbook from the Lakehouse Files area and review field_mapp
 if pay_categories:
     print("Also review pay_category_treatment. Each row represents a payroll earning or payroll item type found in the source payroll data.")
 print("Upload the approved workbook as source_mapping.xlsx.")
+print("Missing optional actual-pay detail does not prevent entitlement calculation; required core audit evidence is still validated by File Readiness.")
 print("NEXT: run 'AuditHero - Convert Mapped Files and Run Audit'.")
 print("Use 'AuditHero - Convert Source Files' when conversion and File Readiness need to be checked without running the payroll audit.")
 
