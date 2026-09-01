@@ -74,6 +74,14 @@ def test_mapping_notebooks_point_to_combined_operator_workflow():
         assert "conversion and File Readiness" in text
 
 
+def test_databricks_mapping_workbook_is_written_locally_before_volume_copy():
+    text = _text(ROOT / "notebooks" / "02d_source_mapping_draft.py")
+    assert "tempfile.mkdtemp" in text
+    assert "write_mapping_workbook(mapping, local_file)" in text
+    assert "dbutils.fs.cp(local_file.as_uri()" in text
+    assert "dbfs:{path}" in text
+
+
 def test_readiness_success_messages_do_not_report_blocking_items_present():
     for path in (
         ROOT / "notebooks" / "02b_audit_readiness.py",
