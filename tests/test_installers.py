@@ -49,6 +49,7 @@ def test_databricks_installer_uses_current_jobs_api_and_publishes_dashboard():
     assert "/api/2.2/jobs/runs/get" in databricks
     assert "/published" in databricks
     assert '"embed_credentials": False' in databricks
+    assert "AuditHero - Payroll Compliance (Genie)" in databricks
 
 
 def test_installers_create_the_mapped_file_operator_path():
@@ -65,7 +66,7 @@ def test_fabric_installer_surfaces_child_deployer_errors():
     assert "subprocess.Popen" in fabric
     assert "stderr=subprocess.STDOUT" in fabric
     assert "AuditHero installer step" in fabric
-    assert "CalledProcessError" in fabric
+    assert "The final output from that step is included below" in fabric
 
 
 def test_fabric_installer_isolates_bootstrap_dependencies_from_managed_runtime():
