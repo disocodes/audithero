@@ -85,12 +85,15 @@ def _write_mapping_draft(mapping: dict, destination: str) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix="audithero-mapping-"))
     local_file = temp_dir / Path(destination).name
     try:
+        # OpenPyXL creates the XLSX on local driver storage. The completed file is
+        # then copied sequentially to the Unity Catalog Volume. This avoids random
+        # access writes against the Volume and avoids dbutils.fs access to /tmp.
         write_mapping_workbook(mapping, local_file)
         destination_parent = destination.rsplit("/", 1)[0]
         dbutils.fs.mkdirs(_volume_uri(destination_parent))
-        copied = dbutils.fs.cp(local_file.as_uri(), _volume_uri(destination), True)
-        if copied is False:
-            raise OSError(f"Databricks could not copy the mapping workbook to {destination}")
+        shutil.copyfile(local_file, destination)
+        if not Path(destination).exists() or Path(destination).stat().st_size == 0:
+            raise OSError(f"Databricks could not publish the mapping workbook to {destination}")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
