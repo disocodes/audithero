@@ -25,6 +25,8 @@ from schads_audit.databricks_io import (
 
 dbutils.widgets.text("catalog", "schads_payroll")
 catalog = dbutils.widgets.get("catalog")
+raw_import_root = f"/Volumes/{catalog}/bronze/landing/import/raw"
+canonical_input_root = f"/Volumes/{catalog}/bronze/landing/input"
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 1. Validate the effective-dated SCHADS rule library
@@ -36,9 +38,11 @@ if errors:
 print("SCHADS rule library validated")
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 2. Create Unity Catalog structures and load reference rules
+# MAGIC ## 2. Create Unity Catalog structures, upload folders and reference rules
 # COMMAND ----------
 create_catalog_objects(spark, catalog)
+dbutils.fs.mkdirs(raw_import_root)
+dbutils.fs.mkdirs(canonical_input_root)
 overwrite_rule_tables(spark, lib, catalog)
 # COMMAND ----------
 # MAGIC %md
@@ -128,8 +132,8 @@ genie_space_id = dbutils.notebook.run(
 )
 
 print("AuditHero Databricks setup complete")
-print(f"Raw import folder:       /Volumes/{catalog}/bronze/landing/import/raw")
-print(f"Canonical input folder:  /Volumes/{catalog}/bronze/landing/input")
+print(f"Raw import folder:       {raw_import_root}")
+print(f"Canonical input folder:  {canonical_input_root}")
 print(f"Payroll metric view:     {catalog}.semantic.payroll_compliance")
 print(f"Audit detail metric view:{catalog}.semantic.audit_detail")
 print(f"Genie Agent ID:          {genie_space_id}")
