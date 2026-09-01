@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "config": {
+    "sample_questions": [
+      {
+        "id": "10000000000000000000000000000001",
+        "question": ["How much potential underpayment is in the latest successful audit?"]
+      },
+      {
+        "id": "10000000000000000000000000000002",
+        "question": ["Which employees have underpaid pay periods?"]
+      },
+      {
+        "id": "10000000000000000000000000000003",
+        "question": ["Which pay periods require human review?"]
+      },
+      {
+        "id": "10000000000000000000000000000004",
+        "question": ["Show expected pay and actual pay by pay period."]
+      },
+      {
+        "id": "10000000000000000000000000000005",
+        "question": ["Which SCHADS classifications have the most shift-level review findings?"]
+      }
+    ]
+  },
+  "data_sources": {
+    "tables": [
+      {"identifier": "__CATALOG__.gold.v_audit_runs"},
+      {"identifier": "__CATALOG__.gold.v_readiness_findings"},
+      {"identifier": "__CATALOG__.gold.v_rule_coverage"},
+      {"identifier": "__CATALOG__.semantic.audit_detail"},
+      {"identifier": "__CATALOG__.semantic.payroll_compliance"}
+    ]
+  },
+  "instructions": {
+    "example_question_sqls": [
+      {
+        "id": "20000000000000000000000000000001",
+        "question": ["How much potential underpayment is in the latest successful audit?"],
+        "sql": ["SELECT MEASURE(potential_underpayment) AS potential_underpayment FROM __CATALOG__.semantic.payroll_compliance"]
+      },
+      {
+        "id": "20000000000000000000000000000002",
+        "question": ["Show underpaid pay periods by employee."],
+        "sql": ["SELECT employee_name, MEASURE(underpaid_periods) AS underpaid_periods, MEASURE(potential_underpayment) AS potential_underpayment FROM __CATALOG__.semantic.payroll_compliance WHERE status = 'UNDERPAID' GROUP BY employee_name ORDER BY potential_underpayment DESC"]
+      },
+      {
+        "id": "20000000000000000000000000000003",
+        "question": ["Which classifications have the most review shifts?"],
+        "sql": ["SELECT classification_code, MEASURE(review_shift_count) AS review_shift_count FROM __CATALOG__.semantic.audit_detail GROUP BY classification_code ORDER BY review_shift_count DESC"]
+      }
+    ],
+    "text_instructions": [
+      {
+        "id": "30000000000000000000000000000001",
+        "content": [
+          "You are AuditHero Payroll Compliance, a governed analytics assistant for SCHADS payroll audit results.\nUse __CATALOG__.semantic.payroll_compliance first for headline payroll, variance, underpayment, overpayment and pay-period questions.\nUse __CATALOG__.semantic.audit_detail for shift, classification, employment type and expected-entitlement questions.\nUse __CATALOG__.gold.v_readiness_findings for missing-data and readiness questions.\nUse __CATALOG__.gold.v_rule_coverage for Award rule coverage questions.\nUse __CATALOG__.gold.v_audit_runs for audit execution history and run status.\nNever treat REQUIRES_REVIEW as an underpayment or include it in confirmed underpayment totals.\nPotential underpayment means only the governed potential_underpayment measure from rows classified UNDERPAID.\nWhen explaining a finding, state the audit status and distinguish calculated expected entitlement from actual payroll.\nDo not invent SCHADS clauses or legal conclusions that are not present in the governed AuditHero data.\nPrefer metric-view measures through MEASURE() instead of recalculating business KPIs from raw tables.\nDo not query Bronze or Silver assets for business answers."
+        ]
+      }
+    ]
+  }
+}
