@@ -2,18 +2,18 @@
 # MAGIC %md
 # MAGIC # AuditHero — Build a Source Mapping Workbook
 # MAGIC
-# MAGIC Use this notebook when your payroll, HR, roster or timekeeping exports do **not** already use AuditHero's standard column names.
+# MAGIC **Purpose:** create an editable source-mapping workbook when payroll, HR, roster or timekeeping exports do not already use AuditHero's canonical field names.
 # MAGIC
-# MAGIC The notebook scans CSV and Excel files in the raw import folder, compares file/sheet names and column headers with AuditHero's canonical fields, and creates an editable `source_mapping_draft.xlsx` workbook. No payroll calculations are performed here.
+# MAGIC The notebook scans CSV and Excel files in the raw import folder, compares file/sheet names and column headings with AuditHero's canonical fields, and creates `source_mapping_draft.xlsx`. No payroll calculations are performed.
 # MAGIC
-# MAGIC **Typical workflow:** upload raw exports → run this notebook → download/edit the mapping workbook → upload it back as `source_mapping.xlsx` → run **AuditHero - Convert Source Files**.
+# MAGIC **Workflow:** upload raw exports → run this notebook → review and save `source_mapping.xlsx` → run **AuditHero - Convert Mapped Files and Run Audit**.
 # COMMAND ----------
 # MAGIC %pip install "openpyxl>=3.1"
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 1. Read job parameters
+# MAGIC ## 1. Read Job parameters
 # MAGIC
-# MAGIC These widgets are also exposed as Databricks Job parameters. If you run the notebook directly, you can change them at the top of the notebook. Leaving a path blank uses the standard AuditHero Unity Catalog Volume locations.
+# MAGIC The parameters are exposed by the Databricks Job and can also be set when this notebook is run directly. Blank path values use the standard AuditHero Unity Catalog Volume locations.
 # COMMAND ----------
 from pathlib import Path
 import sys
@@ -27,7 +27,7 @@ for candidate in (ROOT, *ROOT.parents):
 from schads_audit.source_mapping import scan_source_items, generate_mapping_draft
 from schads_audit.mapping_workbook import write_mapping_workbook
 
-# Job/UI parameters. The catalog value is used only to build friendly defaults.
+# Job parameters. `catalog` determines the default Volume paths.
 dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("source_root", "")
 dbutils.widgets.text("draft_path", "")
@@ -44,7 +44,7 @@ print(f"Mapping draft:     {draft_path}")
 # MAGIC %md
 # MAGIC ## 2. Inspect uploaded files and sheets
 # MAGIC
-# MAGIC `scan_source_items` reads only enough rows to identify each CSV file or Excel sheet and its headers. The inventory lets you confirm that AuditHero can see the exports you uploaded before it tries to suggest mappings.
+# MAGIC `scan_source_items` reads a small sample of each CSV file or Excel sheet to identify the source structure and column headings.
 # COMMAND ----------
 inventory = scan_source_items(source_root)
 if inventory.empty:
@@ -56,12 +56,12 @@ display(inventory[["file", "sheet", "item_name", "sample_rows", "columns"]])
 # MAGIC %md
 # MAGIC ## 3. Generate mapping suggestions
 # MAGIC
-# MAGIC AuditHero compares common payroll terms such as `Employee Number`, `Clock In`, `Pay Category` and `Employment Type` with the canonical schema. Suggestions are deliberately treated as a **draft**. Review every required field before conversion, especially classifications, employment type, dates and amounts.
+# MAGIC AuditHero compares source headings with the canonical schema and proposes dataset and field matches. Review every required field before conversion, especially classifications, employment type, dates and payroll amounts.
 # COMMAND ----------
 draft_file = Path(draft_path)
 if draft_file.exists() and not overwrite:
     raise FileExistsError(
-        f"{draft_path} already exists. Set overwrite=true if you intentionally want to replace the existing draft."
+        f"{draft_path} already exists. Set overwrite=true if the existing draft should be replaced."
     )
 
 draft = generate_mapping_draft(source_root)
@@ -84,12 +84,13 @@ summary = pd.DataFrame(summary_rows)
 display(summary.sort_values(["suggested", "confidence"], ascending=[False, False]))
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 4. What to do next
+# MAGIC ## 4. Review and approve the mapping
 # MAGIC
-# MAGIC In **Catalog Explorer**, open the Volume path printed below and download `source_mapping_draft.xlsx`. Review the `field_mapping` sheet, correct the proposed matches, optionally add source-value translations on `value_mapping`, then upload the edited file as `source_mapping.xlsx`.
+# MAGIC In **Catalog Explorer**, download `source_mapping_draft.xlsx`, review the `field_mapping` sheet, add source-value translations on `value_mapping` where required, and upload the approved workbook as `source_mapping.xlsx`.
 # MAGIC
-# MAGIC The conversion job will stop if a required AuditHero field is not mapped. It does not execute formulas or arbitrary code from the mapping workbook.
+# MAGIC The conversion workflow stops when required AuditHero fields are not mapped. Mapping workbooks cannot execute arbitrary Python or formulas.
 # COMMAND ----------
 print("Mapping draft created successfully.")
 print(draft_path)
-print("NEXT: edit the workbook, upload it as source_mapping.xlsx, then run 'AuditHero - Convert Source Files'.")
+print("NEXT: review the workbook, upload it as source_mapping.xlsx, then run 'AuditHero - Convert Mapped Files and Run Audit'.")
+print("Use 'AuditHero - Convert Source Files' when conversion and File Readiness need to be checked without running the payroll audit.")
