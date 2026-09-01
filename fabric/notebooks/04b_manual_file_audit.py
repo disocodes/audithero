@@ -7,6 +7,7 @@
 # canonical input folder and requested audit date range.
 #
 # The notebook calculates expected entitlements with the shared AuditHero engine,
+# reconciles actual payroll only when sufficient earning-line evidence is available,
 # stores normalized evidence and audit results, records the audit run and publishes
 # the successful reporting snapshot.
 
@@ -26,7 +27,7 @@ print(f"Run ID: {run_id}")
 print(f"Input: {input_root}")
 print(f"Audit window: {start_date} to {end_date}")
 
-print("STEP 2 — Calculate expected entitlements and reconcile actual payroll")
+print("STEP 2 — Calculate expected entitlements and reconcile usable actual payroll")
 lib = bundled_rule_library()
 result = run_manual_audit(
     input_root=input_root,
@@ -70,7 +71,7 @@ write_df(spark, result["reconciliation"], "gold.pay_period_reconciliation")
 
 print("STEP 6 — Record operational run counts")
 reconciliation = result["reconciliation"]
-actual_source = "FILES" if result["payroll_earnings"] is not None and not result["payroll_earnings"].empty else "NONE"
+actual_source = "FILES" if result.get("actual_pay_usable", False) else "NONE"
 run = pd.DataFrame([{
     "audit_run_id": run_id,
     "run_type": "MANUAL_FILE",
