@@ -27,12 +27,12 @@ resources:
             notebook_path: ../notebooks/01b_self_test.py
 
     source_mapping_draft:
-      name: "AuditHero - Build Source Mapping Workbook"
+      name: "AuditHero - Build Source Mapping"
       parameters:
         - name: source_root
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
         - name: draft_path
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping_draft.xlsx"
         - name: overwrite
           default: "false"
       tasks:
@@ -46,14 +46,14 @@ resources:
               overwrite: "{{job.parameters.overwrite}}"
 
     source_file_convert:
-      name: "AuditHero - Convert Source Files"
+      name: "AuditHero - Convert Source Files (Advanced)"
       parameters:
         - name: source_root
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
         - name: mapping_path
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping.xlsx"
         - name: output_root
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/input"
         - name: strict
           default: "true"
       tasks:
@@ -68,14 +68,14 @@ resources:
               strict: "{{job.parameters.strict}}"
 
     mapped_import_audit:
-      name: "AuditHero - Convert Mapped Files and Run Audit"
+      name: "AuditHero - Payroll Audit - Uploaded Files"
       parameters:
         - name: source_root
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
         - name: mapping_path
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping.xlsx"
         - name: output_root
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/input"
         - name: strict
           default: "true"
         - name: start_date
@@ -112,10 +112,10 @@ resources:
             warehouse_id: ${var.sql_warehouse_id}
 
     file_readiness:
-      name: "AuditHero - File Readiness"
+      name: "AuditHero - Readiness - Uploaded Files"
       parameters:
         - name: input_root
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/input"
       tasks:
         - task_key: validate_uploaded_files
           notebook_task:
@@ -125,10 +125,10 @@ resources:
               input_root: "{{job.parameters.input_root}}"
 
     manual_file_audit:
-      name: "AuditHero - Audit Uploaded CSV Excel"
+      name: "AuditHero - Audit Canonical Files (Advanced)"
       parameters:
         - name: input_root
-          default: ""
+          default: "/Volumes/${var.catalog}/bronze/landing/input"
         - name: start_date
           default: "2023-07-01"
         - name: end_date
@@ -160,7 +160,7 @@ resources:
             warehouse_id: ${var.sql_warehouse_id}
 
     connection_test:
-      name: "AuditHero - Employment Hero Connection Test (Optional API)"
+      name: "AuditHero - Employment Hero Connection Test"
       tasks:
         - task_key: test
           notebook_task:
@@ -169,7 +169,7 @@ resources:
               secret_scope: "${var.secret_scope}"
 
     audit_readiness:
-      name: "AuditHero - API Audit Readiness (Optional API)"
+      name: "AuditHero - Readiness - Employment Hero"
       tasks:
         - task_key: readiness
           notebook_task:
@@ -179,7 +179,7 @@ resources:
               secret_scope: "${var.secret_scope}"
 
     historical_audit:
-      name: "AuditHero - Historical SCHADS Audit (Optional API)"
+      name: "AuditHero - Historical Audit - Employment Hero"
       parameters:
         - name: start_date
           default: "2023-07-01"
@@ -207,7 +207,7 @@ resources:
             warehouse_id: ${var.sql_warehouse_id}
 
     monthly_audit:
-      name: "AuditHero - Monthly Payroll Audit (Optional API)"
+      name: "AuditHero - Monthly Payroll Audit - Employment Hero"
       tasks:
         - task_key: audit
           notebook_task:
