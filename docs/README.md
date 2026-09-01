@@ -1,19 +1,19 @@
 # AuditHero documentation
 
-Use this page to find the guide that matches what you are trying to do.
+Use this page to find the guide for the task being performed.
 
-## Install, upgrade or remove AuditHero
-
-AuditHero uses a single bootstrap notebook for the first installation on each platform. The installer creates the application resources and runs Setup and Self Test automatically. It also installs permanent **Install or Upgrade** and **Uninstall** notebooks inside the platform for later administration.
+## Installation, upgrade and removal
 
 - [Microsoft Fabric installation, upgrade and removal](INSTALL_FABRIC_UI.md)
 - [Databricks installation, upgrade and removal](INSTALL_DATABRICKS_UI.md)
 
-A normal uninstall preserves payroll/audit storage. Permanent data deletion requires an explicit confirmation inside the uninstaller notebook.
+The first installation uses a platform-specific installer notebook. After installation, managed **Install or Upgrade** and **Uninstall** notebooks are available inside the target platform.
+
+A standard uninstall preserves payroll and audit storage. Permanent data deletion requires explicit confirmation in the uninstaller notebook.
 
 ## Payroll and audit operators
 
-Start here if you upload data, run audits and review results.
+Use these guides to prepare data, run audits and review results:
 
 1. [Quick start](../QUICKSTART.md)
 2. [Importing and mapping CSV/Excel files](IMPORT_AND_FIELD_MAPPING.md)
@@ -22,21 +22,29 @@ Start here if you upload data, run audits and review results.
 5. [Understanding results](UNDERSTANDING_RESULTS.md)
 6. [Troubleshooting](TROUBLESHOOTING.md)
 
-## Platform and payroll-system administrators
+## Administrators
 
-Use these guides to maintain an installed AuditHero environment.
+Use these guides to maintain an installed AuditHero environment:
 
 - [Administration and security](ADMINISTRATION.md)
 - [Notebook reference](NOTEBOOK_REFERENCE.md)
-- [Optional CLI and automation](CLI_AND_AUTOMATION.md)
+- [CLI and automation](CLI_AND_AUTOMATION.md)
 - [Architecture](ARCHITECTURE.md)
 
-## Payroll governance and compliance reviewers
+## Payroll governance and compliance review
 
-Use these guides when validating the basis of an audit.
+Use these guides when validating the basis and limitations of an audit:
 
 - [SCHADS rules and evidence](SCHADS_RULES_AND_EVIDENCE.md)
 - [Audit data requirements](AUDIT_DATA_REQUIREMENTS.md)
 - [Understanding results](UNDERSTANDING_RESULTS.md)
 
-The main guides are organised around user tasks. Implementation details that are not needed for installation, operation or audit review are kept in the technical and administration material.
+## Platform-specific entry points
+
+### Microsoft Fabric
+
+Routine operation uses the deployed Fabric pipelines and Power BI report.
+
+### Databricks
+
+Routine operation uses **Jobs & Pipelines**, **Catalog Explorer**, **AI/BI** and **Genie**. No separate AuditHero application is required.
