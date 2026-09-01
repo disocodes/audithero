@@ -1,6 +1,6 @@
 # AuditHero on Microsoft Fabric
 
-AuditHero is installed, upgraded, operated and removed from the **Microsoft Fabric UI**.
+AuditHero is installed, upgraded and operated from the Microsoft Fabric workspace.
 
 ## First installation
 
@@ -10,46 +10,46 @@ The installer creates or updates:
 
 - `AuditHero_Lakehouse`;
 - `AuditHero_Environment`;
-- AuditHero notebooks;
+- AuditHero operational notebooks;
 - Data Factory pipelines;
-- the monthly schedule in its configured disabled/enabled state;
+- the configured monthly schedule;
 - the Direct Lake semantic model; and
-- the AuditHero Power BI report.
+- the **AuditHero - SCHADS Payroll Compliance** Power BI report.
 
-It then runs Setup and Self Test automatically and installs two permanent administration notebooks:
+Setup and Self Test run during installation. The following administration notebooks are also installed:
 
 - **AuditHero - Install or Upgrade**
 - **AuditHero - Uninstall**
 
-After the first installation, use those installed notebooks for upgrades and removal. You do not need to import the bootstrap again unless you are reinstalling after removal.
+Later upgrades and removal use the installed administration notebooks.
 
 See [Install AuditHero in Microsoft Fabric](../docs/INSTALL_FABRIC_UI.md).
 
-## Normal operator workflow
+## CSV / Excel audit workflow
 
-In the AuditHero Fabric workspace:
+1. Upload original exports to `AuditHero_Lakehouse / Files / import / raw`.
+2. For a new or changed source layout, run **AuditHero - Build Source Mapping Workbook**.
+3. Review the generated mapping workbook and upload the approved file as `source_mapping.xlsx`.
+4. Run **AuditHero - Convert Mapped Files and Run Audit** for the required audit dates.
+5. Review **AuditHero - SCHADS Payroll Compliance** in Power BI.
 
-1. upload original exports to `AuditHero_Lakehouse / Files / import / raw`;
-2. run **AuditHero - Build Source Mapping Workbook**;
-3. review the generated Excel mapping and upload the approved `source_mapping.xlsx`;
-4. run **AuditHero - Convert Mapped Files and Run Audit** for the required dates; and
-5. review **AuditHero - SCHADS Payroll Compliance** in Power BI.
+Run **AuditHero - Convert Source Files** when conversion and File Readiness need to be checked without running the payroll audit.
 
-If you only want to inspect conversion/readiness, run **AuditHero - Convert Source Files**.
-
-If the exports already use AuditHero canonical format, upload them under `Files/input` and run **AuditHero - Uploaded Files Audit Pipeline** directly.
+If the source data already uses the AuditHero canonical format, upload it under `Files/input` and run **AuditHero - Uploaded Files Audit Pipeline** directly.
 
 Employment Hero API connectivity is optional.
 
 ## Upgrade
 
-Open **AuditHero - Install or Upgrade**, select the approved `release_ref` if required and choose **Run all**. The notebook updates the existing AuditHero application and reruns Setup and Self Test.
+Open **AuditHero - Install or Upgrade**, select the approved `release_ref` when required and choose **Run all**. The notebook updates the AuditHero application and reruns the installation validation sequence.
+
+Validate a representative payroll period after an upgrade before resuming recurring production audits.
 
 ## Uninstall
 
 Open **AuditHero - Uninstall** and choose **Run all**.
 
-The normal uninstall removes AuditHero application resources while preserving `AuditHero_Lakehouse` and its payroll/audit data. Permanent data removal requires the explicit confirmation phrase `DELETE AUDITHERO DATA` inside the uninstaller notebook.
+A standard uninstall removes AuditHero application resources while preserving `AuditHero_Lakehouse` and its payroll/audit data. Permanent data removal requires the explicit confirmation phrase `DELETE AUDITHERO DATA` in the uninstaller notebook.
 
 ## Main documentation
 
@@ -61,4 +61,4 @@ The normal uninstall removes AuditHero application resources while preserving `A
 - [Understanding results](../docs/UNDERSTANDING_RESULTS.md)
 - [Troubleshooting](../docs/TROUBLESHOOTING.md)
 - [Notebook reference](../docs/NOTEBOOK_REFERENCE.md)
-- [Optional CLI/automation](../docs/CLI_AND_AUTOMATION.md)
+- [Optional CLI and automation](../docs/CLI_AND_AUTOMATION.md)
