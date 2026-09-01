@@ -15,17 +15,12 @@
 delete_audit_data = False
 confirmation = ""
 
-# Full deletion requires:
-# delete_audit_data = True
-# confirmation = "DELETE AUDITHERO DATA"
-
 install_root = "/Shared/AuditHero"
 default_catalog = "schads_payroll"
 
 # COMMAND ----------
 import base64
 import json
-
 from databricks.sdk import WorkspaceClient
 
 if delete_audit_data and confirmation != "DELETE AUDITHERO DATA":
@@ -44,12 +39,7 @@ print("Catalog data deletion:", "YES" if delete_audit_data else "NO — data wil
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Read the installation record
-# MAGIC
-# MAGIC The installation record identifies the jobs, dashboard and SQL warehouse selected
-# MAGIC during installation. If it is unavailable, the uninstaller falls back to exact
-# MAGIC AuditHero resource names.
-
+# MAGIC ## Read installation record
 # COMMAND ----------
 state = {}
 try:
@@ -62,12 +52,21 @@ catalog = state.get("catalog") or default_catalog
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Remove AuditHero jobs
-
+# MAGIC ## Remove AuditHero Jobs
 # COMMAND ----------
 managed_job_names = {
     "AuditHero - Setup",
     "AuditHero - Self Test",
+    "AuditHero - Build Source Mapping",
+    "AuditHero - Convert Source Files (Advanced)",
+    "AuditHero - Payroll Audit - Uploaded Files",
+    "AuditHero - Readiness - Uploaded Files",
+    "AuditHero - Audit Canonical Files (Advanced)",
+    "AuditHero - Employment Hero Connection Test",
+    "AuditHero - Readiness - Employment Hero",
+    "AuditHero - Historical Audit - Employment Hero",
+    "AuditHero - Monthly Payroll Audit - Employment Hero",
+    # Previous names are retained for cleanup after an upgrade from older releases.
     "AuditHero - Build Source Mapping Workbook",
     "AuditHero - Convert Source Files",
     "AuditHero - Convert Mapped Files and Run Audit",
@@ -100,8 +99,31 @@ for job_id in sorted(job_ids):
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Unpublish and remove the AuditHero AI/BI dashboard
+# MAGIC ## Remove AuditHero Genie Agent
+# COMMAND ----------
+try:
+    token = None
+    while True:
+        query = {}
+        if token:
+            query["page_token"] = token
+        payload = call("GET", "/api/2.0/genie/spaces", query=query) or {}
+        spaces = payload.get("spaces", []) or payload.get("value", []) or []
+        for space in spaces:
+            if space.get("title") == "AuditHero - Payroll Compliance":
+                space_id = space.get("space_id") or space.get("id")
+                if space_id:
+                    call("DELETE", f"/api/2.0/genie/spaces/{space_id}")
+                    print(f"Removed Genie Agent: {space_id}")
+        token = payload.get("next_page_token") or payload.get("nextPageToken")
+        if not token:
+            break
+except Exception as exc:
+    print(f"Genie Agent cleanup could not be completed automatically: {exc}")
 
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Remove AuditHero AI/BI dashboard
 # COMMAND ----------
 dashboard_id = state.get("dashboard_id")
 if not dashboard_id:
@@ -132,7 +154,6 @@ if dashboard_id:
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Remove SQL warehouse only when AuditHero created it
-
 # COMMAND ----------
 warehouse_id = state.get("warehouse_id")
 if warehouse_id and state.get("warehouse_created_by_installer"):
@@ -146,25 +167,13 @@ else:
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Optionally remove the AuditHero catalog and all data
-# MAGIC
-# MAGIC `DROP CATALOG ... CASCADE` permanently removes AuditHero tables, views and the
-# MAGIC landing Volume. It runs only after the explicit full-delete confirmation above.
-
+# MAGIC ## Optionally remove AuditHero catalog and all data
 # COMMAND ----------
 if delete_audit_data:
     spark.sql(f"DROP CATALOG IF EXISTS `{catalog}` CASCADE")
     print(f"Permanently removed catalog and data: {catalog}")
 else:
     print(f"Preserved catalog and data: {catalog}")
-
-# COMMAND ----------
-# MAGIC %md
-# MAGIC ## Remove installed AuditHero workspace code last
-# MAGIC
-# MAGIC This removes `/Shared/AuditHero`, including the installed Install/Upgrade and
-# MAGIC Uninstall notebooks. It is last so the current uninstaller can finish all other
-# MAGIC cleanup first.
 
 # COMMAND ----------
 print("\nAuditHero uninstall completed.")
