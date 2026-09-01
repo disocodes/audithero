@@ -52,6 +52,17 @@ AMBIGUOUS_NAME_HEADERS = {
     "staff name", "worker name", "person name", "surname", "forename",
 }
 
+# Optional numeric fields may be suggested from a similar heading, but a source
+# containing Yes/No or other text is not sufficient numeric evidence.
+OPTIONAL_NUMERIC_FIELDS: dict[str, tuple[str, ...]] = {
+    "timesheets": ("unpaid_break_minutes", "sleepover_active_minutes"),
+    "rostered_shifts": ("rostered_break_minutes",),
+    "payroll_earnings": ("hours", "rate"),
+    "meal_break_events": ("deducted_break_minutes", "paid_meal_minutes"),
+    "supplemental_events": ("hours",),
+    "toil_register": ("time_off_hours",),
+}
+
 
 def _norm(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
@@ -144,14 +155,69 @@ def _candidate(item: pd.Series) -> dict[str, Any]:
     }
 
 
-def harden_payroll_earnings_draft(draft: dict[str, Any], source_root: str | Path) -> dict[str, Any]:
-    """Replace generic payroll_earnings inference with safety-oriented detection.
+def _read_sample(source_root: str | Path, source: dict[str, Any]) -> pd.DataFrame:
+    file_name = source.get("file") if isinstance(source, dict) else None
+    if not file_name:
+        return pd.DataFrame()
+    path = Path(source_root) / str(file_name)
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        if path.suffix.lower() == ".csv":
+            return pd.read_csv(path, nrows=50)
+        if path.suffix.lower() in {".xlsx", ".xlsm"}:
+            return pd.read_excel(path, sheet_name=source.get("sheet", 0), nrows=50)
+    except Exception:
+        return pd.DataFrame()
+    return pd.DataFrame()
 
-    Actual-pay reconciliation needs an earning-line category. When the uploaded
-    files do not expose a trustworthy employee identifier, pay period, category
-    and amount, payroll_earnings is left disabled. The entitlement audit can then
-    continue without actual-pay reconciliation instead of manufacturing a field
-    match from unrelated columns.
+
+def _numeric_ratio(series: pd.Series) -> float:
+    nonblank = series.dropna()
+    if nonblank.empty:
+        return 0.0
+    text = nonblank.astype(str).str.strip()
+    text = text[~text.str.lower().isin({"", "nan", "none", "nat"})]
+    if text.empty:
+        return 0.0
+    numeric = pd.to_numeric(text, errors="coerce")
+    return float(numeric.notna().mean())
+
+
+def _harden_optional_numeric_mappings(draft: dict[str, Any], source_root: str | Path) -> None:
+    datasets = draft.get("datasets") or {}
+    for dataset, fields in OPTIONAL_NUMERIC_FIELDS.items():
+        cfg = datasets.get(dataset) or {}
+        if not cfg.get("enabled"):
+            continue
+        sample = _read_sample(source_root, cfg.get("source") or {})
+        if sample.empty:
+            continue
+        columns = cfg.get("columns") or {}
+        suggestions = cfg.get("_suggestions") or {}
+        for field in fields:
+            rule = columns.get(field) or {}
+            source_field = rule if isinstance(rule, str) else rule.get("source")
+            if not source_field or source_field not in sample.columns:
+                continue
+            if _numeric_ratio(sample[source_field]) >= 0.8:
+                continue
+            columns.pop(field, None)
+            suggestion = suggestions.setdefault(field, {})
+            suggestion["suggested_source"] = None
+            suggestion["confidence"] = 0.0
+            suggestion["reason"] = "Source values are not predominantly numeric"
+        cfg["columns"] = columns
+        cfg["_suggestions"] = suggestions
+
+
+def harden_payroll_earnings_draft(draft: dict[str, Any], source_root: str | Path) -> dict[str, Any]:
+    """Apply safety-oriented source inference before publishing the mapping draft.
+
+    Actual-pay reconciliation needs a genuine earning-line category. Optional
+    numeric fields also require predominantly numeric sampled values. If those
+    conditions are not met, AuditHero leaves the affected mapping unavailable
+    rather than manufacturing a field match from unrelated source values.
     """
     inventory = scan_source_items(source_root)
     best: dict[str, Any] | None = None
@@ -179,6 +245,7 @@ def harden_payroll_earnings_draft(draft: dict[str, Any], source_root: str | Path
             "_dataset_confidence": round(best["score"], 3) if best is not None else 0.0,
             "_actual_pay_status": "UNAVAILABLE",
         })
+        _harden_optional_numeric_mappings(draft, source_root)
         return draft
 
     item = best["item"]
@@ -200,4 +267,5 @@ def harden_payroll_earnings_draft(draft: dict[str, Any], source_root: str | Path
         "_dataset_confidence": round(best["score"], 3),
         "_actual_pay_status": "AVAILABLE",
     })
+    _harden_optional_numeric_mappings(draft, source_root)
     return draft
