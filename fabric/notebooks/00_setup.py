@@ -2,8 +2,7 @@
 #
 # PURPOSE
 # -------
-# Prepare the attached AuditHero Lakehouse after installation or an approved
-# upgrade.
+# Prepare the attached AuditHero Lakehouse for AuditHero operation.
 #
 # WHAT IT DOES
 # 1. Creates the Lakehouse schemas and output tables.
@@ -12,6 +11,8 @@
 # 4. Creates administrator control and mapping templates when they do not exist.
 # 5. Records deployment context for traceability.
 #
+# DATA ACCESS
+# ----------
 # Setup does not read employee payroll data and does not calculate an audit.
 
 from pathlib import Path
@@ -107,7 +108,7 @@ try:
     CONFIG = Path("/lakehouse/default/Files/config")
     CONFIG.mkdir(parents=True, exist_ok=True)
 
-    # JSON mappings support optional Employment Hero API normalization. Existing
+    # JSON mappings support Employment Hero API normalization. Existing
     # administrator-managed files are preserved.
     json_templates = {
         "classification_mapping.json": {
@@ -187,5 +188,5 @@ else:
     )
     print("Raw import folder:      /lakehouse/default/Files/import/raw")
     print("Canonical input folder: /lakehouse/default/Files/input")
-    print("NEXT: run 'AuditHero - Self Test'.")
+    print("Recommended next step: run 'AuditHero - Self Test'.")
     notebookutils.notebook.exit("AUDITHERO_SUCCESS:" + json.dumps(summary))
