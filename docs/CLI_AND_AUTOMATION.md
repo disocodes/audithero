@@ -1,12 +1,10 @@
 # Optional CLI and automation
 
-AuditHero's primary installation method is the platform installer notebook. The commands in this guide are optional equivalents for administrators who prefer scripted deployment, CI/CD or disaster recovery.
-
-Normal payroll/audit operators do not need these commands.
+This guide is for administrators using scripted deployment, CI/CD or disaster-recovery procedures. The platform installer notebooks remain available for UI-based installation and upgrades.
 
 ## Microsoft Fabric automated deployment
 
-The notebook installer is `installers/Fabric_Install_AuditHero.py`. The scripted alternative is:
+The UI installer is `installers/Fabric_Install_AuditHero.py`. The scripted deployment path is:
 
 ### Linux/macOS
 
@@ -22,11 +20,11 @@ Copy-Item fabric/config/fabric.example.json fabric/config/fabric.json
 .\fabric\scripts\deploy.ps1
 ```
 
-The automated Fabric deployer creates/updates the core workspace items, canonical uploaded-file path, source-mapping pipelines and **AuditHero - Convert Mapped Files and Run Audit**. Key Vault configuration may remain blank when Employment Hero API mode is not used.
+The Fabric deployment creates or updates the core workspace items, uploaded-file workflow, source-mapping workflow and reporting layer. Key Vault configuration can remain blank when Employment Hero API mode is not used.
 
 ## Databricks automated bundle deployment
 
-The notebook installer is `installers/Databricks_Install_AuditHero.py`. The Databricks bundle remains available for scripted deployments.
+The UI installer is `installers/Databricks_Install_AuditHero.py`. The repository also provides a Databricks Declarative Automation Bundle.
 
 ### Linux/macOS
 
@@ -44,38 +42,38 @@ $env:DATABRICKS_BUNDLE_VAR_sql_warehouse_id = "<warehouse-id>"
 .\scripts\deploy.ps1
 ```
 
-The Databricks deployment validates the bundle, deploys the jobs/dashboard, runs Setup and executes the platform-native Self Test.
+The Databricks deployment validates and deploys the Bundle, runs Setup and executes Self Test. Setup creates the Unity Catalog data structures, governed metric views and AuditHero Genie configuration used by the deployed Jobs and AI/BI dashboard.
 
-Only run `scripts/configure_secrets.sh` or `scripts/configure_secrets.ps1` if optional Employment Hero API mode is being enabled.
+Run `scripts/configure_secrets.sh` or `scripts/configure_secrets.ps1` only when Employment Hero API mode is being enabled.
 
-## Source mapping after installation
+## Uploaded-file workflow after deployment
 
-Regardless of whether AuditHero was installed by notebook or script, normal payroll users work in the platform UI:
+Installation method does not change the audit workflow:
 
-1. upload raw exports;
-2. build/review `source_mapping.xlsx`;
+1. upload raw source exports;
+2. build and approve `source_mapping.xlsx` when required;
 3. run **AuditHero - Convert Mapped Files and Run Audit**; and
-4. review the dashboard/report.
+4. review the platform reporting layer.
 
 ## Preflight
 
-`scripts/preflight.py` performs repository/config structural checks before an automated deployment. It checks items such as Python/JSON/YAML structure, rule-manifest references, installer notebooks and required cross-platform deployment entrypoints.
+`scripts/preflight.py` performs repository and configuration structural checks before an automated deployment. It checks Python, JSON and YAML structure, rule-manifest references, installer notebooks and required cross-platform deployment entry points.
 
 Preflight does not replace:
 
-- the Fabric/Databricks native Self Test; or
-- a manually validated known payroll period.
+- the platform-native Setup and Self Test; or
+- validation of a known payroll period.
 
 ## CI/CD
 
-Use the same controlled order for automated promotion:
+A controlled promotion sequence is:
 
-1. repository tests and preflight;
-2. build the package/artifacts;
-3. deploy to a non-production workspace/target;
+1. run repository tests and preflight;
+2. build the package and deployment artifacts;
+3. deploy to a non-production workspace or target;
 4. run platform Setup and Self Test;
 5. run a known-period audit regression;
-6. obtain the required approval; and
-7. promote to production.
+6. complete the required review/approval; and
+7. promote the approved release to production.
 
-Do not automatically enable recurring payroll schedules merely because infrastructure deployment succeeded.
+Recurring payroll schedules should be enabled only after the deployed release and representative payroll results have been validated.
