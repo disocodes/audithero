@@ -4,8 +4,10 @@
 # MAGIC
 # MAGIC **Purpose:** confirm that the source-controlled MA000100 rate, condition and allowance packs can be loaded before they are used in an audit.
 # MAGIC
-# MAGIC This notebook is a rule-library health check. It does not read employee data or calculate under/over-payment.
+# MAGIC This notebook does not read employee data or calculate payroll results.
 # COMMAND ----------
+from pathlib import Path
+
 exec(open(str(Path.cwd() / "_common.py")).read())
 
 import pandas as pd
@@ -14,7 +16,7 @@ from schads_audit.rules import RuleLibrary
 # MAGIC %md
 # MAGIC ## Load and validate the rule packs
 # MAGIC
-# MAGIC Validation stops on malformed/missing rule content. A successful result then displays the coverage rows so an administrator can see the operative dates currently available.
+# MAGIC Validation stops if required rule content is missing or malformed. The resulting table lists the available operative dates by rule-pack type.
 # COMMAND ----------
 lib = RuleLibrary(ROOT / "rules/MA000100")
 errors = lib.validate()
