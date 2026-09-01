@@ -2,9 +2,9 @@
 # MAGIC %md
 # MAGIC # AuditHero — Monthly Payroll Audit (Optional API)
 # MAGIC
-# MAGIC **Purpose:** run the recurring Employment Hero API audit over a rolling lookback window.
+# MAGIC **Purpose:** run the recurring Employment Hero API-sourced payroll audit over a rolling lookback window.
 # MAGIC
-# MAGIC The Databricks Job schedule is paused by default and should be enabled only after a representative payroll period has been validated. File-based audits use the uploaded-file Jobs instead.
+# MAGIC The Databricks Job schedule is paused by default. Enable recurring execution only after a representative payroll period has been validated. File-based audits use the uploaded-file Jobs instead.
 # COMMAND ----------
 # MAGIC %pip install "holidays>=0.75" "requests>=2.32" "pandas>=2.0"
 # COMMAND ----------
@@ -39,7 +39,7 @@ lib = RuleLibrary(ROOT / "rules/MA000100")
 # MAGIC %md
 # MAGIC ## 2. Run the recurring API audit
 # MAGIC
-# MAGIC The shared AuditHero pipeline performs extraction, normalization, evidence controls, effective-dated entitlement calculation, reconciliation and persistence for the resolved date window.
+# MAGIC The shared AuditHero pipeline performs extraction, normalization, evidence controls, effective-dated entitlement calculation, reconciliation, and persistence for the resolved date window.
 # COMMAND ----------
 result = run_databricks_audit_v2(
     spark,
@@ -54,11 +54,11 @@ result = run_databricks_audit_v2(
 )
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 3. Refresh reporting views and display the run summary
+# MAGIC ## 3. Refresh reporting views and display the audit summary
 # COMMAND ----------
 create_views(spark, cfg.catalog)
 print(f"Monthly audit complete: {result['run_id']} ({start_date} to {end_date})")
 if not result["reconciliation"].empty:
     print(result["reconciliation"]["status"].value_counts(dropna=False).to_string())
     display(result["reconciliation"].sort_values(["status", "employee_name"]).head(500))
-print("NEXT: review the AuditHero - SCHADS Payroll Compliance dashboard and the AuditHero - Payroll Compliance Genie space.")
+print("Recommended next step: review the AuditHero - SCHADS Payroll Compliance dashboard, Genie analysis, and detailed audit evidence.")
