@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC **Purpose:** verify representative SCHADS calculations inside the installed Databricks environment before production payroll data is used.
 # MAGIC
-# MAGIC Self Test uses synthetic records only. It checks historical/current rate selection, a casual Saturday, sleepover treatment, location-specific holidays, broken-shift grouping/allowance and period overtime allocation. A failed assertion indicates that the installed runtime or rule configuration requires review.
+# MAGIC Self Test uses synthetic records only. It checks effective-dated rate selection, a casual Saturday, sleepover treatment, location-specific holidays, broken-shift grouping and allowance treatment, and period overtime allocation. A failed assertion indicates that the installed runtime or rule configuration requires review.
 # COMMAND ----------
 # MAGIC %pip install "pandas>=2.0"
 # COMMAND ----------
@@ -32,16 +32,16 @@ def ok(name, condition, detail=""):
 # MAGIC %md
 # MAGIC ## 1. Rule versions and known rates
 # MAGIC
-# MAGIC These checks confirm that the expected historical and current rule packs are available.
+# MAGIC These checks confirm that representative historical and later effective-dated rule packs are available.
 # COMMAND ----------
 errors = lib.validate()
 ok("rule library validation", errors == [], errors)
 
 rate_2024, _ = lib.rate("SACS-L2-P3", "2024-09-01")
-ok("historical 2024 SACS rate", rate_2024 and rate_2024["base_hourly_rate"] == 35.51, rate_2024)
+ok("2024 SACS rate", rate_2024 and rate_2024["base_hourly_rate"] == 35.51, rate_2024)
 
 rate_2026, _ = lib.rate("SACS-L2-P3", "2026-08-01")
-ok("current 2026 SACS rate", rate_2026 and rate_2026["base_hourly_rate"] == 38.50, rate_2026)
+ok("2026 SACS rate", rate_2026 and rate_2026["base_hourly_rate"] == 38.50, rate_2026)
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 2. Build a synthetic employee
@@ -128,4 +128,4 @@ detail = allocate_period_overtime(detail, empty_holidays, lib)
 ok("weekly threshold overtime allocation", any("PERIOD_OVERTIME_REPRICE" in x for x in detail.calculation_evidence))
 
 print(f"\nAuditHero self-test complete: {len(passed)} checks passed.")
-print("NEXT: validate source data and mapping, then run one known payroll period.")
+print("Recommended next step: validate the source data and approved mapping, then run one independently checked payroll period.")
