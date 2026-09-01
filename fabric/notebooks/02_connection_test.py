@@ -2,13 +2,19 @@
 #
 # PURPOSE
 # -------
-# Confirm that optional Employment Hero HR API credentials stored in Azure Key
-# Vault can authenticate and read the basic tenant metadata needed by API mode.
-# This notebook does not change Employment Hero data and does not calculate pay.
-# Uploaded-file audits do not require this notebook.
+# Verify that the configured Employment Hero HR API credentials stored in Azure
+# Key Vault can authenticate and read the tenant metadata required by AuditHero
+# API workflows.
 #
-# PARAMETER: key_vault_url — Azure Key Vault URL containing the canonical AuditHero
-# Employment Hero secret names.
+# DATA ACCESS
+# ----------
+# This notebook performs read-only API checks. It does not change Employment Hero
+# data and does not calculate payroll. Uploaded-file audits do not require it.
+#
+# PARAMETER
+# ---------
+# key_vault_url — Azure Key Vault URL containing the AuditHero Employment Hero
+# secret names.
 
 from schads_audit.fabric_config import FabricAuditConfig
 from schads_audit.employment_hero_hr import EmploymentHeroHRClient
@@ -45,5 +51,5 @@ print(f"Award/classification metadata: {len(awards)}")
 print(f"Pay categories: {len(pay_categories)}")
 print(f"Work types: {len(work_types)}")
 print(f"Work locations: {len(work_locations)}")
-print("NEXT: run 'AuditHero - API Audit Readiness' only if API mode will be used.")
+print("Recommended next step: run 'AuditHero - API Audit Readiness' before the first API-sourced payroll audit.")
 notebookutils.notebook.exit("success")
