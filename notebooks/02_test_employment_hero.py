@@ -2,7 +2,9 @@
 # MAGIC %md
 # MAGIC # AuditHero — Employment Hero Connection Test (Optional API)
 # MAGIC
-# MAGIC **Purpose:** confirm that the optional Employment Hero HR API credentials can authenticate and read the metadata required by AuditHero API workflows. This notebook does not calculate payroll and is not required for uploaded-file audits.
+# MAGIC **Purpose:** verify that the configured Employment Hero HR API credentials can authenticate and read the metadata required by AuditHero API workflows.
+# MAGIC
+# MAGIC **Data access:** this notebook performs read-only API checks. It does not calculate payroll and is not required for uploaded-file audits.
 # COMMAND ----------
 # MAGIC %pip install "requests>=2.32"
 # COMMAND ----------
@@ -16,7 +18,7 @@ from schads_audit.employment_hero_hr import EmploymentHeroHRClient
 # MAGIC %md
 # MAGIC ## 1. Read the Databricks secret scope
 # MAGIC
-# MAGIC Secret values are not printed. The scope contains the Employment Hero client ID, client secret, refresh token and organisation ID configured by an administrator.
+# MAGIC Secret values are not printed. The configured scope contains the Employment Hero client ID, client secret, refresh token, and organisation ID.
 # COMMAND ----------
 dbutils.widgets.text("secret_scope", "audithero")
 scope = dbutils.widgets.get("secret_scope")
@@ -38,11 +40,11 @@ organisation_id = secret("EH_ORGANISATION_ID")
 # MAGIC %md
 # MAGIC ## 2. Perform read-only API checks
 # MAGIC
-# MAGIC The calls below verify access to the organisation and required metadata endpoints. No Employment Hero records are changed.
+# MAGIC The calls below verify access to the organisation and metadata endpoints required by the AuditHero API workflows. No Employment Hero records are changed.
 # COMMAND ----------
 print("Employment Hero connection succeeded")
 print("Employees:", len(client.employees(organisation_id)))
 print("Awards/classifications:", len(client.awards_and_classifications(organisation_id)))
 print("Pay categories:", len(client.pay_categories(organisation_id)))
 print("Work types:", len(client.work_types(organisation_id)))
-print("NEXT: run 'AuditHero - API Audit Readiness (Optional API)' if API mode will be used.")
+print("Recommended next step: run 'AuditHero - API Audit Readiness (Optional API)' before the first API-sourced payroll audit.")
