@@ -2,7 +2,7 @@
 #
 # PURPOSE
 # -------
-# Run the file-based AuditHero payroll audit from canonical files. The standard
+# Run a file-based AuditHero payroll audit from canonical files. The standard
 # Fabric pipeline runs File Readiness first and then invokes this notebook with the
 # canonical input folder and requested audit date range.
 #
@@ -98,5 +98,5 @@ print(f"Uploaded-file audit complete: {run_id}")
 if not reconciliation.empty:
     print(reconciliation["status"].value_counts(dropna=False).to_string())
     display(reconciliation.sort_values(["status", "employee_name"]).head(200))
-print("NEXT: review the AuditHero Power BI report.")
+print("Recommended next step: review the AuditHero Power BI report and detailed audit evidence.")
 notebookutils.notebook.exit(run_id)
