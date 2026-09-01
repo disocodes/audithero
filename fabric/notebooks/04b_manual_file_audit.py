@@ -2,13 +2,13 @@
 #
 # PURPOSE
 # -------
-# Main credential-free AuditHero audit for canonical files. The standard Fabric
-# pipeline runs File Readiness first, then calls this notebook with input_root and
-# the requested date range.
+# Run the file-based AuditHero payroll audit from canonical files. The standard
+# Fabric pipeline runs File Readiness first and then invokes this notebook with the
+# canonical input folder and requested audit date range.
 #
-# This notebook uses the shared AuditHero calculation engine, persists normalized
-# evidence/results, records the run and replaces the Direct Lake current snapshot
-# only after the audit completes successfully.
+# The notebook calculates expected entitlements with the shared AuditHero engine,
+# stores normalized evidence and audit results, records the audit run and publishes
+# the successful reporting snapshot.
 
 from datetime import datetime, timezone
 import uuid
@@ -90,9 +90,7 @@ run = pd.DataFrame([{
 write_df(spark, run, "ops.audit_runs")
 create_views(spark)
 
-print("STEP 7 — Replace the BI-facing snapshot with this successful run")
-# This occurs after calculation/persistence so a failed audit does not replace the
-# previously successful Power BI snapshot.
+print("STEP 7 — Publish the successful audit snapshot for reporting")
 publish_current_snapshots(spark, result)
 
 print(f"Uploaded-file audit complete: {run_id}")
