@@ -64,7 +64,6 @@ def _runtime_context_value(name):
     module_name = type(value).__module__
     type_name = type(value).__name__
     if module_name.startswith("py4j") or type_name == "JavaMember":
-        # Only serializable runtime context values are written to the deployment manifest.
         return None
 
     try:
@@ -100,7 +99,6 @@ try:
 
     stage = "STEP 3 — Create latest-successful audit views"
     print(stage)
-    # Reporting views expose successful audit results.
     create_views(spark)
 
     stage = "STEP 4 — Create administrator configuration templates"
@@ -108,8 +106,6 @@ try:
     CONFIG = Path("/lakehouse/default/Files/config")
     CONFIG.mkdir(parents=True, exist_ok=True)
 
-    # JSON mappings support Employment Hero API normalization. Existing
-    # administrator-managed files are preserved.
     json_templates = {
         "classification_mapping.json": {
             "_instructions": "Source classification name/pay-detail ID -> canonical AuditHero SCHADS classification code"
@@ -132,14 +128,13 @@ try:
         if not path.exists():
             path.write_text(json.dumps(body, indent=2), encoding="utf-8")
 
-    # CSV registers store evidence for conditions that may not be available in
-    # standard payroll exports. Existing administrator-managed registers are preserved.
     csv_headers = {
         "public_holiday_overrides.csv": "state,holiday_date,holiday_name,holiday_location_key,holiday_scope,source\n",
         "supplemental_events.csv": "event_id,employee_id,event_type,start_datetime,end_datetime,hours,pay_period_start,pay_period_end,state,holiday_location_key,on_call,training_or_meeting,classification_code,work_group\n",
         "industrial_instrument_history.csv": "employee_id,effective_from,effective_to,instrument_type,instrument_name,award_code,document_reference\n",
         "part_time_patterns.csv": "employee_id,effective_from,effective_to,weekday,start_time,end_time,guaranteed_hours,agreement_reference\n",
         "part_time_variations.csv": "employee_id,shift_date,start_time,end_time,agreement_reference\n",
+        "rest_break_controls.csv": "employee_id,previous_timesheet_id,next_timesheet_id,shift_start,sleepover_8h_agreement,employer_instructed_resume,release_datetime,evidence_reference\n",
         "overtime_rest_controls.csv": "employee_id,timesheet_id,shift_start,employer_instructed_resume,evidence_reference\n",
         "meal_break_events.csv": "event_id,employee_id,timesheet_id,mode,scheduled_break_start,actual_break_start,deducted_break_minutes,paid_meal_minutes,evidence_reference\n",
         "toil_register.csv": "agreement_id,employee_id,overtime_datetime,overtime_hours,written_agreement,agreement_date,time_off_hours,time_off_date,payment_requested_date,payment_date,payment_pay_period_start,payment_pay_period_end,employment_end_date,classification_code,employment_type,work_group,state,holiday_location_key,evidence_reference\n",
