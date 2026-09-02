@@ -41,7 +41,7 @@ def _container(config, x, y, w, h, z):
     }
 
 
-def _card(entity, measures, x=20, y=20, w=1240, h=165, z=0):
+def _card(entity, measures, x=20, y=20, w=1240, h=165, z=0, title="AuditHero — SCHADS Payroll Compliance"):
     vid = _id()
     source = "r"
     query_refs = [f"{entity}.{m}" for m in measures]
@@ -93,13 +93,7 @@ def _card(entity, measures, x=20, y=20, w=1240, h=165, z=0):
                     {
                         "properties": {
                             "show": {"expr": {"Literal": {"Value": "true"}}},
-                            "text": {
-                                "expr": {
-                                    "Literal": {
-                                        "Value": "'AuditHero — SCHADS Payroll Compliance'"
-                                    }
-                                }
-                            },
+                            "text": {"expr": {"Literal": {"Value": "'" + title.replace("'", "''") + "'"}}},
                         }
                     }
                 ]
@@ -249,6 +243,54 @@ def build_audithero_report_json():
             )
         ],
     )
+    rest_breaks = _section(
+        "Rest & Breaks",
+        [
+            _card(
+                "Rest Break Findings",
+                [
+                    "Rest Intervals Assessed",
+                    "Short Rest Findings",
+                    "Rest Findings Requiring Review",
+                    "Overtime Rest Cases",
+                    "Double-Time Repriced Hours",
+                    "Double-Time Top-up",
+                    "Paid Absence Rostered Hours",
+                ],
+                y=20,
+                h=165,
+                title="AuditHero — Rest Between Work",
+            ),
+            _matrix(
+                "Rest Break Findings",
+                [
+                    "employee_name",
+                    "previous_shift_end",
+                    "next_shift_start",
+                    "required_rest_hours",
+                    "actual_rest_hours",
+                    "rest_shortfall_hours",
+                    "status",
+                    "sleepover_adjacent_exception_eligible",
+                    "sleepover_8h_agreement",
+                    "overtime_rest_rule_applies",
+                    "employer_instructed_resume",
+                    "release_datetime",
+                    "double_time_repriced_hours",
+                    "double_time_topup",
+                    "paid_absence_rostered_hours",
+                    "payment_status",
+                    "clause",
+                    "overtime_clause",
+                    "evidence_reference",
+                    "notes",
+                ],
+                title="Effective-dated rest-between-work findings",
+                y=200,
+                h=485,
+            ),
+        ],
+    )
     supplemental = _section(
         "Supplemental & TOIL",
         [
@@ -348,5 +390,5 @@ def build_audithero_report_json():
                 }
             }
         ],
-        "sections": [overview, exceptions, shifts, supplemental, controls],
+        "sections": [overview, exceptions, shifts, rest_breaks, supplemental, controls],
     }
