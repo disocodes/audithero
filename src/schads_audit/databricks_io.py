@@ -43,6 +43,7 @@ def create_views(spark, catalog):
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_detail_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_detail` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_event_adjustments_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_event_adjustments` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_toil_findings_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`toil_findings` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_rest_break_findings_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`rest_break_findings` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_reconciliation_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`pay_period_reconciliation` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_rule_coverage` AS SELECT * FROM `{catalog}`.`ref`.`rule_coverage` ''')
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_runs` AS SELECT * FROM `{catalog}`.`ops`.`audit_runs` ''')
@@ -154,4 +155,53 @@ measures:
 '''
     spark.sql(
         f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`audit_detail` WITH METRICS LANGUAGE YAML AS $$\n{detail_yaml}\n$$'''
+    )
+
+    rest_yaml = f'''version: 1.1
+comment: "AuditHero governed rest-between-work findings from the latest successful audit runs"
+source: {catalog}.gold.v_rest_break_findings_latest
+fields:
+  - name: employee_id
+    expr: source.employee_id
+  - name: employee_name
+    expr: source.employee_name
+  - name: finding_type
+    expr: source.finding_type
+  - name: previous_shift_end
+    expr: source.previous_shift_end
+  - name: next_shift_start
+    expr: source.next_shift_start
+  - name: required_rest_hours
+    expr: source.required_rest_hours
+  - name: actual_rest_hours
+    expr: source.actual_rest_hours
+  - name: rest_shortfall_hours
+    expr: source.rest_shortfall_hours
+  - name: status
+    expr: source.status
+  - name: payment_status
+    expr: source.payment_status
+  - name: overtime_rest_rule_applies
+    expr: source.overtime_rest_rule_applies
+  - name: audit_run_id
+    expr: source.audit_run_id
+measures:
+  - name: rest_intervals
+    expr: COUNT(1)
+    comment: "Rest intervals assessed between work units"
+  - name: short_rest_findings
+    expr: SUM(CASE WHEN COALESCE(source.rest_shortfall_hours,0) > 0 THEN 1 ELSE 0 END)
+    comment: "Intervals shorter than the applicable effective-dated rest requirement"
+  - name: review_findings
+    expr: SUM(CASE WHEN source.status = 'REQUIRES_REVIEW' THEN 1 ELSE 0 END)
+    comment: "Rest findings requiring evidence review"
+  - name: overtime_rest_cases
+    expr: SUM(CASE WHEN source.overtime_rest_rule_applies THEN 1 ELSE 0 END)
+    comment: "Intervals where clause 28.3 rest-after-overtime logic applies"
+  - name: double_time_topup
+    expr: SUM(COALESCE(source.double_time_topup,0))
+    comment: "Calculated double-time top-up supported by the available evidence"
+'''
+    spark.sql(
+        f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`rest_break_compliance` WITH METRICS LANGUAGE YAML AS $$\n{rest_yaml}\n$$'''
     )
