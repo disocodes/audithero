@@ -32,28 +32,35 @@ def test_dashboard_uses_one_investigation_dataset_for_linked_analysis():
     assert "v_audit_investigation_latest" in datasets["investigation"]["queryLines"][0]
     assert all(isinstance(item.get("queryLines"), list) and item["queryLines"] for item in dashboard["datasets"])
 
-    for page_name in ("overview", "investigation"):
+    for page_name in ("global_filters", "overview", "investigation"):
         for widget in _widgets(_page(dashboard, page_name)):
             for query in widget.get("queries", []):
                 assert query["query"]["datasetName"] == "investigation"
 
 
-def test_dashboard_has_current_field_filters_for_audit_investigation():
+def test_dashboard_has_global_and_page_level_field_filters():
     dashboard = _built_dashboard()
-    overview = _widgets(_page(dashboard, "overview"))
+    global_page = _page(dashboard, "global_filters")
     investigation = _widgets(_page(dashboard, "investigation"))
 
-    filter_widgets = [
-        widget for widget in [*overview, *investigation]
+    assert global_page["pageType"] == "PAGE_TYPE_GLOBAL_FILTERS"
+    global_filters = [
+        widget for widget in _widgets(global_page)
         if str(widget.get("spec", {}).get("widgetType", "")).startswith("filter-")
     ]
-    assert filter_widgets
+    local_filters = [
+        widget for widget in investigation
+        if str(widget.get("spec", {}).get("widgetType", "")).startswith("filter-")
+    ]
+    assert global_filters
+    assert local_filters
 
     fields = {
         widget["spec"]["encodings"]["fields"][0]["fieldName"]
-        for widget in filter_widgets
+        for widget in [*global_filters, *local_filters]
     }
     assert {
+        "pay_period_start",
         "reconciliation_status",
         "employee_name",
         "employment_type",
@@ -62,8 +69,10 @@ def test_dashboard_has_current_field_filters_for_audit_investigation():
         "state",
         "employee_pay_period",
     }.issubset(fields)
+    assert any(widget["spec"]["widgetType"] == "filter-date-range-picker" for widget in global_filters)
+    assert any(widget["spec"]["widgetType"] == "filter-single-select" for widget in local_filters)
 
-    for widget in filter_widgets:
+    for widget in [*global_filters, *local_filters]:
         assert widget["spec"]["version"] == 2
         assert widget["spec"]["frame"]["showTitle"] is True
         assert "associative_filter_predicate_group" not in json.dumps(widget)
@@ -72,7 +81,7 @@ def test_dashboard_has_current_field_filters_for_audit_investigation():
             assert len(query["query"]["fields"]) == 1
 
 
-def test_dashboard_contains_kpis_charts_and_searchable_detail_tables():
+def test_dashboard_contains_kpis_charts_and_current_table_specs():
     dashboard = _built_dashboard()
     overview = _widgets(_page(dashboard, "overview"))
     investigation = _widgets(_page(dashboard, "investigation"))
@@ -83,21 +92,35 @@ def test_dashboard_contains_kpis_charts_and_searchable_detail_tables():
     assert {"counter", "bar", "line", "table"}.issubset(overview_types)
     assert {"counter", "bar", "table", "filter-single-select"}.issubset(investigation_types)
 
-    detail_tables = [widget for widget in investigation if widget.get("spec", {}).get("widgetType") == "table"]
-    assert len(detail_tables) >= 2
-    for widget in detail_tables:
+    all_tables = [
+        widget for page in dashboard["pages"] for widget in _widgets(page)
+        if widget.get("spec", {}).get("widgetType") == "table"
+    ]
+    assert len(all_tables) >= 5
+    for widget in all_tables:
         table = widget["spec"]
-        assert table["version"] == 1
-        assert table["itemsPerPage"] >= 20
-        assert table["paginationSize"] == "default"
-        assert "invisibleColumns" in table
-        assert "withRowNumber" in table
-        assert "condensed" in table
-        assert "allowHTMLByDefault" in table
+        assert table["version"] == 2
         assert all(
-            {"fieldName", "displayName", "order", "visible", "type", "displayAs"}.issubset(column)
+            {"fieldName", "displayName"}.issubset(column)
             for column in table["encodings"]["columns"]
         )
+
+    evidence = next(widget for widget in investigation if widget.get("name") == "calculation_evidence")
+    evidence_columns = {column["fieldName"]: column for column in evidence["spec"]["encodings"]["columns"]}
+    assert evidence_columns["calculation_evidence"]["displayAs"] == "json"
+
+
+def test_text_and_time_series_widgets_use_current_schema():
+    dashboard = _built_dashboard()
+    overview = _widgets(_page(dashboard, "overview"))
+
+    title = next(widget for widget in overview if widget.get("name") == "overview_title")
+    assert "multilineTextboxSpec" in title
+    assert "textbox_spec" not in title
+
+    variance = next(widget for widget in overview if widget.get("name") == "variance_trend")
+    assert variance["spec"]["version"] == 3
+    assert variance["spec"]["encodings"]["x"]["scale"]["type"] == "temporal"
 
 
 def test_overview_pay_period_table_is_grouped_and_drillthrough_ready():
@@ -111,6 +134,7 @@ def test_overview_pay_period_table_is_grouped_and_drillthrough_ready():
     assert query["disaggregated"] is False
     fields = {field["name"] for field in query["fields"]}
     assert {"employee_pay_period", "employee_name", "pay_period_start", "reconciliation_status"}.issubset(fields)
+    assert "Drill to" in period_table["spec"]["frame"]["description"]
     assert _page(dashboard, "investigation")["pageType"] == "PAGE_TYPE_CANVAS"
 
 
