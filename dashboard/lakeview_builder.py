@@ -60,10 +60,15 @@ def _filter(widget: dict[str, Any], index: int) -> dict[str, Any]:
             "disaggregated": False,
         },
     }
-    multiple = widget.get("selection", "multi") == "multi"
+    filter_type = widget.get("filter_type", "categorical")
+    if filter_type == "date-range":
+        widget_type = "filter-date-range-picker"
+    else:
+        multiple = widget.get("selection", "multi") == "multi"
+        widget_type = "filter-multi-select" if multiple else "filter-single-select"
     spec = {
         "version": 2,
-        "widgetType": "filter-multi-select" if multiple else "filter-single-select",
+        "widgetType": widget_type,
         "encodings": {
             "fields": [
                 {
@@ -171,9 +176,10 @@ def _table_column(column: dict[str, Any]) -> dict[str, Any]:
     }
     kind = column.get("kind", "string")
     if kind == "number":
+        currency = str(column.get("number_format", "")).startswith("$")
         result["format"] = {
-            "type": "number-currency" if str(column.get("number_format", "")).startswith("$") else "number-plain",
-            **({"currencyCode": "AUD"} if str(column.get("number_format", "")).startswith("$") else {}),
+            "type": "number-currency" if currency else "number-plain",
+            **({"currencyCode": "AUD"} if currency else {}),
             "abbreviation": "none",
             "decimalPlaces": {"type": "max", "places": 2},
         }
@@ -183,6 +189,10 @@ def _table_column(column: dict[str, Any]) -> dict[str, Any]:
             "abbreviation": "none",
             "decimalPlaces": {"type": "exact", "places": 0},
         }
+    elif kind == "json":
+        result["displayAs"] = "json"
+    if column.get("tooltip"):
+        result["tooltip"] = {"templatedText": column["tooltip"]}
     return result
 
 
@@ -246,7 +256,7 @@ def build_dashboard(spec: dict[str, Any]) -> dict[str, Any]:
         pages.append({
             "name": page["name"],
             "displayName": page["display_name"],
-            "pageType": "PAGE_TYPE_CANVAS",
+            "pageType": page.get("page_type", "PAGE_TYPE_CANVAS"),
             "layoutVersion": "GRID_V1",
             "layout": layout,
         })
