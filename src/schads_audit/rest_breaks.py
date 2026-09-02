@@ -77,6 +77,19 @@ def _rest_rule(conditions: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _row_rule_reference(row):
+    pay_period = _dt(row.get("pay_period_start"))
+    if pay_period is not None:
+        return pay_period, "PAY_PERIOD_START"
+    return _dt(row.get("start_datetime")), "SHIFT_START"
+
+
+def _transition_reference_uncertain(reference, source):
+    if reference is None or source != "SHIFT_START":
+        return False
+    return reference.year == 2026 and reference.month == 6
+
+
 def _merge_controls(rest_controls, legacy_controls):
     frames = []
     for frame in (rest_controls, legacy_controls):
@@ -125,6 +138,18 @@ def _sleepover_groups(timesheets):
     return groups
 
 
+def _unit_reference(members):
+    for member in members:
+        reference, source = _row_rule_reference(member)
+        if source == "PAY_PERIOD_START" and reference is not None:
+            return reference, source
+    for member in members:
+        reference, source = _row_rule_reference(member)
+        if reference is not None:
+            return reference, source
+    return None, "UNKNOWN"
+
+
 def _new_unit(members, *, start=None, end=None, contains_sleepover=False, sleepover_group_id=None, broken_shift_group_id=None):
     work_members = [m for m in members if _bool(m.get("is_sleepover")) is not True]
     if not work_members:
@@ -136,11 +161,14 @@ def _new_unit(members, *, start=None, end=None, contains_sleepover=False, sleepo
     if not starts or not ends:
         return None
     roles = {str(m.get("sleepover_period_role") or "") for m in work_members}
+    reference, reference_source = _unit_reference(members)
     return {
         "employee_id": str(work_members[0].get("employee_id")),
         "timesheet_ids": [m.get("timesheet_id") for m in work_members],
         "start": start or min(starts),
         "end": end or max(ends),
+        "rule_reference": reference,
+        "rule_reference_source": reference_source,
         "sleepover_group_id": sleepover_group_id,
         "broken_shift_group_id": broken_shift_group_id,
         "contains_sleepover": bool(contains_sleepover),
@@ -152,10 +180,10 @@ def _new_unit(members, *, start=None, end=None, contains_sleepover=False, sleepo
 def _work_units(timesheets, lib):
     """Build work units used for rest sequencing.
 
-    Periods that form one broken shift are consolidated. From the 2026 sleepover
-    variation, work immediately before and after a sleepover is consolidated into
-    one shift. Pre-variation sleepover periods remain separate from surrounding
-    work and can count as rest according to the effective condition pack.
+    Periods that form one broken shift are consolidated. Sleepover grouping is
+    selected using the same pay-period reference basis as the entitlement engine.
+    Where June 2026 sleepover data lacks a pay-period reference, the transition is
+    kept ungrouped and later returned for review rather than guessed.
     """
     if timesheets is None or timesheets.empty:
         return [], []
@@ -172,7 +200,12 @@ def _work_units(timesheets, lib):
         end = _dt(row.get("end_datetime"))
         if start is None or end is None or end <= start:
             continue
-        rule = _rest_rule(lib.conditions(start) or {})
+        reference, reference_source = _row_rule_reference(row)
+        rule = _rest_rule(lib.conditions(reference or start) or {})
+        active_minutes = pd.to_numeric(
+            pd.Series([row.get("sleepover_active_minutes")]), errors="coerce"
+        ).iloc[0]
+        active_minutes = 0.0 if pd.isna(active_minutes) else float(active_minutes)
         sleepovers.append(
             {
                 "employee_id": str(row.get("employee_id")),
@@ -181,16 +214,20 @@ def _work_units(timesheets, lib):
                 "start": start,
                 "end": end,
                 "counts_as_break": rule["sleepover_counts_as_break"],
+                "active_work_minutes": active_minutes,
+                "rule_reference": reference,
+                "rule_reference_source": reference_source,
+                "transition_reference_uncertain": _transition_reference_uncertain(reference, reference_source),
             }
         )
 
-    # Current Award treatment: the sleepover and immediately surrounding work are
-    # one shift for the rest-between-work test.
     for gid, members in groups.items():
-        reference = _dt(next((m.get("start_datetime") for m in members if _bool(m.get("is_sleepover")) is True), None))
+        reference, reference_source = _unit_reference(members)
         if reference is None:
             reference = _dt(members[0].get("start_datetime"))
         rule = _rest_rule(lib.conditions(reference) or {}) if reference is not None else _rest_rule({})
+        if _transition_reference_uncertain(reference, reference_source):
+            continue
         if not rule["surrounding_work_same_shift"]:
             continue
         unit = _new_unit(members, contains_sleepover=True, sleepover_group_id=gid)
@@ -202,8 +239,6 @@ def _work_units(timesheets, lib):
                 if m.get("timesheet_id") not in (None, "")
             )
 
-    # A broken shift is a single shift made up of multiple work periods. Its
-    # internal unpaid breaks are not separate 10-hour-rest events.
     broken_groups = {}
     for row in rows:
         tid = str(row.get("timesheet_id"))
@@ -246,17 +281,25 @@ def _work_units(timesheets, lib):
 
 def _qualifying_rest_hours(previous, nxt, sleepovers):
     if nxt["start"] <= previous["end"]:
-        return 0.0, []
+        return 0.0, [], []
     blockers = []
+    uncertainties = []
     for sleep in sleepovers:
-        if sleep["employee_id"] != previous["employee_id"] or sleep["counts_as_break"]:
+        if sleep["employee_id"] != previous["employee_id"]:
             continue
-        start = max(previous["end"], sleep["start"])
-        end = min(nxt["start"], sleep["end"])
-        if end > start:
-            blockers.append((start, end, sleep))
+        overlap_start = max(previous["end"], sleep["start"])
+        overlap_end = min(nxt["start"], sleep["end"])
+        if overlap_end <= overlap_start:
+            continue
+        if sleep.get("transition_reference_uncertain") or (
+            sleep.get("counts_as_break") and sleep.get("active_work_minutes", 0) > 0
+        ):
+            uncertainties.append(sleep)
+        if sleep["counts_as_break"]:
+            continue
+        blockers.append((overlap_start, overlap_end, sleep))
     if not blockers:
-        return (nxt["start"] - previous["end"]).total_seconds() / 3600, []
+        return (nxt["start"] - previous["end"]).total_seconds() / 3600, [], uncertainties
     blockers.sort(key=lambda item: item[0])
     merged = []
     for start, end, sleep in blockers:
@@ -273,7 +316,7 @@ def _qualifying_rest_hours(previous, nxt, sleepovers):
         cursor = max(cursor, end)
         used.extend(sleeps)
     longest = max(longest, (nxt["start"] - cursor).total_seconds() / 3600)
-    return max(0.0, longest), used
+    return max(0.0, longest), used, uncertainties
 
 
 def _sleepover_adjacent(previous, nxt):
@@ -294,7 +337,8 @@ def _historical_internal_sleepover(previous, nxt, sleepovers, lib):
     matching = [s for s in sleepovers if str(s.get("group_id")) == str(gid)]
     if not matching:
         return False
-    return _rest_rule(lib.conditions(previous["start"]) or {})["historical_sleepover_interaction_review"]
+    reference = previous.get("rule_reference") or previous["start"]
+    return _rest_rule(lib.conditions(reference) or {})["historical_sleepover_interaction_review"]
 
 
 def _unit_detail_rows(detail, unit):
@@ -313,13 +357,7 @@ def _unit_has_overtime(detail, unit):
 
 
 def _reprice_resumed_work_to_minimum(detail, employee_id, resume_start, release_datetime, minimum_multiplier, event_key, clause):
-    """Top up observed resumed work to a minimum multiplier when unambiguous.
-
-    Rows already containing overtime repricing are returned for review rather than
-    being repriced a second time because those evidence records overlap the
-    ordinary components. Multi-rate rows are calculated only when the whole row is
-    inside the affected interval; a partial multi-rate row is review-only.
-    """
+    """Top up observed resumed work to a minimum multiplier when unambiguous."""
     out = detail
     topup = Decimal("0")
     repriced_hours = 0.0
@@ -467,9 +505,10 @@ def apply_rest_between_work(
     for employee_id, employee_units in by_employee.items():
         employee_units.sort(key=lambda x: x["start"])
         for previous, nxt in zip(employee_units[:-1], employee_units[1:]):
-            reference = nxt["start"]
+            reference = nxt.get("rule_reference") or nxt["start"]
+            reference_source = nxt.get("rule_reference_source") or "SHIFT_START"
             rule = _rest_rule(lib.conditions(reference) or {})
-            actual_rest, sleepover_blockers = _qualifying_rest_hours(
+            actual_rest, sleepover_blockers, sleepover_uncertainties = _qualifying_rest_hours(
                 previous, nxt, sleepovers
             )
             eligible_8h = _sleepover_adjacent(previous, nxt)
@@ -489,7 +528,32 @@ def apply_rest_between_work(
             finding_type = "REST_BETWEEN_WORK"
             notes = []
 
-            if historical_internal and actual_rest < rule["default_hours"]:
+            transition_uncertain = any(
+                item.get("transition_reference_uncertain")
+                for item in sleepover_uncertainties
+            ) or (
+                _transition_reference_uncertain(reference, reference_source)
+                and eligible_8h
+            )
+            active_sleepover_uncertain = any(
+                item.get("counts_as_break")
+                and item.get("active_work_minutes", 0) > 0
+                for item in sleepover_uncertainties
+            )
+
+            if transition_uncertain:
+                status = "REQUIRES_REVIEW"
+                finding_type = "SLEEPOVER_RULE_TRANSITION_REVIEW"
+                notes.append(
+                    "Pay-period start is required to select the applicable June 2026 sleepover/rest rule."
+                )
+            elif active_sleepover_uncertain:
+                status = "REQUIRES_REVIEW"
+                finding_type = "SLEEPOVER_ACTIVE_WORK_REST_REVIEW"
+                notes.append(
+                    "Active work occurred during a sleepover that may otherwise count toward rest; timestamps of the active work are required to determine consecutive rest."
+                )
+            elif historical_internal and actual_rest < rule["default_hours"]:
                 status = "REQUIRES_REVIEW"
                 finding_type = "HISTORICAL_SLEEPOVER_REST_INTERACTION"
                 notes.append(
@@ -531,6 +595,8 @@ def apply_rest_between_work(
                 _unit_has_overtime(out, previous)
                 and in_scope_employment
                 and actual_rest < rule["default_hours"]
+                and not transition_uncertain
+                and not active_sleepover_uncertain
             )
             instructed = _bool((control or {}).get("employer_instructed_resume"))
             release_from_control = _dt((control or {}).get("release_datetime"))
@@ -636,6 +702,8 @@ def apply_rest_between_work(
                     ),
                     "previous_shift_end": previous["end"],
                     "next_shift_start": nxt["start"],
+                    "rule_reference_date": reference,
+                    "rule_reference_source": reference_source,
                     "required_rest_hours": float(required),
                     "actual_rest_hours": round(float(actual_rest), 4),
                     "rest_shortfall_hours": round(
