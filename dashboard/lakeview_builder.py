@@ -38,13 +38,7 @@ def _filter(widget: dict[str, Any], index: int) -> dict[str, Any]:
         "name": query_name,
         "query": {
             "datasetName": widget["dataset"],
-            "fields": [
-                {"name": field, "expression": f"`{field}`"},
-                {
-                    "name": f"{field}_associativity",
-                    "expression": "COUNT_IF(`associative_filter_predicate_group`)",
-                },
-            ],
+            "fields": [{"name": field, "expression": f"`{field}`"}],
             "disaggregated": False,
         },
     }
@@ -62,7 +56,6 @@ def _filter(widget: dict[str, Any], index: int) -> dict[str, Any]:
             ]
         },
         "frame": {"showTitle": True, "title": widget.get("title", field)},
-        "disallowAll": False,
     }
     return {
         "widget": {"name": widget.get("name", f"filter_{index}"), "queries": [query], "spec": spec},
@@ -234,6 +227,7 @@ def build_dashboard(spec: dict[str, Any]) -> dict[str, Any]:
             "name": page["name"],
             "displayName": page["display_name"],
             "pageType": "PAGE_TYPE_CANVAS",
+            "layoutVersion": "GRID_V1",
             "layout": layout,
         })
     return {"datasets": datasets, "pages": pages}
