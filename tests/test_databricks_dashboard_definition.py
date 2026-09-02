@@ -38,7 +38,7 @@ def test_dashboard_uses_one_investigation_dataset_for_linked_analysis():
                 assert query["query"]["datasetName"] == "investigation"
 
 
-def test_dashboard_has_associative_filters_for_audit_investigation():
+def test_dashboard_has_current_field_filters_for_audit_investigation():
     dashboard = _built_dashboard()
     overview = _widgets(_page(dashboard, "overview"))
     investigation = _widgets(_page(dashboard, "investigation"))
@@ -64,7 +64,12 @@ def test_dashboard_has_associative_filters_for_audit_investigation():
     }.issubset(fields)
 
     for widget in filter_widgets:
-        assert "associative_filter_predicate_group" in json.dumps(widget)
+        assert widget["spec"]["version"] == 2
+        assert widget["spec"]["frame"]["showTitle"] is True
+        assert "associative_filter_predicate_group" not in json.dumps(widget)
+        for query in widget["queries"]:
+            assert query["query"]["disaggregated"] is False
+            assert len(query["query"]["fields"]) == 1
 
 
 def test_dashboard_contains_kpis_charts_and_searchable_detail_tables():
@@ -95,6 +100,20 @@ def test_dashboard_contains_kpis_charts_and_searchable_detail_tables():
         )
 
 
+def test_overview_pay_period_table_is_grouped_and_drillthrough_ready():
+    dashboard = _built_dashboard()
+    period_table = next(
+        widget for widget in _widgets(_page(dashboard, "overview"))
+        if widget.get("name") == "period_summary"
+    )
+    query = period_table["queries"][0]["query"]
+    assert query["datasetName"] == "investigation"
+    assert query["disaggregated"] is False
+    fields = {field["name"] for field in query["fields"]}
+    assert {"employee_pay_period", "employee_name", "pay_period_start", "reconciliation_status"}.issubset(fields)
+    assert _page(dashboard, "investigation")["pageType"] == "PAGE_TYPE_CANVAS"
+
+
 def test_investigation_view_prevents_pay_period_double_counting():
     source = (ROOT / "notebooks" / "00e_setup_investigation_view.py").read_text(encoding="utf-8")
 
@@ -120,6 +139,7 @@ def test_setup_builds_investigation_view_before_dashboard_verification():
     assert "payroll_compliance.spec.json" in verifier
     assert "lakeview_builder.py" in verifier
     assert "interactive filters" in verifier.lower()
+    assert "obsolete filter associativity expression" in verifier
     assert 'current = call("GET", f"/api/2.0/lakeview/dashboards/{dashboard_id}")' in verifier
     assert '"PATCH"' in verifier
     assert 'f"/api/2.0/lakeview/dashboards/{dashboard_id}/published"' in verifier
