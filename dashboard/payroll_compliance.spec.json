@@ -26,7 +26,7 @@
       "name": "overview",
       "display_name": "Interactive Overview",
       "widgets": [
-        {"type":"text","name":"overview_title","text":"# AuditHero — SCHADS Payroll Compliance\nUse the filters to investigate audit results across employees, classifications and pay periods.","position":[0,0,6,1]},
+        {"type":"text","name":"overview_title","text":"# AuditHero — SCHADS Payroll Compliance\nFilter, cross-filter, or drill through from an employee/pay-period result into the underlying shift evidence.","position":[0,0,6,1]},
         {"type":"filter","name":"status_filter","dataset":"investigation","field":"reconciliation_status","title":"Audit Status","selection":"multi","position":[0,1,2,1]},
         {"type":"filter","name":"employee_filter","dataset":"investigation","field":"employee_name","title":"Employee","selection":"multi","position":[2,1,2,1]},
         {"type":"filter","name":"employment_filter","dataset":"investigation","field":"employment_type","title":"Employment Type","selection":"multi","position":[4,1,2,1]},
@@ -44,8 +44,9 @@
         {"type":"line","name":"variance_trend","dataset":"investigation","title":"Variance Trend by Pay Period","x":"pay_period_start","x_title":"Pay Period","y_expression":"SUM(`variance_amount_once`)","y_name":"variance","y_title":"Variance","position":[0,11,3,6]},
         {"type":"bar","name":"review_classification_chart","dataset":"investigation","title":"Review Shifts by Classification","x":"classification_code","x_title":"Classification","y_expression":"SUM(`review_shift_marker`)","y_name":"review_shifts","y_title":"Review Shifts","orientation":"horizontal","position":[3,11,3,6]},
         {
-          "type":"table","name":"period_summary","dataset":"investigation","title":"Pay Period Investigation Summary","page_size":30,"position":[0,17,6,10],
+          "type":"table","name":"period_summary","dataset":"investigation","title":"Pay Period Investigation Summary — right-click a row to drill through","page_size":30,"disaggregated":false,"position":[0,17,6,10],
           "columns":[
+            {"field":"employee_pay_period","title":"Employee / Pay Period"},
             {"field":"employee_name","title":"Employee"},
             {"field":"pay_period_start","title":"Period Start","kind":"datetime","search":false},
             {"field":"pay_period_end","title":"Period End","kind":"datetime","search":false},
@@ -62,7 +63,7 @@
       "name": "investigation",
       "display_name": "Employee / Pay Period Investigation",
       "widgets": [
-        {"type":"text","name":"investigation_title","text":"# Employee / Pay Period Investigation\nSelect an employee-pay-period to inspect all underlying shifts and calculation evidence.","position":[0,0,6,1]},
+        {"type":"text","name":"investigation_title","text":"# Employee / Pay Period Investigation\nDrill here from the Overview or select an employee-pay-period to inspect the underlying shifts and calculation evidence.","position":[0,0,6,1]},
         {"type":"filter","name":"pay_period_filter","dataset":"investigation","field":"employee_pay_period","title":"Employee + Pay Period","selection":"single","position":[0,1,3,1]},
         {"type":"filter","name":"entitlement_status_filter","dataset":"investigation","field":"entitlement_status","title":"Shift Status","selection":"multi","position":[3,1,1,1]},
         {"type":"filter","name":"weekday_filter","dataset":"investigation","field":"weekday_name","title":"Weekday","selection":"multi","position":[4,1,1,1]},
