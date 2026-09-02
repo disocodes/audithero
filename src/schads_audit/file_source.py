@@ -18,6 +18,7 @@ CONTROL_INPUTS = {
     "part_time_patterns":"part_time_patterns",
     "part_time_variations":"part_time_variations",
     "public_holiday_overrides":"public_holiday_overrides",
+    "rest_break_controls":"rest_break_controls",
     "overtime_rest_controls":"overtime_rest_controls",
     "meal_break_events":"meal_break_events",
     "supplemental_events":"supplemental_events",
