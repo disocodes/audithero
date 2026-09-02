@@ -7,9 +7,9 @@
 # canonical input folder and requested audit date range.
 #
 # The notebook calculates expected entitlements with the shared AuditHero engine,
-# reconciles actual payroll only when sufficient earning-line evidence is available,
-# stores normalized evidence and audit results, records the audit run and publishes
-# the successful reporting snapshot.
+# evaluates rest-between-work requirements, reconciles actual payroll only when
+# sufficient earning-line evidence is available, stores normalized evidence and
+# audit results, records the audit run and publishes the successful reporting snapshot.
 
 from datetime import datetime, timezone
 import uuid
@@ -39,7 +39,13 @@ result = run_manual_audit(
 finished = datetime.now(timezone.utc)
 
 print("STEP 3 — Add audit-run metadata to calculated outputs")
-for frame in (result["detail"], result["event_adjustments"], result["toil_findings"], result["reconciliation"]):
+for frame in (
+    result["detail"],
+    result["rest_break_findings"],
+    result["event_adjustments"],
+    result["toil_findings"],
+    result["reconciliation"],
+):
     if frame is not None and not frame.empty:
         frame["audit_run_id"] = run_id
         frame["audit_window_start"] = str(start_date)[:10]
@@ -65,12 +71,14 @@ for name, frame in (
 
 print("STEP 5 — Persist Gold audit evidence and reconciliation")
 write_df(spark, result["detail"], "gold.audit_detail")
+write_df(spark, result["rest_break_findings"], "gold.rest_break_findings")
 write_df(spark, result["event_adjustments"], "gold.audit_event_adjustments")
 write_df(spark, result["toil_findings"], "gold.toil_findings")
 write_df(spark, result["reconciliation"], "gold.pay_period_reconciliation")
 
 print("STEP 6 — Record operational run counts")
 reconciliation = result["reconciliation"]
+rest_findings = result["rest_break_findings"]
 actual_source = "FILES" if result.get("actual_pay_usable", False) else "NONE"
 run = pd.DataFrame([{
     "audit_run_id": run_id,
@@ -86,7 +94,7 @@ run = pd.DataFrame([{
     "underpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "UNDERPAID").sum()),
     "overpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "OVERPAID").sum()),
     "review_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()),
-    "message": f"manual input={input_root}",
+    "message": f"manual input={input_root}; rest_findings={len(rest_findings)}",
 }])
 write_df(spark, run, "ops.audit_runs")
 create_views(spark)
@@ -98,5 +106,9 @@ print(f"Uploaded-file audit complete: {run_id}")
 if not reconciliation.empty:
     print(reconciliation["status"].value_counts(dropna=False).to_string())
     display(reconciliation.sort_values(["status", "employee_name"]).head(200))
+if rest_findings is not None and not rest_findings.empty:
+    print("\nRest-between-work findings:")
+    print(rest_findings["status"].value_counts(dropna=False).to_string())
+    display(rest_findings.sort_values(["status", "employee_name", "next_shift_start"]).head(200))
 print("Recommended next step: review the AuditHero Power BI report and detailed audit evidence.")
 notebookutils.notebook.exit(run_id)
