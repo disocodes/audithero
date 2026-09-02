@@ -13,7 +13,8 @@ from .supplemental import calculate_supplemental_events, merge_event_adjustments
 from .remote_work import aggregate_remote_work_events
 from .industrial_instruments import apply_instrument_history
 from .part_time_patterns import apply_part_time_pattern_checks
-from .rest_meal import apply_rest_after_overtime, apply_meal_break_events
+from .rest_meal import apply_meal_break_events
+from .rest_breaks import apply_rest_between_work
 from .toil import audit_toil_register, merge_toil_adjustments
 
 
@@ -103,7 +104,14 @@ def run_manual_audit(input_root,config_root,start_date,end_date,rule_library,var
     detail=apply_rostered_and_daily_overtime(detail,timesheets,holidays,rule_library); detail=allocate_period_overtime(detail,holidays,rule_library); detail=flag_period_overtime(detail)
     detail=apply_part_time_pattern_checks(detail,_control(frames,"part_time_patterns",root),_control(frames,"part_time_variations",root))
     detail=apply_meal_break_events(detail,timesheets,_control(frames,"meal_break_events",root),holidays,rule_library)
-    detail=apply_rest_after_overtime(detail,_control(frames,"overtime_rest_controls",root))
+    detail,rest_findings=apply_rest_between_work(
+        detail,
+        timesheets,
+        rosters,
+        _control(frames,"rest_break_controls",root),
+        _control(frames,"overtime_rest_controls",root),
+        rule_library,
+    )
     detail=apply_instrument_history(detail,_control(frames,"industrial_instrument_history",root))
 
     events=aggregate_remote_work_events(_control(frames,"supplemental_events",root)); adjustments=calculate_supplemental_events(events,employees,pay_details,holidays,rule_library)
@@ -129,6 +137,7 @@ def run_manual_audit(input_root,config_root,start_date,end_date,rule_library,var
         "actual_pay_usable":actual_pay_usable,
         "public_holidays":holidays,
         "detail":detail,
+        "rest_break_findings":rest_findings,
         "event_adjustments":adjustments,
         "toil_findings":toil,
         "reconciliation":reconciliation,
