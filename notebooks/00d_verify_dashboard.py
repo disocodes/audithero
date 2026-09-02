@@ -2,13 +2,14 @@
 # MAGIC %md
 # MAGIC # AuditHero — Verify AI/BI Dashboard
 # MAGIC
-# MAGIC **Purpose:** ensure the managed AuditHero AI/BI dashboard stored in Databricks matches the dashboard definition installed with the current AuditHero release.
+# MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled specification, then ensure the stored and published Databricks dashboard matches that definition.
 # MAGIC
-# MAGIC This notebook is run by **AuditHero - Setup**. It updates and republishes the managed dashboard when the stored draft differs from the installed definition, then verifies the stored draft after the update.
+# MAGIC This notebook is run by **AuditHero - Setup** after the interactive investigation view has been created.
 # COMMAND ----------
 # MAGIC %pip install -q "databricks-sdk>=0.20"
 # COMMAND ----------
 from pathlib import Path
+import importlib.util
 import json
 
 exec(open(str(Path.cwd() / "_common.py")).read())
@@ -25,26 +26,52 @@ if not warehouse_id:
     raise ValueError("sql_warehouse_id is required to verify and publish the AuditHero dashboard")
 
 DASHBOARD_NAME = "AuditHero - SCHADS Payroll Compliance"
-DASHBOARD_FILE = ROOT / "dashboard" / "payroll_compliance.lvdash.json"
-if not DASHBOARD_FILE.exists():
-    raise FileNotFoundError(f"AuditHero dashboard definition not found: {DASHBOARD_FILE}")
+SPEC_FILE = ROOT / "dashboard" / "payroll_compliance.spec.json"
+BUILDER_FILE = ROOT / "dashboard" / "lakeview_builder.py"
+if not SPEC_FILE.exists():
+    raise FileNotFoundError(f"AuditHero dashboard specification not found: {SPEC_FILE}")
+if not BUILDER_FILE.exists():
+    raise FileNotFoundError(f"AuditHero dashboard builder not found: {BUILDER_FILE}")
 
-desired_text = DASHBOARD_FILE.read_text(encoding="utf-8")
-desired_json = json.loads(desired_text)
+module_spec = importlib.util.spec_from_file_location("audithero_lakeview_builder", BUILDER_FILE)
+if module_spec is None or module_spec.loader is None:
+    raise RuntimeError("AuditHero dashboard builder could not be loaded")
+builder = importlib.util.module_from_spec(module_spec)
+module_spec.loader.exec_module(builder)
 
-# Validate the portable dashboard structure before calling the Lakeview API.
+dashboard_spec = json.loads(SPEC_FILE.read_text(encoding="utf-8"))
+desired_json = builder.build_dashboard(dashboard_spec)
+desired_text = json.dumps(desired_json, separators=(",", ":"))
+
+# Validate the generated dashboard before calling the Lakeview API.
 if not desired_json.get("datasets"):
     raise ValueError("AuditHero dashboard definition contains no datasets")
 if not desired_json.get("pages"):
     raise ValueError("AuditHero dashboard definition contains no pages")
 if not all(isinstance(ds.get("queryLines"), list) and ds.get("queryLines") for ds in desired_json["datasets"]):
     raise ValueError("AuditHero dashboard datasets must use non-empty queryLines arrays")
-if not any(
-    item.get("widget", {}).get("queries")
+
+widgets = [
+    item.get("widget", {})
     for page in desired_json["pages"]
     for item in page.get("layout", [])
-):
+]
+if not any(widget.get("queries") for widget in widgets):
     raise ValueError("AuditHero dashboard definition contains no data-backed widgets")
+filter_widgets = [
+    widget for widget in widgets
+    if str(widget.get("spec", {}).get("widgetType", "")).startswith("filter-")
+]
+if not filter_widgets:
+    raise ValueError("AuditHero dashboard definition contains no interactive filters")
+if not any(
+    "associative_filter_predicate_group" in json.dumps(widget)
+    for widget in filter_widgets
+):
+    raise ValueError("AuditHero dashboard filters are missing Lakeview filter associativity")
+
+# The investigation dataset must exist before the dashboard is published.
+spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`v_audit_investigation_latest` LIMIT 1")
 
 
 def canonical(value):
@@ -101,16 +128,18 @@ for item in matches:
     current_text = current.get("serialized_dashboard") or "{}"
 
     if canonical(current_text) != canonical(desired_text) or current.get("warehouse_id") != warehouse_id:
+        body = {
+            "dashboard_id": dashboard_id,
+            "display_name": DASHBOARD_NAME,
+            "warehouse_id": warehouse_id,
+            "serialized_dashboard": desired_text,
+        }
+        if current.get("etag"):
+            body["etag"] = current["etag"]
         call(
             "PATCH",
             f"/api/2.0/lakeview/dashboards/{dashboard_id}",
-            {
-                "dashboard_id": dashboard_id,
-                "display_name": DASHBOARD_NAME,
-                "warehouse_id": warehouse_id,
-                "serialized_dashboard": desired_text,
-                "etag": current.get("etag"),
-            },
+            body,
             query={"dataset_catalog": catalog, "dataset_schema": "gold"},
         )
         print(f"Updated AuditHero dashboard draft: {dashboard_id}")
@@ -136,3 +165,4 @@ for item in matches:
     print(f"Verified and published dashboard {dashboard_id}; revision={published.get('revision_create_time')}")
 
 print(f"AuditHero dashboard verification complete. Managed dashboard(s): {', '.join(verified_ids)}")
+print("Interactive investigation filters are active for status, employee, employment type, classification, work group, state and employee-pay-period.")
