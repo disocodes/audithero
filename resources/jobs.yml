@@ -19,9 +19,16 @@ resources:
             - task_key: validate_rules
           notebook_task:
             notebook_path: ../notebooks/01b_self_test.py
-        - task_key: verify_dashboard
+        - task_key: setup_investigation_view
           depends_on:
             - task_key: self_test
+          notebook_task:
+            notebook_path: ../notebooks/00e_setup_investigation_view.py
+            base_parameters:
+              catalog: "${var.catalog}"
+        - task_key: verify_dashboard
+          depends_on:
+            - task_key: setup_investigation_view
           notebook_task:
             notebook_path: ../notebooks/00d_verify_dashboard.py
             base_parameters:
