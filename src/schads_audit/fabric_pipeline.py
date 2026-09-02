@@ -35,7 +35,8 @@ from .supplemental import calculate_supplemental_events, merge_event_adjustments
 from .remote_work import aggregate_remote_work_events
 from .industrial_instruments import apply_instrument_history
 from .part_time_patterns import apply_part_time_pattern_checks
-from .rest_meal import apply_rest_after_overtime, apply_meal_break_events
+from .rest_meal import apply_meal_break_events
+from .rest_breaks import apply_rest_between_work
 from .toil import audit_toil_register, merge_toil_adjustments
 from .fabric_io import write_df, create_views
 
@@ -216,8 +217,14 @@ def run_fabric_audit(
         detail = apply_meal_break_events(
             detail, timesheets, meal_events, holidays, rule_library
         )
-        rest_controls = load_csv(root / "overtime_rest_controls.csv")
-        detail = apply_rest_after_overtime(detail, rest_controls)
+        detail, rest_break_findings = apply_rest_between_work(
+            detail,
+            timesheets,
+            rosters,
+            load_csv(root / "rest_break_controls.csv"),
+            load_csv(root / "overtime_rest_controls.csv"),
+            rule_library,
+        )
 
         instrument_history = load_csv(root / "industrial_instrument_history.csv")
         detail = apply_instrument_history(detail, instrument_history)
@@ -250,7 +257,7 @@ def run_fabric_audit(
         )
 
         finished = datetime.now(timezone.utc)
-        for df in (detail, event_adjustments, toil_findings, reconciliation):
+        for df in (detail, rest_break_findings, event_adjustments, toil_findings, reconciliation):
             if df is not None and not df.empty:
                 df["audit_run_id"] = run_id
                 df["audit_window_start"] = str(start_date)[:10]
@@ -274,6 +281,7 @@ def run_fabric_audit(
                 write_df(spark, x, f"silver.{name}")
 
         write_df(spark, detail, "gold.audit_detail")
+        write_df(spark, rest_break_findings, "gold.rest_break_findings")
         write_df(spark, event_adjustments, "gold.audit_event_adjustments")
         write_df(spark, toil_findings, "gold.toil_findings")
         write_df(spark, reconciliation, "gold.pay_period_reconciliation")
@@ -301,8 +309,8 @@ def run_fabric_audit(
                         (reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()
                     ),
                     "message": (
-                        f"rosters={len(rosters)}; supplemental={len(event_adjustments)}; "
-                        f"toil={len(toil_findings)}"
+                        f"rosters={len(rosters)}; rest_findings={len(rest_break_findings)}; "
+                        f"supplemental={len(event_adjustments)}; toil={len(toil_findings)}"
                     ),
                 }
             ]
@@ -312,6 +320,7 @@ def run_fabric_audit(
         return {
             "run_id": run_id,
             "detail": detail,
+            "rest_break_findings": rest_break_findings,
             "event_adjustments": event_adjustments,
             "toil_findings": toil_findings,
             "reconciliation": reconciliation,
