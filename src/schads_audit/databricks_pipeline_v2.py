@@ -26,7 +26,8 @@ from .supplemental import calculate_supplemental_events, merge_event_adjustments
 from .remote_work import aggregate_remote_work_events
 from .industrial_instruments import apply_instrument_history
 from .part_time_patterns import apply_part_time_pattern_checks
-from .rest_meal import apply_rest_after_overtime, apply_meal_break_events
+from .rest_meal import apply_meal_break_events
+from .rest_breaks import apply_rest_between_work
 from .toil import audit_toil_register, merge_toil_adjustments
 from .databricks_io import write_df, create_views
 
@@ -125,7 +126,12 @@ def run_databricks_audit_v2(spark, dbutils, config, rule_library, start_date, en
         detail=allocate_period_overtime(detail,holidays,rule_library); detail=flag_period_overtime(detail)
         detail=apply_part_time_pattern_checks(detail,load_csv(root/'part_time_patterns.csv'),load_csv(root/'part_time_variations.csv'))
         detail=apply_meal_break_events(detail,timesheets,load_csv(root/'meal_break_events.csv'),holidays,rule_library)
-        detail=apply_rest_after_overtime(detail,load_csv(root/'overtime_rest_controls.csv'))
+        detail,rest_findings=apply_rest_between_work(
+            detail,timesheets,rosters,
+            load_csv(root/'rest_break_controls.csv'),
+            load_csv(root/'overtime_rest_controls.csv'),
+            rule_library,
+        )
         detail=apply_instrument_history(detail,load_csv(root/'industrial_instrument_history.csv'))
 
         events=aggregate_remote_work_events(load_csv(root/'supplemental_events.csv'))
@@ -136,13 +142,14 @@ def run_databricks_audit_v2(spark, dbutils, config, rule_library, start_date, en
         reconciliation=reconcile_pay_periods(recon_input,payroll,load_json(root/'pay_category_mapping.json',{}),config.variance_tolerance)
 
         finished=datetime.now(timezone.utc)
-        for df in (detail,adjustments,toil,reconciliation):
+        for df in (detail,rest_findings,adjustments,toil,reconciliation):
             if df is not None and not df.empty:
                 df['audit_run_id']=run_id; df['audit_window_start']=str(start_date)[:10]; df['audit_window_end']=str(end_date)[:10]; df['run_type']=run_type; df['run_finished_at']=finished
         for name,df in (('employees',employees),('pay_details',pay_details),('employment_history',employment_history),('timesheets',timesheets),('rostered_shifts',rosters),('payroll_earnings',payroll),('public_holidays',holidays)):
             if df is not None and not df.empty:
                 x=df.copy(); x['audit_run_id']=run_id; x['ingested_at']=finished; write_df(spark,x,f'{config.catalog}.silver.{name}','append')
         write_df(spark,detail,f'{config.catalog}.gold.audit_detail','append')
+        write_df(spark,rest_findings,f'{config.catalog}.gold.rest_break_findings','append')
         write_df(spark,adjustments,f'{config.catalog}.gold.audit_event_adjustments','append')
         write_df(spark,toil,f'{config.catalog}.gold.toil_findings','append')
         write_df(spark,reconciliation,f'{config.catalog}.gold.pay_period_reconciliation','append')
@@ -152,9 +159,9 @@ def run_databricks_audit_v2(spark, dbutils, config, rule_library, start_date, en
             'underpaid_periods':int((reconciliation.get('status',pd.Series(dtype=str))=='UNDERPAID').sum()),
             'overpaid_periods':int((reconciliation.get('status',pd.Series(dtype=str))=='OVERPAID').sum()),
             'review_periods':int((reconciliation.get('status',pd.Series(dtype=str))=='REQUIRES_REVIEW').sum()),
-            'message':f'rosters={len(rosters)}; supplemental={len(adjustments)}; toil={len(toil)}'}])
+            'message':f'rosters={len(rosters)}; rest_findings={len(rest_findings)}; supplemental={len(adjustments)}; toil={len(toil)}'}])
         write_df(spark,run,f'{config.catalog}.ops.audit_runs','append'); create_views(spark,config.catalog)
-        return {'run_id':run_id,'detail':detail,'event_adjustments':adjustments,'toil_findings':toil,'reconciliation':reconciliation,'run':run}
+        return {'run_id':run_id,'detail':detail,'rest_break_findings':rest_findings,'event_adjustments':adjustments,'toil_findings':toil,'reconciliation':reconciliation,'run':run}
     except Exception as exc:
         finished=datetime.now(timezone.utc)
         failure=pd.DataFrame([{'audit_run_id':run_id,'run_type':run_type,'audit_window_start':str(start_date)[:10],'audit_window_end':str(end_date)[:10],'started_at':started,'finished_at':finished,'status':'FAILED','actual_pay_source':source,'employees':0,'timesheets':0,'underpaid_periods':0,'overpaid_periods':0,'review_periods':0,'message':f'{type(exc).__name__}: {exc}'}])
