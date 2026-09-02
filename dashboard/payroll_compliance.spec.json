@@ -6,6 +6,11 @@
       "query": "SELECT * FROM v_audit_investigation_latest"
     },
     {
+      "name": "rest",
+      "display_name": "Rest Between Work",
+      "query": "SELECT finding_id,finding_type,employee_id,employee_name,previous_timesheet_ids,next_timesheet_ids,previous_shift_end,next_shift_start,required_rest_hours,actual_rest_hours,rest_shortfall_hours,sleepover_adjacent_exception_eligible,sleepover_8h_agreement,sleepover_blocked_rest,historical_sleepover_interaction,overtime_rest_rule_applies,employer_instructed_resume,release_datetime,double_time_repriced_hours,double_time_topup,paid_absence_rostered_hours,payment_status,status,clause,overtime_clause,evidence_reference,notes,audit_run_id,run_type FROM v_rest_break_findings_latest ORDER BY next_shift_start DESC"
+    },
+    {
       "name": "runs",
       "display_name": "Audit Runs",
       "query": "SELECT audit_run_id,run_type,audit_window_start,audit_window_end,finished_at,status,actual_pay_source,employees,timesheets,underpaid_periods,overpaid_periods,review_periods,message FROM v_audit_runs ORDER BY finished_at DESC"
@@ -111,6 +116,51 @@
             {"field":"part_time_pattern_status","title":"Part-time Pattern Status"},
             {"field":"review_flags","title":"Review Flags"},
             {"field":"calculation_evidence","title":"Calculation Evidence","kind":"json"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rest_breaks",
+      "display_name": "Rest & Breaks",
+      "widgets": [
+        {"type":"text","name":"rest_title","text":"## Rest Between Work\nReview effective-dated 10-hour and agreed 8-hour rest requirements and evidence-backed rest-after-overtime payment consequences.","position":[0,0,6,1]},
+        {"type":"filter","name":"rest_employee_filter","dataset":"rest","field":"employee_name","title":"Employee","selection":"multi","position":[0,1,2,1]},
+        {"type":"filter","name":"rest_status_filter","dataset":"rest","field":"status","title":"Finding Status","selection":"multi","position":[2,1,1,1]},
+        {"type":"filter","name":"rest_payment_filter","dataset":"rest","field":"payment_status","title":"Payment Status","selection":"multi","position":[3,1,1,1]},
+        {"type":"filter","name":"rest_overtime_filter","dataset":"rest","field":"overtime_rest_rule_applies","title":"Overtime Rest Rule","selection":"multi","position":[4,1,1,1]},
+        {"type":"filter","name":"rest_run_filter","dataset":"rest","field":"run_type","title":"Run Type","selection":"multi","position":[5,1,1,1]},
+        {"type":"counter","name":"rest_intervals","dataset":"rest","title":"Intervals Assessed","expression":"COUNT(`finding_id`)","decimals":0,"position":[0,2,1,2]},
+        {"type":"counter","name":"short_rest_intervals","dataset":"rest","title":"Short Rest","expression":"SUM(CASE WHEN `rest_shortfall_hours` > 0 THEN 1 ELSE 0 END)","decimals":0,"position":[1,2,1,2]},
+        {"type":"counter","name":"rest_reviews","dataset":"rest","title":"Requires Review","expression":"SUM(CASE WHEN `status` = 'REQUIRES_REVIEW' THEN 1 ELSE 0 END)","decimals":0,"position":[2,2,1,2]},
+        {"type":"counter","name":"rest_overtime_cases","dataset":"rest","title":"Overtime Rest Cases","expression":"SUM(CASE WHEN `overtime_rest_rule_applies` THEN 1 ELSE 0 END)","decimals":0,"position":[3,2,1,2]},
+        {"type":"counter","name":"rest_repriced_hours","dataset":"rest","title":"Repriced Hours","expression":"SUM(`double_time_repriced_hours`)","decimals":2,"position":[4,2,1,2]},
+        {"type":"counter","name":"rest_topup","dataset":"rest","title":"Double-Time Top-up","expression":"SUM(`double_time_topup`)","format":"currency","decimals":2,"position":[5,2,1,2]},
+        {"type":"bar","name":"rest_status_chart","dataset":"rest","title":"Rest Intervals by Status","x":"status","x_title":"Status","y_expression":"COUNT(`finding_id`)","y_name":"intervals","y_title":"Intervals","color":"status","position":[0,4,3,6]},
+        {"type":"bar","name":"rest_employee_shortfall","dataset":"rest","title":"Rest Shortfall Hours by Employee","x":"employee_name","x_title":"Employee","y_expression":"SUM(`rest_shortfall_hours`)","y_name":"shortfall_hours","y_title":"Shortfall Hours","orientation":"horizontal","position":[3,4,3,6]},
+        {
+          "type":"table","name":"rest_findings_table","dataset":"rest","title":"Rest Between Work Findings","description":"General short-rest findings are compliance findings. A monetary top-up is shown only where the applicable payment rule and supporting evidence allow AuditHero to calculate it.","position":[0,10,6,13],
+          "columns":[
+            {"field":"employee_name","title":"Employee"},
+            {"field":"previous_shift_end","title":"Previous Work End"},
+            {"field":"next_shift_start","title":"Next Work Start"},
+            {"field":"required_rest_hours","title":"Required Rest","kind":"number","number_format":"0.00"},
+            {"field":"actual_rest_hours","title":"Actual Rest","kind":"number","number_format":"0.00"},
+            {"field":"rest_shortfall_hours","title":"Shortfall","kind":"number","number_format":"0.00"},
+            {"field":"status","title":"Finding Status"},
+            {"field":"sleepover_adjacent_exception_eligible","title":"8h Exception Eligible","kind":"boolean"},
+            {"field":"sleepover_8h_agreement","title":"8h Agreement","kind":"boolean"},
+            {"field":"overtime_rest_rule_applies","title":"Overtime Rest Rule","kind":"boolean"},
+            {"field":"employer_instructed_resume","title":"Employer Instructed Resume","kind":"boolean"},
+            {"field":"release_datetime","title":"Release Time"},
+            {"field":"double_time_repriced_hours","title":"Repriced Hours","kind":"number","number_format":"0.00"},
+            {"field":"double_time_topup","title":"Double-Time Top-up","kind":"number","number_format":"$0,0.00"},
+            {"field":"paid_absence_rostered_hours","title":"Rostered Hours in Paid Absence Window","kind":"number","number_format":"0.00"},
+            {"field":"payment_status","title":"Payment Status"},
+            {"field":"clause","title":"Rest Clause"},
+            {"field":"overtime_clause","title":"Overtime Clause"},
+            {"field":"evidence_reference","title":"Evidence Reference"},
+            {"field":"notes","title":"Notes"}
           ]
         }
       ]
