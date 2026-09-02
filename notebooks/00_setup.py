@@ -99,7 +99,7 @@ spark.sql(
 )
 spark.sql(
     f"""CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`rest_break_findings` (
-    finding_id STRING,employee_id STRING,employee_name STRING,previous_timesheet_ids STRING,
+    finding_id STRING,finding_type STRING,employee_id STRING,employee_name STRING,previous_timesheet_ids STRING,
     next_timesheet_ids STRING,previous_shift_end TIMESTAMP,next_shift_start TIMESTAMP,
     required_rest_hours DOUBLE,actual_rest_hours DOUBLE,rest_shortfall_hours DOUBLE,
     sleepover_adjacent_exception_eligible BOOLEAN,sleepover_8h_agreement BOOLEAN,
