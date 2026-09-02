@@ -64,11 +64,15 @@ filter_widgets = [
 ]
 if not filter_widgets:
     raise ValueError("AuditHero dashboard definition contains no interactive filters")
-if not any(
-    "associative_filter_predicate_group" in json.dumps(widget)
-    for widget in filter_widgets
-):
-    raise ValueError("AuditHero dashboard filters are missing Lakeview filter associativity")
+for widget in filter_widgets:
+    if widget.get("spec", {}).get("version") != 2:
+        raise ValueError("AuditHero dashboard filters must use Lakeview filter specification version 2")
+    for query in widget.get("queries", []):
+        fields = query.get("query", {}).get("fields", [])
+        if len(fields) != 1 or not fields[0].get("expression"):
+            raise ValueError("AuditHero dashboard field filters must bind directly to one dataset field")
+        if "associative_filter_predicate_group" in json.dumps(query):
+            raise ValueError("AuditHero dashboard contains an obsolete filter associativity expression")
 
 # The investigation dataset must exist before the dashboard is published.
 spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`v_audit_investigation_latest` LIMIT 1")
