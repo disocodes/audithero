@@ -43,6 +43,7 @@ try:
     TABLES = {
         "Pay Period Reconciliation": "gold.current_reconciliation",
         "Audit Detail": "gold.current_audit_detail",
+        "Rest Break Findings": "gold.current_rest_break_findings",
         "Supplemental Entitlements": "gold.current_event_adjustments",
         "TOIL Findings": "gold.current_toil_findings",
         "Rule Coverage": "ref.rule_coverage",
@@ -67,8 +68,6 @@ try:
 
     stage = "STEP 3 — Define payroll/audit business measures"
     print(stage)
-    # Measures define the user-facing payroll and audit KPIs. Remediation measures
-    # filter to definitive reconciliation statuses.
     MEASURES = {
         "Pay Period Reconciliation": {
             "Employees Audited": ("DISTINCTCOUNT('Pay Period Reconciliation'[employee_id])", "0", "Distinct employees in the current successful audit snapshot."),
@@ -90,6 +89,15 @@ try:
             "Review Shifts": ("CALCULATE(COUNTROWS('Audit Detail'), 'Audit Detail'[entitlement_status] = \"REQUIRES_REVIEW\")", "0", "Shift records requiring evidence or rule review."),
             "Expected Shift Entitlements": ("SUM('Audit Detail'[expected_amount])", "$#,##0.00;($#,##0.00)", "Expected shift-level Award comparator before pay-period reconciliation."),
         },
+        "Rest Break Findings": {
+            "Rest Intervals Assessed": ("COUNTROWS('Rest Break Findings')", "0", "Rest intervals assessed between successive AuditHero work units."),
+            "Short Rest Findings": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[rest_shortfall_hours] > 0)", "0", "Intervals shorter than the effective-dated rest requirement."),
+            "Rest Findings Requiring Review": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[status] = \"REQUIRES_REVIEW\")", "0", "Rest findings that require agreement, instruction, release, roster or historical evidence review."),
+            "Overtime Rest Cases": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[overtime_rest_rule_applies] = TRUE())", "0", "Rest intervals where the rest-after-overtime rule applies."),
+            "Double-Time Repriced Hours": ("SUM('Rest Break Findings'[double_time_repriced_hours])", "0.00", "Observed resumed-work hours repriced under the applicable rest-after-overtime rule."),
+            "Double-Time Top-up": ("SUM('Rest Break Findings'[double_time_topup])", "$#,##0.00;($#,##0.00)", "Evidence-backed top-up calculated to bring resumed work to the required minimum rate."),
+            "Paid Absence Rostered Hours": ("SUM('Rest Break Findings'[paid_absence_rostered_hours])", "0.00", "Rostered ordinary hours identified inside the post-release rest window. These remain subject to payroll/evidence verification where payment cannot be determined safely."),
+        },
         "Supplemental Entitlements": {
             "Supplemental Expected Adjustments": ("SUM('Supplemental Entitlements'[expected_adjustment])", "$#,##0.00;($#,##0.00)", "Calculated controlled supplemental entitlements.")
         },
@@ -99,8 +107,6 @@ try:
         },
     }
 
-    # Open the semantic model through Semantic Link and create or update the
-    # AuditHero measures.
     with connect_semantic_model(
         dataset=semantic_model_name,
         workspace=workspace_name,
@@ -155,8 +161,6 @@ try:
 
     stage = "STEP 4B — Rebind report to the AuditHero semantic model"
     print(stage)
-    # Bind the report to the current AuditHero semantic model after model creation
-    # or update.
     report_rebind(
         report=report_name,
         dataset=semantic_model_name,
