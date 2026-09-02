@@ -189,7 +189,13 @@ def _table(widget: dict[str, Any], index: int) -> dict[str, Any]:
     return {
         "widget": {
             "name": widget.get("name", f"table_{index}"),
-            "queries": [_query(widget["dataset"], fields, disaggregated=True)],
+            "queries": [
+                _query(
+                    widget["dataset"],
+                    fields,
+                    disaggregated=bool(widget.get("disaggregated", True)),
+                )
+            ],
             "spec": spec,
         },
         "position": _position(widget["position"]),
