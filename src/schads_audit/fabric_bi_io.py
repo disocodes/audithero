@@ -5,6 +5,7 @@ from .fabric_io import _sql, write_df
 
 SNAPSHOT_SOURCES = {
     "gold.current_audit_detail": "gold.audit_detail",
+    "gold.current_rest_break_findings": "gold.rest_break_findings",
     "gold.current_event_adjustments": "gold.audit_event_adjustments",
     "gold.current_toil_findings": "gold.toil_findings",
     "gold.current_reconciliation": "gold.pay_period_reconciliation",
@@ -46,6 +47,7 @@ def publish_current_snapshots(spark, result):
     ensure_current_tables(spark)
     mapping = {
         "detail": "gold.current_audit_detail",
+        "rest_break_findings": "gold.current_rest_break_findings",
         "event_adjustments": "gold.current_event_adjustments",
         "toil_findings": "gold.current_toil_findings",
         "reconciliation": "gold.current_reconciliation",
