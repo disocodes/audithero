@@ -1,0 +1,155 @@
+{
+  "datasets": [
+    {
+      "name": "investigation",
+      "display_name": "Audit Investigation",
+      "query": "SELECT * FROM v_audit_investigation_latest"
+    },
+    {
+      "name": "runs",
+      "display_name": "Audit Runs",
+      "query": "SELECT audit_run_id,run_type,audit_window_start,audit_window_end,finished_at,status,actual_pay_source,employees,timesheets,underpaid_periods,overpaid_periods,review_periods,message FROM v_audit_runs ORDER BY finished_at DESC"
+    },
+    {
+      "name": "readiness",
+      "display_name": "Readiness",
+      "query": "SELECT finding_type,source_key,status,detail,checked_at FROM v_readiness_findings ORDER BY checked_at DESC"
+    },
+    {
+      "name": "rules",
+      "display_name": "Rule Coverage",
+      "query": "SELECT pack_type,pack_id,operative_date,verification_status,source_publisher,source_url FROM v_rule_coverage ORDER BY pack_type,operative_date"
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "display_name": "Interactive Overview",
+      "widgets": [
+        {"type":"text","name":"overview_title","text":"# AuditHero — SCHADS Payroll Compliance\nUse the filters to investigate audit results across employees, classifications and pay periods.","position":[0,0,6,1]},
+        {"type":"filter","name":"status_filter","dataset":"investigation","field":"reconciliation_status","title":"Audit Status","selection":"multi","position":[0,1,2,1]},
+        {"type":"filter","name":"employee_filter","dataset":"investigation","field":"employee_name","title":"Employee","selection":"multi","position":[2,1,2,1]},
+        {"type":"filter","name":"employment_filter","dataset":"investigation","field":"employment_type","title":"Employment Type","selection":"multi","position":[4,1,2,1]},
+        {"type":"filter","name":"classification_filter","dataset":"investigation","field":"classification_code","title":"Classification","selection":"multi","position":[0,2,2,1]},
+        {"type":"filter","name":"work_group_filter","dataset":"investigation","field":"work_group","title":"Work Group","selection":"multi","position":[2,2,2,1]},
+        {"type":"filter","name":"state_filter","dataset":"investigation","field":"state","title":"State","selection":"multi","position":[4,2,2,1]},
+        {"type":"counter","name":"period_count","dataset":"investigation","title":"Audited Pay Periods","expression":"SUM(`pay_period_marker`)","decimals":0,"position":[0,3,1,2]},
+        {"type":"counter","name":"employee_count","dataset":"investigation","title":"Employees","expression":"COUNT(DISTINCT `employee_id`)","decimals":0,"position":[1,3,1,2]},
+        {"type":"counter","name":"review_shift_count","dataset":"investigation","title":"Review Shifts","expression":"SUM(`review_shift_marker`)","decimals":0,"position":[2,3,1,2]},
+        {"type":"counter","name":"expected_pay","dataset":"investigation","title":"Expected Pay","expression":"SUM(`period_expected_amount_once`)","format":"currency","decimals":2,"position":[3,3,1,2]},
+        {"type":"counter","name":"potential_underpayment","dataset":"investigation","title":"Potential Underpayment","expression":"SUM(`underpayment_amount_once`)","format":"currency","decimals":2,"position":[4,3,1,2]},
+        {"type":"counter","name":"potential_overpayment","dataset":"investigation","title":"Potential Overpayment","expression":"SUM(`overpayment_amount_once`)","format":"currency","decimals":2,"position":[5,3,1,2]},
+        {"type":"bar","name":"status_chart","dataset":"investigation","title":"Pay Periods by Audit Status","x":"reconciliation_status","x_title":"Audit Status","y_expression":"SUM(`pay_period_marker`)","y_name":"pay_periods","y_title":"Pay Periods","color":"reconciliation_status","position":[0,5,3,6]},
+        {"type":"bar","name":"underpayment_employee_chart","dataset":"investigation","title":"Potential Underpayment by Employee","x":"employee_name","x_title":"Employee","y_expression":"SUM(`underpayment_amount_once`)","y_name":"underpayment","y_title":"Underpayment","orientation":"horizontal","position":[3,5,3,6]},
+        {"type":"line","name":"variance_trend","dataset":"investigation","title":"Variance Trend by Pay Period","x":"pay_period_start","x_title":"Pay Period","y_expression":"SUM(`variance_amount_once`)","y_name":"variance","y_title":"Variance","position":[0,11,3,6]},
+        {"type":"bar","name":"review_classification_chart","dataset":"investigation","title":"Review Shifts by Classification","x":"classification_code","x_title":"Classification","y_expression":"SUM(`review_shift_marker`)","y_name":"review_shifts","y_title":"Review Shifts","orientation":"horizontal","position":[3,11,3,6]},
+        {
+          "type":"table","name":"period_summary","dataset":"investigation","title":"Pay Period Investigation Summary","page_size":30,"position":[0,17,6,10],
+          "columns":[
+            {"field":"employee_name","title":"Employee"},
+            {"field":"pay_period_start","title":"Period Start","kind":"datetime","search":false},
+            {"field":"pay_period_end","title":"Period End","kind":"datetime","search":false},
+            {"field":"reconciliation_status","title":"Audit Status"},
+            {"field":"pay_period_expected_amount","title":"Expected","kind":"number","number_format":"$0,0.00"},
+            {"field":"actual_auditable_amount","title":"Actual Auditable","kind":"number","number_format":"$0,0.00"},
+            {"field":"variance_actual_minus_expected","title":"Variance","kind":"number","number_format":"$0,0.00"},
+            {"field":"unmapped_pay_categories","title":"Unmapped Pay Categories"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "investigation",
+      "display_name": "Employee / Pay Period Investigation",
+      "widgets": [
+        {"type":"text","name":"investigation_title","text":"# Employee / Pay Period Investigation\nSelect an employee-pay-period to inspect all underlying shifts and calculation evidence.","position":[0,0,6,1]},
+        {"type":"filter","name":"pay_period_filter","dataset":"investigation","field":"employee_pay_period","title":"Employee + Pay Period","selection":"single","position":[0,1,3,1]},
+        {"type":"filter","name":"entitlement_status_filter","dataset":"investigation","field":"entitlement_status","title":"Shift Status","selection":"multi","position":[3,1,1,1]},
+        {"type":"filter","name":"weekday_filter","dataset":"investigation","field":"weekday_name","title":"Weekday","selection":"multi","position":[4,1,1,1]},
+        {"type":"filter","name":"run_type_filter","dataset":"investigation","field":"run_type","title":"Run Type","selection":"multi","position":[5,1,1,1]},
+        {"type":"counter","name":"investigation_shifts","dataset":"investigation","title":"Shifts","expression":"COUNT(`timesheet_id`)","decimals":0,"position":[0,2,1,2]},
+        {"type":"counter","name":"investigation_hours","dataset":"investigation","title":"Worked Hours","expression":"SUM(`worked_hours`)","decimals":2,"position":[1,2,1,2]},
+        {"type":"counter","name":"investigation_shift_expected","dataset":"investigation","title":"Shift Expected","expression":"SUM(`shift_expected_amount`)","format":"currency","decimals":2,"position":[2,2,1,2]},
+        {"type":"counter","name":"investigation_period_expected","dataset":"investigation","title":"Period Expected","expression":"SUM(`period_expected_amount_once`)","format":"currency","decimals":2,"position":[3,2,1,2]},
+        {"type":"counter","name":"investigation_actual","dataset":"investigation","title":"Actual Auditable","expression":"SUM(`actual_auditable_amount_once`)","format":"currency","decimals":2,"position":[4,2,1,2]},
+        {"type":"counter","name":"investigation_variance","dataset":"investigation","title":"Variance","expression":"SUM(`variance_amount_once`)","format":"currency","decimals":2,"position":[5,2,1,2]},
+        {"type":"bar","name":"weekday_hours_chart","dataset":"investigation","title":"Worked Hours by Weekday","x":"weekday_name","x_title":"Weekday","y_expression":"SUM(`worked_hours`)","y_name":"worked_hours_total","y_title":"Hours","position":[0,4,3,6]},
+        {"type":"bar","name":"status_expected_chart","dataset":"investigation","title":"Expected Entitlement by Shift Status","x":"entitlement_status","x_title":"Shift Status","y_expression":"SUM(`shift_expected_amount`)","y_name":"expected_total","y_title":"Expected","color":"entitlement_status","position":[3,4,3,6]},
+        {
+          "type":"table","name":"shift_detail","dataset":"investigation","title":"Underlying Shift Evidence","page_size":30,"position":[0,10,6,11],
+          "columns":[
+            {"field":"timesheet_id","title":"Timesheet ID"},
+            {"field":"shift_start","title":"Shift Start","kind":"datetime","search":false},
+            {"field":"shift_end","title":"Shift End","kind":"datetime","search":false},
+            {"field":"worked_hours","title":"Hours","kind":"number","number_format":"0.00"},
+            {"field":"employment_type","title":"Employment Type"},
+            {"field":"classification_code","title":"Classification"},
+            {"field":"work_group","title":"Work Group"},
+            {"field":"base_hourly_rate","title":"Base Rate","kind":"number","number_format":"$0.00"},
+            {"field":"shift_expected_amount","title":"Expected","kind":"number","number_format":"$0,0.00"},
+            {"field":"entitlement_status","title":"Entitlement Status"},
+            {"field":"review_flags","title":"Review Flags"}
+          ]
+        },
+        {
+          "type":"table","name":"calculation_evidence","dataset":"investigation","title":"Calculation and Instrument Evidence","page_size":20,"position":[0,21,6,11],
+          "columns":[
+            {"field":"timesheet_id","title":"Timesheet ID"},
+            {"field":"award_reference_date","title":"Award Reference Date","kind":"datetime","search":false},
+            {"field":"industrial_instrument_type","title":"Instrument Type"},
+            {"field":"industrial_instrument_name","title":"Instrument"},
+            {"field":"instrument_reference","title":"Instrument Reference"},
+            {"field":"part_time_pattern_status","title":"Part-time Pattern Status"},
+            {"field":"review_flags","title":"Review Flags"},
+            {"field":"calculation_evidence","title":"Calculation Evidence"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "controls",
+      "display_name": "Controls & Rules",
+      "widgets": [
+        {"type":"text","name":"controls_title","text":"# Audit Operations, Readiness & Rule Coverage","position":[0,0,6,1]},
+        {
+          "type":"table","name":"runs_table","dataset":"runs","title":"Audit Run History","page_size":25,"position":[0,1,6,9],
+          "columns":[
+            {"field":"audit_run_id","title":"Audit Run"},
+            {"field":"run_type","title":"Run Type"},
+            {"field":"audit_window_start","title":"Window Start"},
+            {"field":"audit_window_end","title":"Window End"},
+            {"field":"finished_at","title":"Finished","kind":"datetime","search":false},
+            {"field":"status","title":"Run Status"},
+            {"field":"actual_pay_source","title":"Actual Pay Source"},
+            {"field":"employees","title":"Employees","kind":"integer"},
+            {"field":"timesheets","title":"Timesheets","kind":"integer"},
+            {"field":"underpaid_periods","title":"Underpaid","kind":"integer"},
+            {"field":"review_periods","title":"Review","kind":"integer"},
+            {"field":"message","title":"Message"}
+          ]
+        },
+        {
+          "type":"table","name":"readiness_table","dataset":"readiness","title":"Readiness Findings","page_size":25,"position":[0,10,6,8],
+          "columns":[
+            {"field":"finding_type","title":"Finding Type"},
+            {"field":"source_key","title":"Source"},
+            {"field":"status","title":"Status"},
+            {"field":"detail","title":"Detail"},
+            {"field":"checked_at","title":"Checked","kind":"datetime","search":false}
+          ]
+        },
+        {
+          "type":"table","name":"rules_table","dataset":"rules","title":"SCHADS Rule Coverage","page_size":25,"position":[0,18,6,9],
+          "columns":[
+            {"field":"pack_type","title":"Pack Type"},
+            {"field":"pack_id","title":"Pack ID"},
+            {"field":"operative_date","title":"Operative Date"},
+            {"field":"verification_status","title":"Verification"},
+            {"field":"source_publisher","title":"Publisher"},
+            {"field":"source_url","title":"Source URL"}
+          ]
+        }
+      ]
+    }
+  ]
+}
