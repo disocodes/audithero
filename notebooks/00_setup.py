@@ -98,6 +98,19 @@ spark.sql(
     "run_finished_at TIMESTAMP) USING DELTA"
 )
 spark.sql(
+    f"""CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`rest_break_findings` (
+    finding_id STRING,employee_id STRING,employee_name STRING,previous_timesheet_ids STRING,
+    next_timesheet_ids STRING,previous_shift_end TIMESTAMP,next_shift_start TIMESTAMP,
+    required_rest_hours DOUBLE,actual_rest_hours DOUBLE,rest_shortfall_hours DOUBLE,
+    sleepover_adjacent_exception_eligible BOOLEAN,sleepover_8h_agreement BOOLEAN,
+    sleepover_blocked_rest BOOLEAN,historical_sleepover_interaction BOOLEAN,
+    overtime_rest_rule_applies BOOLEAN,employer_instructed_resume BOOLEAN,release_datetime TIMESTAMP,
+    double_time_repriced_hours DOUBLE,double_time_topup DOUBLE,paid_absence_rostered_hours DOUBLE,
+    payment_status STRING,status STRING,clause STRING,overtime_clause STRING,evidence_reference STRING,
+    notes STRING,audit_run_id STRING,audit_window_start STRING,audit_window_end STRING,run_type STRING,
+    run_finished_at TIMESTAMP) USING DELTA"""
+)
+spark.sql(
     f"CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`pay_period_reconciliation` ("
     "employee_id STRING,employee_name STRING,pay_period_start TIMESTAMP,pay_period_end TIMESTAMP,"
     "expected_amount DOUBLE,shift_count BIGINT,entitlement_review_count BIGINT,"
