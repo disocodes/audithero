@@ -151,6 +151,28 @@ def ensure_output_tables(spark):
             """,
         ),
         (
+            "creating gold.rest_break_findings",
+            """
+            CREATE TABLE IF NOT EXISTS gold.rest_break_findings (
+              finding_id STRING, finding_type STRING, employee_id STRING,
+              employee_name STRING, previous_timesheet_ids STRING,
+              next_timesheet_ids STRING, previous_shift_end TIMESTAMP,
+              next_shift_start TIMESTAMP, required_rest_hours DOUBLE,
+              actual_rest_hours DOUBLE, rest_shortfall_hours DOUBLE,
+              sleepover_adjacent_exception_eligible BOOLEAN,
+              sleepover_8h_agreement BOOLEAN, sleepover_blocked_rest BOOLEAN,
+              historical_sleepover_interaction BOOLEAN,
+              overtime_rest_rule_applies BOOLEAN, employer_instructed_resume BOOLEAN,
+              release_datetime TIMESTAMP, double_time_repriced_hours DOUBLE,
+              double_time_topup DOUBLE, paid_absence_rostered_hours DOUBLE,
+              payment_status STRING, status STRING, clause STRING,
+              overtime_clause STRING, evidence_reference STRING, notes STRING,
+              audit_run_id STRING, audit_window_start STRING, audit_window_end STRING,
+              run_type STRING, run_finished_at TIMESTAMP
+            ) USING DELTA
+            """,
+        ),
+        (
             "creating gold.pay_period_reconciliation",
             """
             CREATE TABLE IF NOT EXISTS gold.pay_period_reconciliation (
@@ -178,8 +200,7 @@ def ensure_output_tables(spark):
 
 
 def create_views(spark):
-    # Use a subquery instead of QUALIFY and explicit grouping columns instead of
-    # GROUP BY ALL so these definitions remain portable across Fabric runtimes.
+    # Reporting views select the latest successful run for each audit window.
     statements = [
         (
             "creating gold.v_latest_audit_runs",
@@ -193,6 +214,7 @@ def create_views(spark):
                        ORDER BY finished_at DESC
                      ) AS __audithero_row_number
               FROM ops.audit_runs r
+              WHERE status='SUCCESS'
             ) ranked
             WHERE __audithero_row_number = 1
             """,
@@ -203,7 +225,6 @@ def create_views(spark):
             CREATE OR REPLACE VIEW gold.v_audit_detail_latest AS
             SELECT d.* FROM gold.audit_detail d
             INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            WHERE r.status='SUCCESS'
             """,
         ),
         (
@@ -212,7 +233,6 @@ def create_views(spark):
             CREATE OR REPLACE VIEW gold.v_reconciliation_latest AS
             SELECT d.* FROM gold.pay_period_reconciliation d
             INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            WHERE r.status='SUCCESS'
             """,
         ),
         (
@@ -221,7 +241,6 @@ def create_views(spark):
             CREATE OR REPLACE VIEW gold.v_event_adjustments_latest AS
             SELECT d.* FROM gold.audit_event_adjustments d
             INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            WHERE r.status='SUCCESS'
             """,
         ),
         (
@@ -230,7 +249,14 @@ def create_views(spark):
             CREATE OR REPLACE VIEW gold.v_toil_findings_latest AS
             SELECT d.* FROM gold.toil_findings d
             INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            WHERE r.status='SUCCESS'
+            """,
+        ),
+        (
+            "creating gold.v_rest_break_findings_latest",
+            """
+            CREATE OR REPLACE VIEW gold.v_rest_break_findings_latest AS
+            SELECT d.* FROM gold.rest_break_findings d
+            INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
             """,
         ),
         (
