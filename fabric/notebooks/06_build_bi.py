@@ -5,17 +5,10 @@
 # Create or update AuditHero's Direct Lake semantic model, business measures and
 # Power BI report. Run after Setup and when the AuditHero BI definition is upgraded.
 #
-# PARAMETERS
-# workspace_name      — Fabric workspace containing AuditHero.
-# lakehouse_name      — AuditHero Lakehouse name.
-# semantic_model_name — target Direct Lake semantic model.
-# report_name         — target Power BI report.
-#
-# REPORTING CONTROL
-# -----------------
-# Confirmed underpayment and overpayment measures include only reconciliation rows
-# with UNDERPAID or OVERPAID status. REQUIRES_REVIEW rows are excluded from
-# confirmed remediation totals until the underlying evidence is resolved.
+# The model separates definitive actual-pay reconciliation from Award scenario
+# analysis. Scenario measures calculate what SCHADS requires under a selected
+# classification/employment scenario. Definitive under/overpayment measures use
+# actual payroll evidence only.
 
 import json
 import traceback
@@ -43,6 +36,9 @@ try:
     TABLES = {
         "Pay Period Reconciliation": "gold.current_reconciliation",
         "Audit Detail": "gold.current_audit_detail",
+        "Award Scenarios": "gold.current_award_scenario_detail",
+        "Award Criteria": "gold.current_award_criteria_detail",
+        "Award Scenario Rest": "gold.current_award_scenario_rest_findings",
         "Rest Break Findings": "gold.current_rest_break_findings",
         "Supplemental Entitlements": "gold.current_event_adjustments",
         "TOIL Findings": "gold.current_toil_findings",
@@ -66,7 +62,7 @@ try:
         overwrite=True,
     )
 
-    stage = "STEP 3 — Define payroll/audit business measures"
+    stage = "STEP 3 — Define payroll and Award analysis measures"
     print(stage)
     MEASURES = {
         "Pay Period Reconciliation": {
@@ -75,7 +71,7 @@ try:
             "Underpaid Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"UNDERPAID\")", "0", "Pay periods with a definite negative actual-minus-expected variance and no unresolved review condition."),
             "Overpaid Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"OVERPAID\")", "0", "Pay periods with a definite positive actual-minus-expected variance and no unresolved review condition."),
             "Requires Review Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"REQUIRES_REVIEW\")", "0", "Pay periods requiring evidence review before a definitive decision."),
-            "Actual Pay Unavailable Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"ACTUAL_PAY_UNAVAILABLE\")", "0", "Expected entitlement exists but usable actual payroll earnings were not available."),
+            "Actual Pay Unavailable Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] IN {\"ACTUAL_PAY_UNAVAILABLE\",\"ENTITLEMENT_ONLY\"})", "0", "Expected entitlement exists but usable actual payroll earnings were not available."),
             "Compliant Periods": ("CALCULATE(COUNTROWS('Pay Period Reconciliation'), 'Pay Period Reconciliation'[status] = \"COMPLIANT\")", "0", "Pay periods within tolerance and with no unresolved review finding."),
             "Potential Underpayment": ("SUMX(FILTER('Pay Period Reconciliation', 'Pay Period Reconciliation'[status] = \"UNDERPAID\"), -'Pay Period Reconciliation'[variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Underpayment variance for definitive UNDERPAID periods."),
             "Potential Overpayment": ("SUMX(FILTER('Pay Period Reconciliation', 'Pay Period Reconciliation'[status] = \"OVERPAID\"), 'Pay Period Reconciliation'[variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Overpayment variance for definitive OVERPAID periods."),
@@ -85,18 +81,45 @@ try:
             "Compliance Rate": ("DIVIDE([Compliant Periods], [Pay Periods] - [Requires Review Periods] - [Actual Pay Unavailable Periods])", "0.0%", "Compliance rate among periods with a definitive decision."),
         },
         "Audit Detail": {
-            "Shifts Audited": ("COUNTROWS('Audit Detail')", "0", "Shift-level audit records in the current snapshot."),
+            "Shifts Audited": ("COUNTROWS('Audit Detail')", "0", "Shift-level definitive audit records in the current snapshot."),
             "Review Shifts": ("CALCULATE(COUNTROWS('Audit Detail'), 'Audit Detail'[entitlement_status] = \"REQUIRES_REVIEW\")", "0", "Shift records requiring evidence or rule review."),
-            "Expected Shift Entitlements": ("SUM('Audit Detail'[expected_amount])", "$#,##0.00;($#,##0.00)", "Expected shift-level Award comparator before pay-period reconciliation."),
+            "Expected Shift Entitlements": ("SUM('Audit Detail'[expected_amount])", "$#,##0.00;($#,##0.00)", "Expected shift-level entitlement for known employee facts."),
+        },
+        "Award Scenarios": {
+            "Scenario Shift Rows": ("COUNTROWS('Award Scenarios')", "0", "Shift rows in the selected SCHADS classification and employment scenario."),
+            "Scenario Employees": ("DISTINCTCOUNT('Award Scenarios'[employee_id])", "0", "Employees represented in the selected scenario."),
+            "Scenario Expected Pay": ("SUM('Award Scenarios'[expected_amount])", "$#,##0.00;($#,##0.00)", "Expected SCHADS entitlement for the selected scenario."),
+            "Below Minimum Rate Rows": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[base_rate_status] = \"BELOW_MINIMUM\")", "0", "Shift rows where the effective supplied base rate is below the selected SCHADS minimum."),
+            "At Minimum Rate Rows": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[base_rate_status] = \"AT_MINIMUM\")", "0", "Shift rows where the supplied base rate equals the selected SCHADS minimum within tolerance."),
+            "Above Minimum Rate Rows": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[base_rate_status] = \"ABOVE_MINIMUM\")", "0", "Shift rows where the supplied base rate exceeds the selected SCHADS minimum."),
+            "Rate Not Supplied Rows": ("CALCULATE(COUNTROWS('Award Scenarios'), ISBLANK('Award Scenarios'[supplied_base_hourly_rate]))", "0", "Shift rows without an employee base rate supplied for that effective date."),
+            "Base Rate Shortfall Estimate": ("SUMX(FILTER('Award Scenarios', 'Award Scenarios'[base_rate_variance] < 0), -'Award Scenarios'[base_rate_variance] * 'Award Scenarios'[worked_hours])", "$#,##0.00;($#,##0.00)", "Simple base-rate-only shortfall for worked hours. Penalties, overtime and other components are calculated separately in the scenario entitlement."),
+            "Explicit Shift Underpaid": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[scenario_status] = \"UNDERPAID\")", "0", "Scenario shift rows underpaid where an explicit actual shift amount was supplied."),
+            "Explicit Shift Shortfall": ("SUMX(FILTER('Award Scenarios', 'Award Scenarios'[scenario_status] = \"UNDERPAID\"), -'Award Scenarios'[shift_variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Scenario shortfall where an explicit actual shift amount was supplied."),
+            "Scenario Review Shifts": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[entitlement_status] = \"REQUIRES_REVIEW\")", "0", "Scenario shift rows requiring additional evidence."),
+        },
+        "Award Criteria": {
+            "Award Components": ("COUNTROWS('Award Criteria')", "0", "Calculated or review components exposed by Award criteria."),
+            "Criterion Hours": ("SUM('Award Criteria'[hours])", "0.00", "Hours associated with the selected Award components."),
+            "Criterion Amount": ("SUM('Award Criteria'[criterion_amount])", "$#,##0.00;($#,##0.00)", "Calculated monetary amount for the selected Award components where applicable."),
+            "Evidence Findings": ("CALCULATE(COUNTROWS('Award Criteria'), 'Award Criteria'[criterion] = \"EVIDENCE_OR_RULE_REVIEW\")", "0", "Criteria requiring evidence or review rather than an assumed fact."),
+        },
+        "Award Scenario Rest": {
+            "Scenario Rest Intervals": ("COUNTROWS('Award Scenario Rest')", "0", "Rest intervals assessed for the selected Award scenario."),
+            "Scenario Short Rest": ("CALCULATE(COUNTROWS('Award Scenario Rest'), 'Award Scenario Rest'[rest_shortfall_hours] > 0)", "0", "Intervals shorter than the applicable rest requirement."),
+            "Scenario Rest Shortfall Hours": ("SUM('Award Scenario Rest'[rest_shortfall_hours])", "0.00", "Total rest shortfall hours for selected scenario findings."),
+            "Scenario Rest Review": ("CALCULATE(COUNTROWS('Award Scenario Rest'), 'Award Scenario Rest'[status] = \"REQUIRES_REVIEW\")", "0", "Rest findings requiring factual evidence review."),
+            "Scenario Double-Time Hours": ("SUM('Award Scenario Rest'[double_time_repriced_hours])", "0.00", "Observed resumed-work hours repriced under supported rest-after-overtime evidence."),
+            "Scenario Double-Time Top-up": ("SUM('Award Scenario Rest'[double_time_topup])", "$#,##0.00;($#,##0.00)", "Evidence-backed double-time top-up for selected scenario findings."),
         },
         "Rest Break Findings": {
-            "Rest Intervals Assessed": ("COUNTROWS('Rest Break Findings')", "0", "Rest intervals assessed between successive AuditHero work units."),
+            "Rest Intervals Assessed": ("COUNTROWS('Rest Break Findings')", "0", "Rest intervals assessed for the definitive employee audit."),
             "Short Rest Findings": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[rest_shortfall_hours] > 0)", "0", "Intervals shorter than the effective-dated rest requirement."),
-            "Rest Findings Requiring Review": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[status] = \"REQUIRES_REVIEW\")", "0", "Rest findings that require agreement, instruction, release, roster or historical evidence review."),
-            "Overtime Rest Cases": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[overtime_rest_rule_applies] = TRUE())", "0", "Rest intervals where the rest-after-overtime rule applies."),
+            "Rest Findings Requiring Review": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[status] = \"REQUIRES_REVIEW\")", "0", "Rest findings requiring evidence review."),
+            "Overtime Rest Cases": ("CALCULATE(COUNTROWS('Rest Break Findings'), 'Rest Break Findings'[overtime_rest_rule_applies] = TRUE())", "0", "Intervals where the rest-after-overtime rule applies."),
             "Double-Time Repriced Hours": ("SUM('Rest Break Findings'[double_time_repriced_hours])", "0.00", "Observed resumed-work hours repriced under the applicable rest-after-overtime rule."),
             "Double-Time Top-up": ("SUM('Rest Break Findings'[double_time_topup])", "$#,##0.00;($#,##0.00)", "Evidence-backed top-up calculated to bring resumed work to the required minimum rate."),
-            "Paid Absence Rostered Hours": ("SUM('Rest Break Findings'[paid_absence_rostered_hours])", "0.00", "Rostered ordinary hours identified inside the post-release rest window. These remain subject to payroll/evidence verification where payment cannot be determined safely."),
+            "Paid Absence Rostered Hours": ("SUM('Rest Break Findings'[paid_absence_rostered_hours])", "0.00", "Rostered ordinary hours identified inside the post-release rest window."),
         },
         "Supplemental Entitlements": {
             "Supplemental Expected Adjustments": ("SUM('Supplemental Entitlements'[expected_adjustment])", "$#,##0.00;($#,##0.00)", "Calculated controlled supplemental entitlements.")
