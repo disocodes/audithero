@@ -35,39 +35,24 @@ def _control(frames, name, root):
 
 
 def _pay_category_mapping(frames, root):
-    """Return pay-category treatments from either supported workbook layout."""
     df=frames.get("pay_category_mapping")
     if df is None or df.empty:
         return _json(Path(root)/"pay_category_mapping.json")
     mapping={}
     for _,r in df.iterrows():
         treatment=str(r.get("audit_treatment") or r.get("treatment") or "").strip().upper()
-        if not treatment:
-            continue
+        if not treatment: continue
         value={"audit_treatment":treatment}
-        keys=(
-            r.get("pay_category_id"),
-            r.get("pay_category"),
-            r.get("source_key"),
-            r.get("source_label"),
-        )
-        for key in keys:
-            if pd.notna(key) and str(key).strip():
-                mapping[str(key).strip()]=value
+        for key in (r.get("pay_category_id"),r.get("pay_category"),r.get("source_key"),r.get("source_label")):
+            if pd.notna(key) and str(key).strip(): mapping[str(key).strip()]=value
     return mapping
 
 
 def _usable_actual_pay(payroll: pd.DataFrame, mapping: dict) -> bool:
-    """Return True only when payroll has enough evidence for safe reconciliation."""
-    if payroll is None or payroll.empty or not mapping:
-        return False
+    if payroll is None or payroll.empty or not mapping: return False
     required={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}
-    if not required.issubset(payroll.columns):
-        return False
-    for field in required:
-        if payroll[field].isna().any():
-            return False
-    return True
+    if not required.issubset(payroll.columns): return False
+    return not any(payroll[field].isna().any() for field in required)
 
 
 def _assign_manual_pay_periods(timesheets: pd.DataFrame,pay_runs: pd.DataFrame):
@@ -89,21 +74,8 @@ def _assign_manual_pay_periods(timesheets: pd.DataFrame,pay_runs: pd.DataFrame):
     return out
 
 
-def run_manual_audit(
-    input_root,
-    config_root,
-    start_date,
-    end_date,
-    rule_library,
-    variance_tolerance=0.05,
-    generate_award_scenarios=True,
-):
-    """Run AuditHero from a self-contained workbook or canonical CSV/XLSX inputs.
-
-    The definitive audit uses known employee facts. In parallel, Award scenarios
-    recalculate the supplied shifts across SCHADS classifications and employment
-    types so incomplete employee master data does not prevent Award analysis.
-    """
+def run_manual_audit(input_root,config_root,start_date,end_date,rule_library,variance_tolerance=0.05,generate_award_scenarios=True):
+    """Run the complete file audit plus selectable SCHADS Award scenarios."""
     frames=normalize_canonical_frames(load_file_source(input_root,start_date,end_date)); root=Path(config_root)
     employees=frames["employees"].copy(); pay_details=frames["pay_details"].copy(); employment_history=frames["employment_history"].copy()
     timesheets=_assign_manual_pay_periods(frames["timesheets"].copy(),frames["pay_runs"].copy()); rosters=frames["rostered_shifts"].copy(); payroll=frames["payroll_earnings"].copy()
@@ -113,68 +85,38 @@ def run_manual_audit(
     holidays=pd.DataFrame(australian_public_holidays(start_date,end_date)); override=_control(frames,"public_holiday_overrides",root)
     if not override.empty: holidays=pd.concat([holidays,override],ignore_index=True,sort=False)
 
-    part_time_patterns=_control(frames,"part_time_patterns",root)
-    part_time_variations=_control(frames,"part_time_variations",root)
-    meal_break_events=_control(frames,"meal_break_events",root)
-    rest_break_controls=_control(frames,"rest_break_controls",root)
-    overtime_rest_controls=_control(frames,"overtime_rest_controls",root)
+    part_time_patterns=_control(frames,"part_time_patterns",root); part_time_variations=_control(frames,"part_time_variations",root)
+    meal_break_events=_control(frames,"meal_break_events",root); rest_break_controls=_control(frames,"rest_break_controls",root); overtime_rest_controls=_control(frames,"overtime_rest_controls",root)
 
     detail=calculate_entitlements(employees,employment_history,pay_details,timesheets,holidays,rule_library)
     detail=apply_broken_shift_rules(detail,timesheets,rule_library); detail=apply_sleepover_group_rules(detail,timesheets,rule_library)
     detail=apply_rostered_and_daily_overtime(detail,timesheets,holidays,rule_library); detail=allocate_period_overtime(detail,holidays,rule_library); detail=flag_period_overtime(detail)
     detail=apply_part_time_pattern_checks(detail,part_time_patterns,part_time_variations)
     detail=apply_meal_break_events(detail,timesheets,meal_break_events,holidays,rule_library)
-    detail,rest_findings=apply_rest_between_work(
-        detail,
-        timesheets,
-        rosters,
-        rest_break_controls,
-        overtime_rest_controls,
-        rule_library,
-    )
+    detail,rest_findings=apply_rest_between_work(detail,timesheets,rosters,rest_break_controls,overtime_rest_controls,rule_library)
     detail=apply_instrument_history(detail,_control(frames,"industrial_instrument_history",root))
 
     events=aggregate_remote_work_events(_control(frames,"supplemental_events",root)); adjustments=calculate_supplemental_events(events,employees,pay_details,holidays,rule_library)
     recon_input=merge_event_adjustments_into_entitlements(detail,adjustments)
     toil=audit_toil_register(_control(frames,"toil_register",root),employees,pay_details,holidays,rule_library,audit_end_date=end_date); recon_input=merge_toil_adjustments(recon_input,toil)
 
-    pay_mapping=_pay_category_mapping(frames,root)
-    actual_pay_usable=_usable_actual_pay(payroll,pay_mapping)
-    reconciliation=reconcile_pay_periods(
-        recon_input,
-        payroll if actual_pay_usable else pd.DataFrame(),
-        pay_mapping if actual_pay_usable else {},
-        variance_tolerance,
-    )
+    pay_mapping=_pay_category_mapping(frames,root); actual_pay_usable=_usable_actual_pay(payroll,pay_mapping)
+    reconciliation=reconcile_pay_periods(recon_input,payroll if actual_pay_usable else pd.DataFrame(),pay_mapping if actual_pay_usable else {},variance_tolerance)
 
     scenarios={"detail":pd.DataFrame(),"criteria":pd.DataFrame(),"rest_findings":pd.DataFrame()}
     if generate_award_scenarios:
         scenarios=calculate_award_scenarios(
-            employees,
-            timesheets,
-            holidays,
-            rule_library,
+            employees,timesheets,holidays,rule_library,
             pay_details=pay_details,
+            employment_history=employment_history,
             rosters=rosters,
             rest_break_controls=rest_break_controls,
             overtime_rest_controls=overtime_rest_controls,
         )
 
     return {
-        "employees":employees,
-        "pay_details":pay_details,
-        "employment_history":employment_history,
-        "timesheets":timesheets,
-        "rostered_shifts":rosters,
-        "payroll_earnings":payroll,
-        "actual_pay_usable":actual_pay_usable,
-        "public_holidays":holidays,
-        "detail":detail,
-        "rest_break_findings":rest_findings,
-        "event_adjustments":adjustments,
-        "toil_findings":toil,
-        "reconciliation":reconciliation,
-        "award_scenario_detail":scenarios["detail"],
-        "award_criteria_detail":scenarios["criteria"],
-        "award_scenario_rest_findings":scenarios["rest_findings"],
+        "employees":employees,"pay_details":pay_details,"employment_history":employment_history,"timesheets":timesheets,
+        "rostered_shifts":rosters,"payroll_earnings":payroll,"actual_pay_usable":actual_pay_usable,"public_holidays":holidays,
+        "detail":detail,"rest_break_findings":rest_findings,"event_adjustments":adjustments,"toil_findings":toil,"reconciliation":reconciliation,
+        "award_scenario_detail":scenarios["detail"],"award_criteria_detail":scenarios["criteria"],"award_scenario_rest_findings":scenarios["rest_findings"],
     }
