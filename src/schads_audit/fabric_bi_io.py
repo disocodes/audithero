@@ -11,6 +11,11 @@ SNAPSHOT_SOURCES = {
     "gold.current_award_scenario_detail": "gold.award_scenario_detail",
     "gold.current_award_criteria_detail": "gold.award_criteria_detail",
     "gold.current_award_scenario_rest_findings": "gold.award_scenario_rest_findings",
+    "gold.current_penalties_shiftwork": "gold.award_criteria_detail",
+    "gold.current_overtime_criteria": "gold.award_criteria_detail",
+    "gold.current_meal_break_criteria": "gold.award_criteria_detail",
+    "gold.current_sleep_broken_allowances": "gold.award_criteria_detail",
+    "gold.current_evidence_required": "gold.award_criteria_detail",
 }
 
 
@@ -38,6 +43,13 @@ def ensure_current_tables(spark):
         _ensure_snapshot_table(spark, target, source)
 
 
+def _replace_snapshot(spark, table: str, frame) -> None:
+    if frame is None or frame.empty:
+        _sql(spark, f"truncating {table}", f"TRUNCATE TABLE {table}")
+    else:
+        write_df(spark, frame, table, "overwrite")
+
+
 def publish_current_snapshots(spark, result):
     """Replace BI-facing snapshots only after a successful audit has completed."""
     ensure_current_tables(spark)
@@ -52,10 +64,42 @@ def publish_current_snapshots(spark, result):
         "award_scenario_rest_findings": "gold.current_award_scenario_rest_findings",
     }
     for key, table in mapping.items():
-        df = result.get(key)
-        if df is None:
-            continue
-        if df.empty:
-            _sql(spark, f"truncating {table}", f"TRUNCATE TABLE {table}")
-        else:
-            write_df(spark, df, table, "overwrite")
+        _replace_snapshot(spark, table, result.get(key))
+
+    criteria = result.get("award_criteria_detail")
+    if criteria is None or criteria.empty:
+        for table in (
+            "gold.current_penalties_shiftwork",
+            "gold.current_overtime_criteria",
+            "gold.current_meal_break_criteria",
+            "gold.current_sleep_broken_allowances",
+            "gold.current_evidence_required",
+        ):
+            _replace_snapshot(spark, table, None)
+        return
+
+    _replace_snapshot(
+        spark,
+        "gold.current_penalties_shiftwork",
+        criteria[criteria["criterion_group"].isin(["PENALTIES_AND_SHIFTWORK", "PUBLIC_HOLIDAYS", "MINIMUM_ENGAGEMENT"])].copy(),
+    )
+    _replace_snapshot(
+        spark,
+        "gold.current_overtime_criteria",
+        criteria[criteria["criterion_group"] == "OVERTIME"].copy(),
+    )
+    _replace_snapshot(
+        spark,
+        "gold.current_meal_break_criteria",
+        criteria[criteria["criterion_group"] == "MEAL_BREAKS"].copy(),
+    )
+    _replace_snapshot(
+        spark,
+        "gold.current_sleep_broken_allowances",
+        criteria[criteria["criterion_group"].isin(["SLEEPOVER", "BROKEN_SHIFT", "MINIMUM_ENGAGEMENT", "ALLOWANCES"])].copy(),
+    )
+    _replace_snapshot(
+        spark,
+        "gold.current_evidence_required",
+        criteria[criteria["criterion"] == "EVIDENCE_OR_RULE_REVIEW"].copy(),
+    )
