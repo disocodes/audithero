@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC **Purpose:** run a file-based AuditHero payroll audit from canonical CSV files or `audithero_input.xlsx`.
 # MAGIC
-# MAGIC The standard uploaded-file Job runs File Readiness before invoking this notebook. The audit calculates expected entitlements, evaluates rest-between-work requirements, applies supported event and TOIL controls, reconciles actual payroll when sufficient earning-line evidence is available, stores normalized evidence and audit results, and refreshes the latest-successful reporting views.
+# MAGIC The audit calculates definitive expected entitlements from known employee facts and also builds a selectable SCHADS Award scenario matrix across classifications and employment types. It evaluates rest-between-work requirements, applies supported event and TOIL controls, reconciles actual payroll when sufficient earning-line evidence is available, and stores governed Gold results for the dashboard and Genie.
 # COMMAND ----------
 # MAGIC %pip install "pandas>=2.0" "openpyxl>=3.1" "holidays>=0.75"
 # COMMAND ----------
@@ -41,7 +41,7 @@ print(f"Audit window: {start_date} to {end_date}")
 # MAGIC %md
 # MAGIC ## 2. Run the file-based audit engine
 # MAGIC
-# MAGIC `run_manual_audit` loads canonical evidence, assigns pay periods where supported, applies the effective-dated SCHADS modules, and returns detailed, rest-compliance, and reconciled results. Missing optional actual-pay detail does not prevent expected entitlement calculation. A new run ID is assigned to the stored evidence and results.
+# MAGIC Known employee facts drive the definitive audit. The same shifts are also recalculated across available SCHADS classifications and employment types so incomplete employee master data does not prevent Award analysis.
 # COMMAND ----------
 run_id = str(uuid.uuid4())
 started = datetime.now(timezone.utc)
@@ -51,8 +51,6 @@ finished = datetime.now(timezone.utc)
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 3. Add audit-run metadata
-# MAGIC
-# MAGIC Run metadata keeps repeated audits of the same date range distinguishable and traceable.
 # COMMAND ----------
 for frame in (
     result["detail"],
@@ -60,6 +58,9 @@ for frame in (
     result["event_adjustments"],
     result["toil_findings"],
     result["reconciliation"],
+    result["award_scenario_detail"],
+    result["award_criteria_detail"],
+    result["award_scenario_rest_findings"],
 ):
     if frame is not None and not frame.empty:
         frame["audit_run_id"] = run_id
@@ -70,8 +71,6 @@ for frame in (
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 4. Store normalized evidence and audit results
-# MAGIC
-# MAGIC Silver tables retain normalized source evidence. Gold tables retain calculated entitlement, rest-between-work findings, event, TOIL, and reconciliation results. Historical runs are appended rather than overwritten.
 # COMMAND ----------
 for name, frame in (
     ("employees", result["employees"]),
@@ -93,14 +92,16 @@ write_df(spark, result["rest_break_findings"], f"{catalog}.gold.rest_break_findi
 write_df(spark, result["event_adjustments"], f"{catalog}.gold.audit_event_adjustments", "append")
 write_df(spark, result["toil_findings"], f"{catalog}.gold.toil_findings", "append")
 write_df(spark, result["reconciliation"], f"{catalog}.gold.pay_period_reconciliation", "append")
+write_df(spark, result["award_scenario_detail"], f"{catalog}.gold.award_scenario_detail", "append")
+write_df(spark, result["award_criteria_detail"], f"{catalog}.gold.award_criteria_detail", "append")
+write_df(spark, result["award_scenario_rest_findings"], f"{catalog}.gold.award_scenario_rest_findings", "append")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 5. Record audit-run status and refresh reporting views
-# MAGIC
-# MAGIC `actual_pay_source` is recorded as `FILES` only when the supplied payroll earnings contain the fields and approved treatment mapping required for reliable reconciliation. Otherwise the run records `NONE` and retains the supplied payroll file as Silver evidence.
 # COMMAND ----------
 reconciliation = result["reconciliation"]
 rest_findings = result["rest_break_findings"]
+scenario_detail = result["award_scenario_detail"]
 actual_source = "FILES" if result.get("actual_pay_usable", False) else "NONE"
 run = pd.DataFrame([
     {
@@ -117,7 +118,7 @@ run = pd.DataFrame([
         "underpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "UNDERPAID").sum()),
         "overpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "OVERPAID").sum()),
         "review_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()),
-        "message": f"manual input={input_root}; rest_findings={len(rest_findings)}",
+        "message": f"manual input={input_root}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}",
     }
 ])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
@@ -133,5 +134,6 @@ if not reconciliation.empty:
 if rest_findings is not None and not rest_findings.empty:
     print("\nRest-between-work findings:")
     print(rest_findings["status"].value_counts(dropna=False).to_string())
-    display(rest_findings.sort_values(["status", "employee_name", "next_shift_start"]).head(200))
-print("Recommended next step: review the AuditHero - SCHADS Payroll Compliance dashboard, Genie analysis, and detailed audit evidence.")
+if scenario_detail is not None and not scenario_detail.empty:
+    print(f"\nAward scenario rows available for interactive level/pay-point analysis: {len(scenario_detail):,}")
+print("Recommended next step: use the AuditHero dashboard to move between Award criteria, classification levels, employee records, exceptions and supporting calculation evidence.")
