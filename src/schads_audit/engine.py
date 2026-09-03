@@ -104,20 +104,17 @@ def _mult(c, emp_type, day_type, shift_type):
 
 
 def _minimum(c, work_group, emp_type):
+    fallback = None
     for row in c["minimum_engagement"]:
+        if row["work_group"] == "OTHER" and emp_type in row["employment_types"]:
+            fallback = (float(row["hours"]), row["clause"])
         if row["work_group"] == work_group and emp_type in row["employment_types"]:
             return float(row["hours"]), row["clause"]
-    return 0, None
+    return fallback or (0, None)
 
 
 def _first_full_pay_period_transition(reference, packs, window_days=31):
-    """Return True only when a missing pay-period start can change rule selection.
-
-    Ordinary shifts away from an operative-date boundary can safely use their shift
-    date as the Award reference. Around a pack whose application basis is the first
-    full pay period starting on/after its operative date, pay-period evidence is
-    needed to determine whether the new pack had commenced for that employee.
-    """
+    """Return True only when a missing pay-period start can change rule selection."""
     ref = _dt(reference)
     if ref is None:
         return False
@@ -211,10 +208,7 @@ def calculate_entitlements(employees, employment_history, classifications, times
         rate, rate_pack = lib.rate(code, reference) if code else (None, None)
         conditions = lib.conditions(reference)
         allowance_pack = lib.allowances(reference)
-        if pp_start is None and _first_full_pay_period_transition(
-            reference,
-            (rate_pack, conditions, allowance_pack),
-        ):
+        if pp_start is None and _first_full_pay_period_transition(reference, (rate_pack, conditions, allowance_pack)):
             flags.append("PAY_PERIOD_START_REQUIRED_AT_AWARD_TRANSITION")
 
         if not rate:
@@ -224,7 +218,10 @@ def calculate_entitlements(employees, employment_history, classifications, times
 
         base = float(rate["base_hourly_rate"]) if rate else None
         state = ts.get("location_state") or emp.get("state")
-        work_group = ts.get("work_group") or emp.get("work_group") or "DISABILITY_SERVICES"
+        source_work_group = ts.get("work_group") or emp.get("work_group")
+        work_group = str(source_work_group).strip() if source_work_group not in (None, "") and not pd.isna(source_work_group) else "OTHER"
+        if work_group == "OTHER":
+            flags.append("WORK_GROUP_MISSING_AWARD_CONDITION_REVIEW")
         holiday_location_key = ts.get("holiday_location_key")
         is_sleepover = _bool(ts.get("is_sleepover"))
         if not state:
@@ -283,21 +280,11 @@ def calculate_entitlements(employees, employment_history, classifications, times
                         "clause": clause,
                     })
             else:
-                evidence.append({
-                    "component": "SLEEPOVER_SPAN",
-                    "span_hours": round(span_hours, 4),
-                    "ordinary_hours_paid": 0.0,
-                    "clause": "25.7",
-                })
+                evidence.append({"component": "SLEEPOVER_SPAN", "span_hours": round(span_hours, 4), "ordinary_hours_paid": 0.0, "clause": "25.7"})
                 allowance, selected_allowance_pack = lib.allowance("sleepover", reference)
                 if allowance:
                     expected += money(allowance["amount"])
-                    evidence.append({
-                        "component": "SLEEPOVER_ALLOWANCE",
-                        "amount": float(money(allowance["amount"])),
-                        "allowance_pack_id": selected_allowance_pack["allowance_pack_id"],
-                        "clause": "25.7",
-                    })
+                    evidence.append({"component": "SLEEPOVER_ALLOWANCE", "amount": float(money(allowance["amount"])), "allowance_pack_id": selected_allowance_pack["allowance_pack_id"], "clause": "25.7"})
                 else:
                     flags.append("SLEEPOVER_ALLOWANCE_MISSING")
                 if bool(ts.get("_invalid_sleepover_active_minutes", False)):
@@ -307,11 +294,7 @@ def calculate_entitlements(employees, employment_history, classifications, times
                 if conditions["sleepover"].get("surrounding_work_is_one_shift") and not ts.get("sleepover_group_id"):
                     flags.append("SLEEPOVER_2026_CONTINUOUS_SHIFT_GROUPING_MISSING")
 
-            if (
-                not is_sleepover
-                and worked > float(conditions["meal_break"]["review_if_shift_gt_hours_and_no_break"])
-                and break_minutes == 0
-            ):
+            if not is_sleepover and worked > float(conditions["meal_break"]["review_if_shift_gt_hours_and_no_break"]) and break_minutes == 0:
                 flags.append("MEAL_BREAK_REVIEW")
 
         rows.append({
@@ -375,23 +358,10 @@ def reconcile_pay_periods(entitlements, payroll_lines, mapping, tolerance=0.05):
     for keys, group in payroll.groupby(["employee_id", "pay_period_start", "pay_period_end"], dropna=False):
         auditable = group[group.audit_treatment.isin(["AUDITABLE_WORK", "ALLOWANCE"])]
         unmapped = sorted(set(group.loc[group.audit_treatment == "UNMAPPED", "pay_category"].astype(str)))
-        rows.append({
-            "employee_id": str(keys[0]),
-            "pay_period_start": keys[1],
-            "pay_period_end": keys[2],
-            "actual_auditable_amount": round(float(auditable.amount.sum()), 2),
-            "unmapped_pay_categories": "; ".join(unmapped),
-        })
+        rows.append({"employee_id": str(keys[0]), "pay_period_start": keys[1], "pay_period_end": keys[2], "actual_auditable_amount": round(float(auditable.amount.sum()), 2), "unmapped_pay_categories": "; ".join(unmapped)})
 
-    out = grouped.merge(
-        pd.DataFrame(rows),
-        on=["employee_id", "pay_period_start", "pay_period_end"],
-        how="left",
-    )
-    out["variance_actual_minus_expected"] = (
-        pd.to_numeric(out.actual_auditable_amount, errors="coerce")
-        - pd.to_numeric(out.expected_amount, errors="coerce")
-    ).round(2)
+    out = grouped.merge(pd.DataFrame(rows), on=["employee_id", "pay_period_start", "pay_period_end"], how="left")
+    out["variance_actual_minus_expected"] = (pd.to_numeric(out.actual_auditable_amount, errors="coerce") - pd.to_numeric(out.expected_amount, errors="coerce")).round(2)
 
     def status(row):
         if int(row.entitlement_review_count) > 0 or row.get("unmapped_pay_categories"):
