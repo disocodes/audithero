@@ -5,10 +5,10 @@
 # Prepare the attached AuditHero Lakehouse for AuditHero operation.
 #
 # WHAT IT DOES
-# 1. Creates the Lakehouse schemas and output tables.
+# 1. Creates the Lakehouse schemas, audit tables and reporting snapshots.
 # 2. Validates and loads the effective-dated SCHADS rule reference tables.
-# 3. Creates reporting views and Direct Lake snapshot tables.
-# 4. Creates administrator control and mapping templates when they do not exist.
+# 3. Creates latest-successful reporting views.
+# 4. Creates upload, automatic-input and administrator configuration folders.
 # 5. Records deployment context for traceability.
 #
 # DATA ACCESS
@@ -101,26 +101,30 @@ try:
     print(stage)
     create_views(spark)
 
-    stage = "STEP 4 — Create administrator configuration templates"
+    stage = "STEP 4 — Create AuditHero file areas and administrator templates"
     print(stage)
+    RAW = Path("/lakehouse/default/Files/import/raw")
+    AUTO = Path("/lakehouse/default/Files/auto_input")
+    INPUT = Path("/lakehouse/default/Files/input")
     CONFIG = Path("/lakehouse/default/Files/config")
-    CONFIG.mkdir(parents=True, exist_ok=True)
+    for folder in (RAW, AUTO, INPUT, CONFIG):
+        folder.mkdir(parents=True, exist_ok=True)
 
     json_templates = {
         "classification_mapping.json": {
-            "_instructions": "Source classification name/pay-detail ID -> canonical AuditHero SCHADS classification code"
+            "_instructions": "Optional source classification mapping used by advanced/manual imports"
         },
         "work_type_mapping.json": {
-            "_instructions": "Source work type/name -> work_group and optional sleepover facts"
+            "_instructions": "Optional source work-type mapping used when source labels cannot be identified automatically"
         },
         "work_location_state_mapping.json": {
-            "_instructions": "Source location ID -> state and optional holiday_location_key"
+            "_instructions": "Optional source location mapping for state and holiday-location evidence"
         },
         "employee_overrides.json": {
-            "_instructions": "Controlled employee facts not reliably available from the source system"
+            "_instructions": "Optional controlled employee facts not reliably available from source files"
         },
         "pay_category_mapping.json": {
-            "_instructions": "Source pay category -> AUDITABLE_WORK, ALLOWANCE or EXCLUDE"
+            "_instructions": "Optional actual-pay treatment mapping for payroll earning categories"
         },
     }
     for name, body in json_templates.items():
@@ -181,7 +185,8 @@ else:
         f"{summary['condition_packs']} condition packs and "
         f"{summary['allowance_packs']} allowance packs"
     )
-    print("Raw import folder:      /lakehouse/default/Files/import/raw")
-    print("Canonical input folder: /lakehouse/default/Files/input")
-    print("Recommended next step: run 'AuditHero - Self Test'.")
+    print("Raw upload folder:       /lakehouse/default/Files/import/raw")
+    print("Automatic input folder:  /lakehouse/default/Files/auto_input")
+    print("Advanced input folder:   /lakehouse/default/Files/input")
+    print("Recommended next step: upload ordinary CSV/XLSX files to the raw upload folder and run 'AuditHero - Auto Audit Uploaded Files'.")
     notebookutils.notebook.exit("AUDITHERO_SUCCESS:" + json.dumps(summary))
