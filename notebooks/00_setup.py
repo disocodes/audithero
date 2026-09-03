@@ -66,7 +66,8 @@ spark.sql(f"CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`toil_findings` (toil_
 
 spark.sql(f"""CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`rest_break_findings` (
  finding_id STRING,finding_type STRING,employee_id STRING,employee_name STRING,previous_timesheet_ids STRING,
- next_timesheet_ids STRING,previous_shift_end TIMESTAMP,next_shift_start TIMESTAMP,required_rest_hours DOUBLE,
+ next_timesheet_ids STRING,previous_shift_end TIMESTAMP,next_shift_start TIMESTAMP,
+ rule_reference_date TIMESTAMP,rule_reference_source STRING,required_rest_hours DOUBLE,
  actual_rest_hours DOUBLE,rest_shortfall_hours DOUBLE,sleepover_adjacent_exception_eligible BOOLEAN,
  sleepover_8h_agreement BOOLEAN,sleepover_blocked_rest BOOLEAN,historical_sleepover_interaction BOOLEAN,
  overtime_rest_rule_applies BOOLEAN,employer_instructed_resume BOOLEAN,release_datetime TIMESTAMP,
@@ -105,7 +106,8 @@ spark.sql(f"""CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`award_criteria_deta
 
 spark.sql(f"""CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`award_scenario_rest_findings` (
  finding_id STRING,finding_type STRING,employee_id STRING,employee_name STRING,previous_timesheet_ids STRING,
- next_timesheet_ids STRING,previous_shift_end TIMESTAMP,next_shift_start TIMESTAMP,required_rest_hours DOUBLE,
+ next_timesheet_ids STRING,previous_shift_end TIMESTAMP,next_shift_start TIMESTAMP,
+ rule_reference_date TIMESTAMP,rule_reference_source STRING,required_rest_hours DOUBLE,
  actual_rest_hours DOUBLE,rest_shortfall_hours DOUBLE,sleepover_adjacent_exception_eligible BOOLEAN,
  sleepover_8h_agreement BOOLEAN,sleepover_blocked_rest BOOLEAN,historical_sleepover_interaction BOOLEAN,
  overtime_rest_rule_applies BOOLEAN,employer_instructed_resume BOOLEAN,release_datetime TIMESTAMP,
@@ -116,6 +118,38 @@ spark.sql(f"""CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`award_scenario_rest
  criterion_group STRING,audit_run_id STRING,audit_window_start STRING,audit_window_end STRING,run_type STRING,
  run_finished_at TIMESTAMP
 ) USING DELTA""")
+
+# Upgrade existing Delta tables in place. CREATE TABLE IF NOT EXISTS does not add
+# newly introduced columns to tables created by an earlier AuditHero release.
+def ensure_columns(table_name, column_specs):
+    existing = {row["col_name"] for row in spark.sql(f"DESCRIBE TABLE `{catalog}`.`gold`.`{table_name}`").collect() if row["col_name"] and not str(row["col_name"]).startswith("#")}
+    missing = [spec for spec in column_specs if spec.split()[0] not in existing]
+    if missing:
+        spark.sql(f"ALTER TABLE `{catalog}`.`gold`.`{table_name}` ADD COLUMNS ({', '.join(missing)})")
+        print(f"Updated Gold schema: {table_name} (+{len(missing)} column(s))")
+
+ensure_columns("rest_break_findings", ["rule_reference_date TIMESTAMP", "rule_reference_source STRING"])
+ensure_columns("award_scenario_rest_findings", ["rule_reference_date TIMESTAMP", "rule_reference_source STRING"])
+ensure_columns(
+    "award_scenario_detail",
+    [
+        "supplied_base_hourly_rate DOUBLE",
+        "source_rate_effective_from TIMESTAMP",
+        "source_rate_reference STRING",
+        "source_classification_code STRING",
+        "source_classification_name STRING",
+        "source_level_hint INT",
+        "source_employment_type STRING",
+        "base_rate_variance DOUBLE",
+        "base_rate_status STRING",
+        "matches_source_classification BOOLEAN",
+        "matches_source_level_hint BOOLEAN",
+        "matches_source_employment_type BOOLEAN",
+        "observed_shift_pay DOUBLE",
+        "shift_variance_actual_minus_expected DOUBLE",
+        "scenario_status STRING",
+    ],
+)
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 4. Create reporting views and governed metric views
