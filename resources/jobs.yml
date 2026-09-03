@@ -42,8 +42,47 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/01b_self_test.py
 
+    auto_file_audit:
+      name: "AuditHero - Auto Audit Uploaded Files"
+      parameters:
+        - name: source_root
+          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
+        - name: start_date
+          default: ""
+        - name: end_date
+          default: ""
+      tasks:
+        - task_key: auto_prepare
+          notebook_task:
+            notebook_path: ../notebooks/02f_auto_intake.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              source_root: "{{job.parameters.source_root}}"
+              output_root: "/Volumes/${var.catalog}/bronze/landing/auto_input"
+              start_date: "{{job.parameters.start_date}}"
+              end_date: "{{job.parameters.end_date}}"
+        - task_key: audit_prepared_files
+          depends_on:
+            - task_key: auto_prepare
+          notebook_task:
+            notebook_path: ../notebooks/03b_manual_file_audit.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              input_root: "{{tasks.auto_prepare.values.output_root}}"
+              start_date: "{{tasks.auto_prepare.values.start_date}}"
+              end_date: "{{tasks.auto_prepare.values.end_date}}"
+              run_type: "AUTO_FILE"
+          max_retries: 1
+          min_retry_interval_millis: 30000
+        - task_key: refresh_dashboard
+          depends_on:
+            - task_key: audit_prepared_files
+          dashboard_task:
+            dashboard_id: ${resources.dashboards.payroll_compliance.id}
+            warehouse_id: ${var.sql_warehouse_id}
+
     source_mapping_draft:
-      name: "AuditHero - Build Source Mapping Workbook"
+      name: "AuditHero - Build Source Mapping Workbook (Advanced)"
       parameters:
         - name: source_root
           default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
@@ -62,7 +101,7 @@ resources:
               overwrite: "{{job.parameters.overwrite}}"
 
     source_file_convert:
-      name: "AuditHero - Convert Source Files"
+      name: "AuditHero - Convert Source Files (Advanced)"
       parameters:
         - name: source_root
           default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
@@ -84,7 +123,7 @@ resources:
               strict: "{{job.parameters.strict}}"
 
     mapped_import_audit:
-      name: "AuditHero - Convert Mapped Files and Run Audit"
+      name: "AuditHero - Convert Mapped Files and Run Audit (Advanced)"
       parameters:
         - name: source_root
           default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
@@ -118,6 +157,7 @@ resources:
               input_root: "{{job.parameters.output_root}}"
               start_date: "{{job.parameters.start_date}}"
               end_date: "{{job.parameters.end_date}}"
+              run_type: "MAPPED_FILE"
           max_retries: 1
           min_retry_interval_millis: 30000
         - task_key: refresh_dashboard
@@ -128,7 +168,7 @@ resources:
             warehouse_id: ${var.sql_warehouse_id}
 
     file_readiness:
-      name: "AuditHero - File Readiness"
+      name: "AuditHero - File Readiness (Advanced)"
       parameters:
         - name: input_root
           default: "/Volumes/${var.catalog}/bronze/landing/input"
@@ -141,7 +181,7 @@ resources:
               input_root: "{{job.parameters.input_root}}"
 
     manual_file_audit:
-      name: "AuditHero - Audit Uploaded CSV Excel"
+      name: "AuditHero - Audit Canonical CSV Excel (Advanced)"
       parameters:
         - name: input_root
           default: "/Volumes/${var.catalog}/bronze/landing/input"
@@ -166,6 +206,7 @@ resources:
               input_root: "{{job.parameters.input_root}}"
               start_date: "{{job.parameters.start_date}}"
               end_date: "{{job.parameters.end_date}}"
+              run_type: "MANUAL_FILE"
           max_retries: 1
           min_retry_interval_millis: 30000
         - task_key: refresh_dashboard
