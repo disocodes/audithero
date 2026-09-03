@@ -6,7 +6,6 @@ from typing import Any
 import pandas as pd
 
 
-# Canonical file fields that must have stable runtime types before Award modules run.
 DATE_FIELDS: dict[str, tuple[str, ...]] = {
     "pay_details": ("effective_from",),
     "employment_history": ("start_date", "end_date"),
@@ -31,7 +30,8 @@ DATE_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 NUMERIC_FIELDS: dict[str, tuple[str, ...]] = {
-    "timesheets": ("unpaid_break_minutes", "sleepover_active_minutes"),
+    "pay_details": ("supplied_hourly_rate",),
+    "timesheets": ("unpaid_break_minutes", "sleepover_active_minutes", "units", "source_supplied_base_hourly_rate", "source_actual_amount"),
     "rostered_shifts": ("rostered_break_minutes",),
     "payroll_earnings": ("hours", "rate", "amount"),
     "part_time_patterns": ("guaranteed_hours",),
@@ -45,11 +45,7 @@ _YEAR_FIRST_RE = re.compile(r"^\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\s|T|$)")
 
 
 def parse_datetime_value(value: Any):
-    """Parse canonical dates without confusing Australian and ISO date order.
-
-    Day-first parsing is applied only when the value actually starts with a
-    DD-MM-YYYY or DD/MM/YYYY shape. ISO YYYY-MM-DD values remain year-first.
-    """
+    """Parse canonical dates without confusing Australian and ISO date order."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return pd.NaT
     if isinstance(value, pd.Timestamp):
@@ -110,7 +106,4 @@ def normalize_canonical_frame(dataset: str, frame: pd.DataFrame) -> pd.DataFrame
 
 def normalize_canonical_frames(frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     """Normalize all canonical file datasets before readiness or calculation."""
-    return {
-        name: normalize_canonical_frame(name, frame)
-        for name, frame in frames.items()
-    }
+    return {name: normalize_canonical_frame(name, frame) for name, frame in frames.items()}
