@@ -36,82 +36,67 @@ def overwrite_rule_tables(spark, lib, catalog):
 
 
 def create_views(spark, catalog):
-    # Reporting views always retain the latest successful audit for each window.
-    # A later failed attempt remains visible in v_audit_runs but must not hide the
-    # previous successful Gold snapshot.
     spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_latest_audit_runs` AS SELECT * FROM `{catalog}`.`ops`.`audit_runs` WHERE status='SUCCESS' QUALIFY ROW_NUMBER() OVER (PARTITION BY audit_window_start,audit_window_end ORDER BY finished_at DESC)=1''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_detail_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_detail` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_event_adjustments_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`audit_event_adjustments` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_toil_findings_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`toil_findings` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_rest_break_findings_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`rest_break_findings` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_reconciliation_latest` AS SELECT d.* FROM `{catalog}`.`gold`.`pay_period_reconciliation` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_rule_coverage` AS SELECT * FROM `{catalog}`.`ref`.`rule_coverage` ''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_runs` AS SELECT * FROM `{catalog}`.`ops`.`audit_runs` ''')
-    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_readiness_findings` AS SELECT * FROM `{catalog}`.`ops`.`readiness_findings` ''')
+    latest = {
+        'v_audit_detail_latest': 'audit_detail',
+        'v_event_adjustments_latest': 'audit_event_adjustments',
+        'v_toil_findings_latest': 'toil_findings',
+        'v_rest_break_findings_latest': 'rest_break_findings',
+        'v_reconciliation_latest': 'pay_period_reconciliation',
+        'v_award_scenario_detail_latest': 'award_scenario_detail',
+        'v_award_criteria_detail_latest': 'award_criteria_detail',
+        'v_award_scenario_rest_findings_latest': 'award_scenario_rest_findings',
+    }
+    for view, table in latest.items():
+        spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`{view}` AS SELECT d.* FROM `{catalog}`.`gold`.`{table}` d JOIN `{catalog}`.`gold`.`v_latest_audit_runs` r ON d.audit_run_id=r.audit_run_id''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_rule_coverage` AS SELECT * FROM `{catalog}`.`ref`.`rule_coverage`''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_audit_runs` AS SELECT * FROM `{catalog}`.`ops`.`audit_runs`''')
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`gold`.`v_readiness_findings` AS SELECT * FROM `{catalog}`.`ops`.`readiness_findings`''')
 
 
 def create_metric_views(spark, catalog):
-    """Create the governed Unity Catalog semantic layer consumed by AI/BI and Genie."""
+    """Create governed metric views consumed by AI/BI and Genie."""
     payroll_yaml = f'''version: 1.1
 comment: "AuditHero governed payroll compliance metrics from the latest successful audit runs"
 source: {catalog}.gold.v_reconciliation_latest
 fields:
   - name: employee_id
     expr: source.employee_id
-    comment: "Employee identifier"
   - name: employee_name
     expr: source.employee_name
-    comment: "Employee name"
   - name: pay_period_start
     expr: source.pay_period_start
-    comment: "Pay period start"
   - name: pay_period_end
     expr: source.pay_period_end
-    comment: "Pay period end"
   - name: status
     expr: source.status
-    comment: "AuditHero reconciliation status"
   - name: run_type
     expr: source.run_type
-    comment: "Audit execution type"
   - name: audit_run_id
     expr: source.audit_run_id
-    comment: "Immutable audit run identifier"
 measures:
   - name: employee_count
     expr: COUNT(DISTINCT source.employee_id)
-    comment: "Distinct employees represented in the selected audit results"
   - name: pay_period_count
     expr: COUNT(1)
-    comment: "Audited employee pay periods"
   - name: expected_pay
     expr: SUM(COALESCE(source.expected_amount, 0))
-    comment: "Total expected auditable pay calculated by AuditHero"
   - name: actual_pay
     expr: SUM(COALESCE(source.actual_auditable_amount, 0))
-    comment: "Total actual auditable payroll amount supplied to AuditHero"
   - name: potential_underpayment
     expr: SUM(CASE WHEN source.status = 'UNDERPAID' THEN GREATEST(COALESCE(source.expected_amount,0) - COALESCE(source.actual_auditable_amount,0), 0) ELSE 0 END)
-    comment: "Confirmed auditable shortfall for rows classified UNDERPAID; excludes REQUIRES_REVIEW"
   - name: potential_overpayment
     expr: SUM(CASE WHEN source.status = 'OVERPAID' THEN GREATEST(COALESCE(source.actual_auditable_amount,0) - COALESCE(source.expected_amount,0), 0) ELSE 0 END)
-    comment: "Confirmed auditable excess for rows classified OVERPAID"
   - name: underpaid_periods
     expr: SUM(CASE WHEN source.status = 'UNDERPAID' THEN 1 ELSE 0 END)
-    comment: "Number of pay periods classified UNDERPAID"
   - name: overpaid_periods
     expr: SUM(CASE WHEN source.status = 'OVERPAID' THEN 1 ELSE 0 END)
-    comment: "Number of pay periods classified OVERPAID"
   - name: review_periods
     expr: SUM(CASE WHEN source.status = 'REQUIRES_REVIEW' THEN 1 ELSE 0 END)
-    comment: "Number of pay periods requiring human review"
   - name: compliant_periods
     expr: SUM(CASE WHEN source.status = 'COMPLIANT' THEN 1 ELSE 0 END)
-    comment: "Number of compliant pay periods"
 '''
-    spark.sql(
-        f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`payroll_compliance` WITH METRICS LANGUAGE YAML AS $$\n{payroll_yaml}\n$$'''
-    )
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`payroll_compliance` WITH METRICS LANGUAGE YAML AS $$\n{payroll_yaml}\n$$''')
 
     detail_yaml = f'''version: 1.1
 comment: "AuditHero shift-level entitlement metrics from the latest successful audit runs"
@@ -142,20 +127,14 @@ fields:
 measures:
   - name: shift_count
     expr: COUNT(1)
-    comment: "Number of shift-level audit records"
   - name: worked_hours
     expr: SUM(COALESCE(source.worked_hours,0))
-    comment: "Total worked hours represented by the audit records"
   - name: expected_entitlement
     expr: SUM(COALESCE(source.expected_amount,0))
-    comment: "Total expected shift-level entitlement"
   - name: review_shift_count
     expr: SUM(CASE WHEN source.entitlement_status = 'REQUIRES_REVIEW' OR source.review_flags IS NOT NULL THEN 1 ELSE 0 END)
-    comment: "Shift records requiring review"
 '''
-    spark.sql(
-        f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`audit_detail` WITH METRICS LANGUAGE YAML AS $$\n{detail_yaml}\n$$'''
-    )
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`audit_detail` WITH METRICS LANGUAGE YAML AS $$\n{detail_yaml}\n$$''')
 
     rest_yaml = f'''version: 1.1
 comment: "AuditHero governed rest-between-work findings from the latest successful audit runs"
@@ -188,20 +167,51 @@ fields:
 measures:
   - name: rest_intervals
     expr: COUNT(1)
-    comment: "Rest intervals assessed between work units"
   - name: short_rest_findings
     expr: SUM(CASE WHEN COALESCE(source.rest_shortfall_hours,0) > 0 THEN 1 ELSE 0 END)
-    comment: "Intervals shorter than the applicable effective-dated rest requirement"
   - name: review_findings
     expr: SUM(CASE WHEN source.status = 'REQUIRES_REVIEW' THEN 1 ELSE 0 END)
-    comment: "Rest findings requiring evidence review"
   - name: overtime_rest_cases
     expr: SUM(CASE WHEN source.overtime_rest_rule_applies THEN 1 ELSE 0 END)
-    comment: "Intervals where clause 28.3 rest-after-overtime logic applies"
   - name: double_time_topup
     expr: SUM(COALESCE(source.double_time_topup,0))
-    comment: "Calculated double-time top-up supported by the available evidence"
 '''
-    spark.sql(
-        f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`rest_break_compliance` WITH METRICS LANGUAGE YAML AS $$\n{rest_yaml}\n$$'''
-    )
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`rest_break_compliance` WITH METRICS LANGUAGE YAML AS $$\n{rest_yaml}\n$$''')
+
+    scenario_yaml = f'''version: 1.1
+comment: "Selectable SCHADS classification and employment-type scenario calculations. Filter to the intended scenario before interpreting totals."
+source: {catalog}.gold.v_award_scenario_detail_latest
+fields:
+  - name: employee_id
+    expr: source.employee_id
+  - name: employee_name
+    expr: source.employee_name
+  - name: shift_start
+    expr: source.shift_start
+  - name: classification_family
+    expr: source.classification_family
+  - name: classification_code
+    expr: source.scenario_classification_code
+  - name: classification_level
+    expr: source.scenario_level
+  - name: pay_point
+    expr: source.scenario_pay_point
+  - name: employment_type
+    expr: source.scenario_employment_type
+  - name: scenario_status
+    expr: source.scenario_status
+measures:
+  - name: scenario_shift_rows
+    expr: COUNT(1)
+  - name: expected_pay
+    expr: SUM(COALESCE(source.expected_amount,0))
+  - name: observed_shift_pay
+    expr: SUM(COALESCE(source.observed_shift_pay,0))
+  - name: base_rate_shortfall
+    expr: SUM(CASE WHEN source.base_rate_variance < 0 THEN -source.base_rate_variance * COALESCE(source.worked_hours,0) ELSE 0 END)
+  - name: scenario_underpayment
+    expr: SUM(CASE WHEN source.scenario_status='UNDERPAID' THEN GREATEST(-COALESCE(source.shift_variance_actual_minus_expected,0),0) ELSE 0 END)
+  - name: scenario_overpayment
+    expr: SUM(CASE WHEN source.scenario_status='OVERPAID' THEN GREATEST(COALESCE(source.shift_variance_actual_minus_expected,0),0) ELSE 0 END)
+'''
+    spark.sql(f'''CREATE OR REPLACE VIEW `{catalog}`.`semantic`.`award_scenarios` WITH METRICS LANGUAGE YAML AS $$\n{scenario_yaml}\n$$''')
