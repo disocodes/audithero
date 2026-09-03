@@ -6,7 +6,7 @@ AuditHero is operated through Databricks **Jobs & Pipelines**, **Catalog Explore
 
 Import `installers/Databricks_Install_AuditHero.py` into the target workspace and choose **Run all**.
 
-A successful installation creates or updates the AuditHero workspace files, Jobs, Unity Catalog structures, landing Volume, Silver and Gold Delta tables, semantic metric views, AI/BI dashboard, and Genie space. Installation finishes by running Setup and Self Test.
+A successful installation creates or updates the AuditHero workspace files, Jobs, Unity Catalog structures, landing Volume, Silver and Gold Delta tables, semantic metric views, AI/BI dashboard, and Genie space.
 
 Administration notebooks are installed at:
 
@@ -15,144 +15,168 @@ Administration notebooks are installed at:
 
 Employment Hero credentials are required only for Employment Hero API workflows.
 
-## First CSV/Excel audit
+## Standard CSV/Excel audit
 
-1. Export the required payroll, HR, rostering, and timekeeping CSV/XLSX files.
-2. Upload the original exports to `/Volumes/schads_payroll/bronze/landing/import/raw`.
-3. Run **AuditHero - Build Source Mapping Workbook** for a new or changed source layout.
-4. Review `source_mapping_draft.xlsx`.
-5. Save the approved mapping as `/Volumes/schads_payroll/bronze/landing/import/source_mapping.xlsx`.
-6. Run **AuditHero - Convert Mapped Files and Run Audit**.
-7. Enter the audit start and end dates.
-8. Review **AuditHero - SCHADS Payroll Compliance** in AI/BI.
-9. Use **AuditHero - Payroll Compliance** in Genie for governed analysis of completed audit results.
+1. Upload ordinary CSV/XLSX files to `/Volumes/schads_payroll/bronze/landing/import/raw`.
+2. Run **AuditHero - Auto Audit Uploaded Files**.
+3. Open **AuditHero - SCHADS Payroll Compliance** in AI/BI.
+4. Use **AuditHero - Payroll Compliance** in Genie for governed natural-language analysis.
 
-The standard Job configuration already contains the default Volume paths. Routine file audits normally require only the audit dates unless a source or storage location has changed.
+Automatic intake can combine information across multiple files and workbook sheets. A basic timesheet needs an employee name or identifier plus shift start and end. Additional information is used when available, including hours, break minutes, hourly rates, effective dates, employment type, classification, location, work type, pay-period dates and explicit actual amounts.
 
-## File-audit processing flow
+## Effective-dated rate history
+
+Employee hourly/base rates may be included on timesheet rows or supplied in a separate rate-history file. Multiple rate changes for the same employee are retained.
+
+For each shift AuditHero identifies the latest supplied employee rate effective on or before that shift, then compares it with the SCHADS minimum effective for the selected Award scenario.
+
+A supplied base rate is not treated as complete actual shift pay. Full actual-versus-expected reconciliation requires suitable actual payroll evidence.
+
+## Processing flow
 
 ```text
-Raw CSV/XLSX exports
+Ordinary CSV/XLSX files
         ↓
-Approved source mapping
+Automatic source detection
         ↓
-Canonical conversion
+Canonical employee / shift / effective-rate evidence
         ↓
-File Readiness
+Definitive audit where employee facts are known
+        +
+Selectable SCHADS Award scenarios
         ↓
-Silver normalized evidence
-        ↓
-SCHADS calculation engine
-        ↓
-Gold audit results
-        ↓
-Unity Catalog metric views
+Gold results and governed metric views
         ↓
 AI/BI and Genie
 ```
 
-If File Readiness identifies a blocking issue, the payroll calculation does not proceed until the blocking issue is resolved.
+Material facts that cannot be established safely are retained as `REQUIRES_REVIEW` or evidence-required findings. Unrelated Award calculations continue.
 
-## Using the AI/BI audit dashboard
+## Award-oriented AI/BI dashboard
 
-**AuditHero - SCHADS Payroll Compliance** is organized for progressive audit investigation rather than notebook-output review.
+**AuditHero - SCHADS Payroll Compliance** is organized around audit criteria rather than database output tables.
 
-### Interactive Overview
+### Award Explorer
 
-Use the Audit Status, Employee, Employment Type, Classification, Work Group, and State filters to narrow the audit population. The KPI cards, status distribution, variance trend, employee underpayment analysis, classification review analysis, and pay-period summary update with the selected scope.
+Use the controls for:
 
-Supported dashboard visualizations can also be used for cross-filtering. Selecting a value in a supported chart narrows other visualizations on the same page.
+- Employee;
+- SCHADS stream/classification family;
+- Level;
+- Pay Point;
+- Employment Type;
+- Base Rate Status; and
+- Scenario Status.
 
-The **Pay Period Investigation Summary** provides one result per employee/pay period. Right-click a result and choose **Drill to → Employee / Pay Period Investigation** to open the detailed investigation page with the selected context applied.
+The same supplied shifts are recalculated under the selected scenario. This supports classification comparison without converting an analytical scenario into a definitive classification decision.
 
-### Employee / Pay Period Investigation
+### Classification & Historical Rates
 
-This page is the shift-level audit workbench. It contains:
+Review each shift against the employee rate effective on that date. The page shows:
 
-- pay-period expected, actual, and variance totals;
-- shift count and worked hours;
-- worked-hours and entitlement-status analysis;
-- the underlying timesheet/shift records;
-- employment type, classification, work group, base rate, and calculated entitlement;
-- review flags;
-- Award reference and industrial-instrument evidence;
-- part-time pattern evidence; and
-- calculation evidence generated by the deterministic audit engine.
+- rate effective date and source;
+- supplied classification where available;
+- selected SCHADS stream, level and pay point;
+- supplied employee rate;
+- Award minimum base rate;
+- rate difference; and
+- rate status.
 
-The **Employee + Pay Period** selector can also be used directly when drill-through is not required.
+### Penalties & Shiftwork
 
-### Controls & Rules
+Inspect ordinary penalties, shiftwork, weekends, public holidays and minimum-engagement components generated by the deterministic engine.
 
-Use this page to review audit-run history, File Readiness findings, and loaded SCHADS rule coverage.
+### Overtime
+
+Inspect daily, roster-based and period overtime components, including hours, multipliers, rates, amounts, clauses and calculation evidence.
+
+### Rest & Meal Breaks
+
+Review rest-between-work requirements, actual rest, shortfall, overtime-rest applicability, repriced hours, evidence-backed double-time top-up and meal-break findings.
+
+### Sleepovers, Broken Shifts & Allowances
+
+Review applicable sleepover, broken-shift, minimum-engagement and allowance calculations and evidence requirements.
+
+### Actual vs Expected
+
+This page is reserved for definitive actual-pay reconciliation. It distinguishes calculated expected entitlement from actual payroll evidence and does not treat a supplied base-rate file as complete payroll.
+
+### Evidence Required
+
+Shows facts that could not be established safely from the uploaded files. These findings identify the affected employee/shift and audit area without blocking unrelated calculations.
+
+### Definitive Shift Investigation
+
+Shows the governed shift-level result where employee classification and employment facts are known, including calculation evidence and review flags.
 
 ## Stored data
 
 Normalized source evidence is stored in Silver tables such as:
 
 - `schads_payroll.silver.employees`
+- `schads_payroll.silver.pay_details`
 - `schads_payroll.silver.employment_history`
 - `schads_payroll.silver.timesheets`
 - `schads_payroll.silver.payroll_earnings`
 - `schads_payroll.silver.rostered_shifts`
 
-Audit outputs are stored in:
+Gold outputs include:
 
 - `schads_payroll.gold.audit_detail`
+- `schads_payroll.gold.rest_break_findings`
 - `schads_payroll.gold.pay_period_reconciliation`
+- `schads_payroll.gold.award_scenario_detail`
+- `schads_payroll.gold.award_criteria_detail`
+- `schads_payroll.gold.award_scenario_rest_findings`
 - `schads_payroll.gold.audit_event_adjustments`
 - `schads_payroll.gold.toil_findings`
-- `schads_payroll.ops.audit_runs`
 
-The interactive dashboard also uses the latest-successful investigation view:
-
-- `schads_payroll.gold.v_audit_investigation_latest`
-
-Governed reporting uses:
+Governed semantic views include:
 
 - `schads_payroll.semantic.payroll_compliance`
 - `schads_payroll.semantic.audit_detail`
+- `schads_payroll.semantic.rest_break_compliance`
+- `schads_payroll.semantic.award_scenarios`
 
-Genie queries governed AuditHero results and semantic measures. SCHADS entitlement calculations are performed by the AuditHero calculation engine before results reach the reporting layer.
+Genie queries governed results and semantic measures. SCHADS calculations are performed before results reach the reporting layer.
 
-## Routine monthly file audit
+## Routine file audit
 
-After a mapping has been approved for the source layout:
+For each later payroll period:
 
-1. upload the new exports to the raw import folder;
-2. run **AuditHero - Convert Mapped Files and Run Audit**;
-3. enter the audit dates; and
-4. review AI/BI, Genie, and detailed audit evidence.
+1. replace or upload the source files in `/Volumes/schads_payroll/bronze/landing/import/raw`;
+2. run **AuditHero - Auto Audit Uploaded Files**; and
+3. review AI/BI, Genie and any evidence-required findings.
 
-Rebuild the source mapping when the source-system export structure, sheet names, columns, or coded values change.
+Audit dates are inferred from the supplied shifts unless explicitly provided.
 
-## Canonical AuditHero files
+## Advanced source mapping
 
-If the source files already use the AuditHero canonical format, upload them to:
+Use source mapping only for exports that automatic intake cannot identify reliably:
 
-`/Volumes/schads_payroll/bronze/landing/input`
-
-Then run:
-
-**AuditHero - Audit Uploaded CSV Excel**
+- **AuditHero - Build Source Mapping Workbook (Advanced)**
+- **AuditHero - Convert Source Files (Advanced)**
+- **AuditHero - Convert Mapped Files and Run Audit (Advanced)**
+- **AuditHero - File Readiness (Advanced)**
+- **AuditHero - Audit Canonical CSV Excel (Advanced)**
 
 ## Employment Hero API
 
-After the required Databricks Secrets are configured:
+After Databricks Secrets are configured:
 
 1. run **AuditHero - Employment Hero Connection Test (Optional API)**;
 2. run **AuditHero - API Audit Readiness (Optional API)**;
 3. use **AuditHero - Monthly Payroll Audit (Optional API)** for recurring audits; or
 4. use **AuditHero - Historical SCHADS Audit (Optional API)** for a selected historical range.
 
-API and uploaded-file workflows use the same calculation and governed result layers.
+API and uploaded-file workflows use the same deterministic calculation and governed result layers.
 
 ## Upgrade
 
 Open `/Shared/AuditHero/admin/AuditHero - Install or Upgrade` and choose **Run all**.
 
-Setup creates or refreshes the interactive investigation view and verifies that the managed AI/BI dashboard stored in Databricks matches the installed AuditHero dashboard specification before publishing it.
-
-After an upgrade, validate a known payroll period before resuming recurring production audits.
+Upgrade migrates managed Gold schemas, refreshes the effective-dated rule library, updates Jobs, rebuilds the Award-oriented dashboard from its managed specification, and refreshes Genie.
 
 ## Uninstall
 
