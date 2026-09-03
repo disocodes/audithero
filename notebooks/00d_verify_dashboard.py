@@ -2,9 +2,9 @@
 # MAGIC %md
 # MAGIC # AuditHero — Verify AI/BI Dashboard
 # MAGIC
-# MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled specification, then ensure the stored and published Databricks dashboard matches that definition.
+# MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled Award-oriented specification, then ensure the stored and published Databricks dashboard matches that definition.
 # MAGIC
-# MAGIC This notebook is run by **AuditHero - Setup** after the interactive investigation view has been created.
+# MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created.
 # COMMAND ----------
 # MAGIC %pip install -q "databricks-sdk>=0.20"
 # COMMAND ----------
@@ -74,8 +74,20 @@ for widget in filter_widgets:
         if "associative_filter_predicate_group" in json.dumps(query):
             raise ValueError("AuditHero dashboard contains an obsolete filter associativity expression")
 
-# The investigation dataset must exist before the dashboard is published.
-spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`v_audit_investigation_latest` LIMIT 1")
+# All governed datasets required by the Award-oriented dashboard must be queryable
+# even before the first audit. Setup creates empty source tables so these views are stable.
+required_views = [
+    "v_audit_investigation_latest",
+    "v_award_scenario_detail_latest",
+    "v_award_criteria_detail_latest",
+    "v_award_scenario_rest_findings_latest",
+    "v_reconciliation_latest",
+    "v_audit_runs",
+    "v_readiness_findings",
+    "v_rule_coverage",
+]
+for view in required_views:
+    spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`{view}` LIMIT 1")
 
 
 def canonical(value):
@@ -169,4 +181,4 @@ for item in matches:
     print(f"Verified and published dashboard {dashboard_id}; revision={published.get('revision_create_time')}")
 
 print(f"AuditHero dashboard verification complete. Managed dashboard(s): {', '.join(verified_ids)}")
-print("Interactive investigation filters are active for status, employee, employment type, classification, work group, state and employee-pay-period.")
+print("Award Explorer and criteria pages are available with employee, SCHADS stream, level, pay point, employment-type and evidence/status filters.")
