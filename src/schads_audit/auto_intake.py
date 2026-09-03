@@ -15,12 +15,14 @@ ALIASES = {
     "employee_id": ["employee id", "employee number", "employee no", "staff id", "worker id", "emp id"],
     "employee_name": ["employee name", "full name", "staff name", "worker name", "employee", "name"],
     "date": ["date", "shift date", "work date", "timesheet date"],
+    "effective_from": ["effective from", "effective date", "rate effective date", "pay rate effective date", "rate start date", "commencement date"],
+    "effective_to": ["effective to", "end date", "rate end date", "expiry date"],
     "start": ["start datetime", "shift start", "clock in", "start time", "start"],
     "end": ["end datetime", "shift end", "clock out", "finish time", "end time", "finish", "end"],
     "hours": ["worked hours", "hours worked", "total hours", "ordinary hours", "hours", "units"],
     "break_minutes": ["unpaid break minutes", "break minutes", "meal break minutes"],
     "hourly_rate": ["hourly rate", "base hourly rate", "base rate", "pay rate", "rate per hour", "rate"],
-    "actual_amount": ["paid amount", "actual amount", "gross amount", "line amount", "earnings amount"],
+    "actual_amount": ["paid amount", "actual amount", "gross amount", "line amount", "earnings amount", "shift amount"],
     "employment_type": ["employment type", "employment status", "contract type", "engagement type"],
     "classification": ["classification", "award classification", "schads classification", "pay level", "award level", "level"],
     "state": ["work state", "location state", "state"],
@@ -104,7 +106,6 @@ def _datetime(date_value: Any, time_value: Any):
     if _blank(time_value):
         return pd.NaT
     raw = str(time_value).strip()
-    # Full timestamp supplied in the time column.
     if re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}", raw):
         return parse_datetime_value(raw)
     if not _blank(date_value):
@@ -139,13 +140,30 @@ def _describe(file: str, sheet: str | None, frame: pd.DataFrame):
     }
 
 
-def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
-    """Infer canonical AuditHero inputs from ordinary CSV/XLSX files.
+def _row_effective_date(row, mapped, *, shift_start=None):
+    if mapped.get("effective_from") and not _blank(row.get(mapped["effective_from"])):
+        return parse_datetime_value(row.get(mapped["effective_from"]))
+    if mapped.get("date") and not _blank(row.get(mapped["date"])):
+        return parse_datetime_value(row.get(mapped["date"]))
+    if shift_start is not None and not pd.isna(shift_start):
+        return pd.Timestamp(shift_start).normalize()
+    return pd.NaT
 
-    A usable timesheet needs only an employee name/ID and shift start/end. Optional
-    files or columns enrich employment type, SCHADS classification, state, work
-    stream and supplied hourly rate. Missing optional facts are preserved as
-    unknowns for the Award scenario engine rather than blocking the audit.
+
+def _first_nonblank(series):
+    for value in series:
+        if not _blank(value):
+            return value
+    return None
+
+
+def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
+    """Infer canonical inputs from ordinary CSV/XLSX files.
+
+    A timesheet needs only employee name/ID plus shift start/end. Hourly rates,
+    classifications and employment types may be in the same rows or in separate
+    effective-dated files. Multiple historical rate records for the same employee
+    are retained and aligned to shifts by date by the audit engine.
     """
     root = Path(source_root)
     if not root.exists():
@@ -156,10 +174,13 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
 
     timesheet_rows: list[dict[str, Any]] = []
     attribute_rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
 
     for desc in descriptions:
         df, m = desc["frame"], desc["mapped"]
         label = desc["file"] if desc["sheet"] is None else f"{desc['file']}#{desc['sheet']}"
+        row_shift_starts: dict[Any, Any] = {}
+
         if desc["timesheet"]:
             for row_no, row in df.iterrows():
                 name = row.get(m["employee_name"]) if m["employee_name"] else None
@@ -174,6 +195,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                     end += pd.Timedelta(days=1)
                 if end <= start:
                     continue
+                row_shift_starts[row_no] = start
                 elapsed = (end - start).total_seconds() / 3600
                 hours = pd.to_numeric(pd.Series([row.get(m["hours"]) if m["hours"] else None]), errors="coerce").iloc[0]
                 break_minutes = pd.to_numeric(pd.Series([row.get(m["break_minutes"]) if m["break_minutes"] else None]), errors="coerce").iloc[0]
@@ -182,7 +204,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                     break_minutes = max(0.0, inferred) if -1 <= inferred <= 480 else float("nan")
                 work_type = row.get(m["work_type"]) if m["work_type"] else None
                 work_group = row.get(m["work_group"]) if m["work_group"] else None
-                actual_rate = pd.to_numeric(pd.Series([row.get(m["hourly_rate"]) if m["hourly_rate"] else None]), errors="coerce").iloc[0]
+                supplied_rate = pd.to_numeric(pd.Series([row.get(m["hourly_rate"]) if m["hourly_rate"] else None]), errors="coerce").iloc[0]
                 actual_amount = pd.to_numeric(pd.Series([row.get(m["actual_amount"]) if m["actual_amount"] else None]), errors="coerce").iloc[0]
                 timesheet_rows.append({
                     "timesheet_id": _row_id(label, row_no, eid, start, end),
@@ -198,7 +220,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                     "is_sleepover": "sleepover" in _norm(work_type),
                     "pay_period_start": parse_datetime_value(row.get(m["pay_period_start"])) if m["pay_period_start"] and not _blank(row.get(m["pay_period_start"])) else pd.NaT,
                     "pay_period_end": parse_datetime_value(row.get(m["pay_period_end"])) if m["pay_period_end"] and not _blank(row.get(m["pay_period_end"])) else pd.NaT,
-                    "source_actual_hourly_rate": None if pd.isna(actual_rate) else float(actual_rate),
+                    "source_supplied_base_hourly_rate": None if pd.isna(supplied_rate) else float(supplied_rate),
                     "source_actual_amount": None if pd.isna(actual_amount) else float(actual_amount),
                     "source_file": desc["file"],
                     "source_sheet": desc["sheet"],
@@ -206,7 +228,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                 })
 
         if desc["attributes"] or desc["timesheet"]:
-            for _, row in df.iterrows():
+            for row_no, row in df.iterrows():
                 name = row.get(m["employee_name"]) if m["employee_name"] else None
                 source_id = row.get(m["employee_id"]) if m["employee_id"] else None
                 if _blank(name) and _blank(source_id):
@@ -215,6 +237,8 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                 work_type = row.get(m["work_type"]) if m["work_type"] else None
                 group_value = row.get(m["work_group"]) if m["work_group"] else None
                 rate = pd.to_numeric(pd.Series([row.get(m["hourly_rate"]) if m["hourly_rate"] else None]), errors="coerce").iloc[0]
+                effective_from = _row_effective_date(row, m, shift_start=row_shift_starts.get(row_no))
+                effective_to = parse_datetime_value(row.get(m["effective_to"])) if m["effective_to"] and not _blank(row.get(m["effective_to"])) else pd.NaT
                 attribute_rows.append({
                     "employee_id": _employee_id(source_id, name),
                     "employee_name": None if _blank(name) else str(name).strip(),
@@ -225,47 +249,66 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                     "work_group": _work_group(group_value) or _work_group(work_type),
                     "work_type_name": None if _blank(work_type) else str(work_type).strip(),
                     "supplied_hourly_rate": None if pd.isna(rate) else float(rate),
+                    "effective_from": effective_from,
+                    "effective_to": effective_to,
                     "source_item": label,
+                    "source_row": int(row_no) + 2,
                 })
 
     timesheets = pd.DataFrame(timesheet_rows)
     if timesheets.empty:
         raise ValueError("Could not identify a usable timesheet. Supply employee name/ID plus shift start and end columns.")
     attributes = pd.DataFrame(attribute_rows)
-
     names = timesheets[["employee_id", "employee_name_source"]].drop_duplicates().rename(columns={"employee_name_source": "employee_name"})
-    if attributes.empty:
-        attributes = names.copy()
-    else:
-        attributes = pd.concat([attributes, names], ignore_index=True, sort=False)
-
-    def first_nonblank(series):
-        for value in series:
-            if not _blank(value):
-                return value
-        return None
+    attributes = names.copy() if attributes.empty else pd.concat([attributes, names], ignore_index=True, sort=False)
 
     employees, histories, pay_details = [], [], []
     first_shift = timesheets.groupby("employee_id")["start_datetime"].min().to_dict()
-    for eid, group in attributes.groupby("employee_id", dropna=False):
-        eid = str(eid)
-        name = first_nonblank(group.get("employee_name", pd.Series(dtype=object))) or eid
-        emp_type = first_nonblank(group.get("employment_type", pd.Series(dtype=object)))
-        state = first_nonblank(group.get("state", pd.Series(dtype=object)))
-        work_group = first_nonblank(group.get("work_group", pd.Series(dtype=object))) or "DISABILITY_SERVICES"
-        employees.append({"employee_id": eid, "employee_name": str(name), "employment_type_current": emp_type, "state": state, "work_group": work_group, "auto_intake": True})
-        histories.append({"employee_id": eid, "start_date": first_shift.get(eid), "end_date": pd.NaT, "employment_type": emp_type or "UNKNOWN", "contract_type": None, "title": first_nonblank(group.get("work_type_name", pd.Series(dtype=object))), "auto_intake": True})
-        candidates = group[(group.get("classification_code", pd.Series(index=group.index, dtype=object)).notna()) | (group.get("classification_name", pd.Series(index=group.index, dtype=object)).notna()) | (group.get("supplied_hourly_rate", pd.Series(index=group.index, dtype=float)).notna())]
-        if candidates.empty:
-            candidates = group.iloc[:1]
-        for _, candidate in candidates.iterrows():
+    for raw_eid, group in attributes.groupby("employee_id", dropna=False):
+        eid = str(raw_eid)
+        name = _first_nonblank(group.get("employee_name", pd.Series(dtype=object))) or eid
+        state = _first_nonblank(group.get("state", pd.Series(dtype=object)))
+        work_group = _first_nonblank(group.get("work_group", pd.Series(dtype=object))) or "DISABILITY_SERVICES"
+        dated = group.copy()
+        dated["_effective"] = pd.to_datetime(dated.get("effective_from"), errors="coerce")
+        dated = dated.sort_values("_effective", na_position="last")
+        current_emp_type = _first_nonblank(dated.get("employment_type", pd.Series(dtype=object)))
+        nonblank_types = dated[dated.get("employment_type", pd.Series(index=dated.index, dtype=object)).notna()]
+        if not nonblank_types.empty:
+            current_emp_type = nonblank_types.iloc[-1].get("employment_type")
+        employees.append({"employee_id": eid, "employee_name": str(name), "employment_type_current": current_emp_type, "state": state, "work_group": work_group, "auto_intake": True})
+
+        history_candidates = dated[dated.get("employment_type", pd.Series(index=dated.index, dtype=object)).notna()].copy()
+        if history_candidates.empty:
+            histories.append({"employee_id": eid, "start_date": first_shift.get(raw_eid) or first_shift.get(eid), "end_date": pd.NaT, "employment_type": "UNKNOWN", "contract_type": None, "title": _first_nonblank(group.get("work_type_name", pd.Series(dtype=object))), "auto_intake": True})
+        else:
+            for _, candidate in history_candidates.drop_duplicates(subset=["_effective", "employment_type"]).iterrows():
+                eff = candidate.get("_effective")
+                if pd.isna(eff):
+                    eff = first_shift.get(raw_eid) or first_shift.get(eid)
+                histories.append({"employee_id": eid, "start_date": eff, "end_date": candidate.get("effective_to"), "employment_type": candidate.get("employment_type"), "contract_type": None, "title": candidate.get("work_type_name"), "auto_intake": True})
+
+        pay_candidates = dated[(dated.get("classification_code", pd.Series(index=dated.index, dtype=object)).notna()) | (dated.get("classification_name", pd.Series(index=dated.index, dtype=object)).notna()) | (dated.get("supplied_hourly_rate", pd.Series(index=dated.index, dtype=float)).notna())].copy()
+        if pay_candidates.empty:
+            pay_candidates = dated.iloc[:1]
+        rate_series = pd.to_numeric(pay_candidates.get("supplied_hourly_rate", pd.Series(index=pay_candidates.index, dtype=float)), errors="coerce")
+        undated_rates = pay_candidates[rate_series.notna() & pay_candidates["_effective"].isna()]
+        distinct_undated = pd.to_numeric(undated_rates.get("supplied_hourly_rate"), errors="coerce").dropna().unique()
+        if len(distinct_undated) > 1:
+            warnings.append(f"{name}: multiple different hourly rates were supplied without effective dates; rate chronology requires review.")
+        for _, candidate in pay_candidates.drop_duplicates(subset=["_effective", "classification_code", "classification_name", "supplied_hourly_rate"]).iterrows():
+            eff = candidate.get("_effective")
+            if pd.isna(eff):
+                eff = first_shift.get(raw_eid) or first_shift.get(eid)
             pay_details.append({
                 "employee_id": eid,
-                "effective_from": first_shift.get(eid),
+                "effective_from": eff,
                 "classification_code": candidate.get("classification_code"),
                 "classification_name": candidate.get("classification_name"),
                 "industrial_instrument": "SCHADS",
                 "supplied_hourly_rate": candidate.get("supplied_hourly_rate"),
+                "source_reference": candidate.get("source_item"),
+                "source_row": candidate.get("source_row"),
                 "auto_intake": True,
             })
 
@@ -297,6 +340,8 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
             "timesheet_items": [d["file"] if d["sheet"] is None else f"{d['file']}#{d['sheet']}" for d in descriptions if d["timesheet"]],
             "employees": len(employee_df),
             "timesheets": len(timesheets),
+            "rate_history_rows": len(pay_details),
+            "warnings": warnings,
             "start_date": None if starts.empty else str(starts.min().date()),
             "end_date": None if starts.empty else str(starts.max().date()),
         },
