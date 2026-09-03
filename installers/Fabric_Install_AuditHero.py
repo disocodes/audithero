@@ -13,7 +13,7 @@
 # be installed, then choose Run all. The notebook detects the current workspace,
 # downloads the selected AuditHero release, creates or updates the managed
 # Lakehouse, Environment, notebooks, pipelines, Direct Lake model and Power BI
-# report, and runs Setup and Self Test.
+# report, and runs the initialization sequence.
 #
 # Employment Hero credentials are optional. Leave key_vault_url blank for
 # uploaded CSV/Excel audits.
@@ -80,7 +80,6 @@ def _context_value(name: str):
                 except Exception:
                     value = None
 
-        # Read zero-argument runtime context members when available.
         if value is None:
             member = getattr(ctx, name, None)
             if callable(member):
@@ -144,6 +143,7 @@ required_release_files = [
     repo_root / "fabric" / "scripts" / "deploy_file_source.py",
     repo_root / "fabric" / "scripts" / "deploy_source_mapping.py",
     repo_root / "fabric" / "scripts" / "deploy_admin_notebooks.py",
+    repo_root / "fabric" / "notebooks" / "03e_auto_intake.py",
     repo_root / "installers" / "Fabric_Install_AuditHero.py",
     repo_root / "installers" / "Fabric_Uninstall_AuditHero.py",
 ]
@@ -165,19 +165,25 @@ config = {
     "semantic_model_name": str(semantic_model_name),
     "report_name": str(report_name),
     "key_vault_url": str(key_vault_url or ""),
+    "auto_file_source": {
+        "enabled": True,
+        "source_root": "/lakehouse/default/Files/import/raw",
+        "output_root": "/lakehouse/default/Files/auto_input",
+        "pipeline_name": "AuditHero - Auto Audit Uploaded Files"
+    },
     "source_mapping": {
         "source_root": "/lakehouse/default/Files/import/raw",
         "draft_path": "/lakehouse/default/Files/import/source_mapping_draft.xlsx",
         "mapping_path": "/lakehouse/default/Files/import/source_mapping.xlsx",
         "output_root": "/lakehouse/default/Files/input",
-        "draft_pipeline_name": "AuditHero - Build Source Mapping Workbook",
-        "conversion_pipeline_name": "AuditHero - Convert Source Files",
-        "mapped_audit_pipeline_name": "AuditHero - Convert Mapped Files and Run Audit"
+        "draft_pipeline_name": "AuditHero - Build Source Mapping Workbook (Advanced)",
+        "conversion_pipeline_name": "AuditHero - Convert Source Files (Advanced)",
+        "mapped_audit_pipeline_name": "AuditHero - Convert Mapped Files and Run Audit (Advanced)"
     },
     "manual_file_source": {
         "enabled": True,
         "input_root": "/lakehouse/default/Files/input",
-        "pipeline_name": "AuditHero - Uploaded Files Audit Pipeline"
+        "pipeline_name": "AuditHero - Canonical Files Audit (Advanced)"
     },
     "monthly_schedule": {
         "enabled": bool(monthly_schedule_enabled),
@@ -252,7 +258,6 @@ def _run_deployment_step(step: Path) -> None:
         os.pathsep + existing_pythonpath if existing_pythonpath else ""
     )
 
-    # Stream deployment output and retain the final lines for any installer error.
     tail = deque(maxlen=120)
     process = subprocess.Popen(
         command,
@@ -286,11 +291,13 @@ for step in steps:
 # CELL ********************
 
 print("\nAuditHero installation completed successfully.")
-print("Open the Fabric workspace and use:")
-print("  • AuditHero - Build Source Mapping Workbook")
-print("  • AuditHero - Convert Mapped Files and Run Audit")
-print("  • AuditHero - Uploaded Files Audit Pipeline")
-print("  • AuditHero - SCHADS Payroll Compliance (Power BI)")
+print("Primary file workflow:")
+print("  1. Upload ordinary CSV/XLSX files to Lakehouse Files/import/raw")
+print("  2. Run AuditHero - Auto Audit Uploaded Files")
+print("  3. Open AuditHero - SCHADS Payroll Compliance (Power BI)")
+print("Advanced import tools:")
+print("  • AuditHero - Build Source Mapping Workbook (Advanced)")
+print("  • AuditHero - Convert Mapped Files and Run Audit (Advanced)")
 print("Administration notebooks:")
 print("  • AuditHero - Install or Upgrade")
 print("  • AuditHero - Uninstall")
