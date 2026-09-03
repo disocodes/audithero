@@ -15,11 +15,7 @@ def _sql(spark, label: str, statement: str):
 def create_lakehouse_objects(spark):
     """Create AuditHero schemas in the notebook's attached schema-enabled Lakehouse."""
     for schema in ("bronze", "silver", "ref", "gold", "ops"):
-        _sql(
-            spark,
-            f"creating schema {schema}",
-            f"CREATE SCHEMA IF NOT EXISTS `{schema}`",
-        )
+        _sql(spark, f"creating schema {schema}", f"CREATE SCHEMA IF NOT EXISTS `{schema}`")
 
 
 def write_df(spark, df: pd.DataFrame, table: str, mode: str = "append"):
@@ -49,6 +45,7 @@ def overwrite_rule_tables(spark, rule_library):
                 {
                     "award_code": pack["award_code"],
                     "rate_pack_id": pack["rate_pack_id"],
+                    "classification_family": pack.get("classification_family"),
                     "operative_date": pack["operative_date"],
                     "application_basis": pack["application_basis"],
                     "source_json": json.dumps(pack.get("source", {})),
@@ -80,12 +77,7 @@ def overwrite_rule_tables(spark, rule_library):
     write_df(spark, pd.DataFrame(rate_rows), "ref.rates", "overwrite")
     write_df(spark, pd.DataFrame(condition_rows), "ref.conditions", "overwrite")
     write_df(spark, pd.DataFrame(allowance_rows), "ref.allowances", "overwrite")
-    write_df(
-        spark,
-        pd.DataFrame(rule_library.coverage_rows()),
-        "ref.rule_coverage",
-        "overwrite",
-    )
+    write_df(spark, pd.DataFrame(rule_library.coverage_rows()), "ref.rule_coverage", "overwrite")
 
 
 def ensure_output_tables(spark):
@@ -157,7 +149,8 @@ def ensure_output_tables(spark):
               finding_id STRING, finding_type STRING, employee_id STRING,
               employee_name STRING, previous_timesheet_ids STRING,
               next_timesheet_ids STRING, previous_shift_end TIMESTAMP,
-              next_shift_start TIMESTAMP, required_rest_hours DOUBLE,
+              next_shift_start TIMESTAMP, rule_reference_date TIMESTAMP,
+              rule_reference_source STRING, required_rest_hours DOUBLE,
               actual_rest_hours DOUBLE, rest_shortfall_hours DOUBLE,
               sleepover_adjacent_exception_eligible BOOLEAN,
               sleepover_8h_agreement BOOLEAN, sleepover_blocked_rest BOOLEAN,
@@ -186,6 +179,79 @@ def ensure_output_tables(spark):
             """,
         ),
         (
+            "creating gold.award_scenario_detail",
+            """
+            CREATE TABLE IF NOT EXISTS gold.award_scenario_detail (
+              timesheet_id STRING, employee_id STRING, employee_name STRING,
+              employment_type STRING, classification_code STRING, work_group STRING,
+              state STRING, holiday_location_key STRING, pay_period_start TIMESTAMP,
+              pay_period_end TIMESTAMP, award_reference_date TIMESTAMP,
+              shift_start TIMESTAMP, shift_end TIMESTAMP, worked_hours DOUBLE,
+              sleepover_span_hours DOUBLE, base_hourly_rate DOUBLE,
+              expected_amount DOUBLE, entitlement_status STRING, review_flags STRING,
+              calculation_evidence STRING, scenario_id STRING,
+              classification_family STRING, scenario_classification_code STRING,
+              scenario_classification_name STRING, scenario_level INT,
+              scenario_pay_point INT, scenario_employment_type STRING,
+              supplied_base_hourly_rate DOUBLE, source_rate_effective_from TIMESTAMP,
+              source_rate_reference STRING, source_classification_code STRING,
+              source_classification_name STRING, source_level_hint INT,
+              source_employment_type STRING, base_rate_variance DOUBLE,
+              base_rate_status STRING, matches_source_classification BOOLEAN,
+              matches_source_level_hint BOOLEAN, matches_source_employment_type BOOLEAN,
+              observed_shift_pay DOUBLE, shift_variance_actual_minus_expected DOUBLE,
+              scenario_status STRING, audit_run_id STRING, audit_window_start STRING,
+              audit_window_end STRING, run_type STRING, run_finished_at TIMESTAMP
+            ) USING DELTA
+            """,
+        ),
+        (
+            "creating gold.award_criteria_detail",
+            """
+            CREATE TABLE IF NOT EXISTS gold.award_criteria_detail (
+              scenario_id STRING, classification_family STRING,
+              scenario_classification_code STRING, scenario_classification_name STRING,
+              scenario_level INT, scenario_pay_point INT,
+              scenario_employment_type STRING, timesheet_id STRING,
+              employee_id STRING, employee_name STRING, shift_start TIMESTAMP,
+              shift_end TIMESTAMP, worked_hours DOUBLE, entitlement_status STRING,
+              review_flags STRING, criterion_group STRING, criterion STRING,
+              clause STRING, hours DOUBLE, multiplier DOUBLE,
+              effective_hourly_rate DOUBLE, criterion_amount DOUBLE,
+              day_type STRING, shift_type STRING, detail STRING,
+              audit_run_id STRING, audit_window_start STRING,
+              audit_window_end STRING, run_type STRING, run_finished_at TIMESTAMP
+            ) USING DELTA
+            """,
+        ),
+        (
+            "creating gold.award_scenario_rest_findings",
+            """
+            CREATE TABLE IF NOT EXISTS gold.award_scenario_rest_findings (
+              finding_id STRING, finding_type STRING, employee_id STRING,
+              employee_name STRING, previous_timesheet_ids STRING,
+              next_timesheet_ids STRING, previous_shift_end TIMESTAMP,
+              next_shift_start TIMESTAMP, rule_reference_date TIMESTAMP,
+              rule_reference_source STRING, required_rest_hours DOUBLE,
+              actual_rest_hours DOUBLE, rest_shortfall_hours DOUBLE,
+              sleepover_adjacent_exception_eligible BOOLEAN,
+              sleepover_8h_agreement BOOLEAN, sleepover_blocked_rest BOOLEAN,
+              historical_sleepover_interaction BOOLEAN,
+              overtime_rest_rule_applies BOOLEAN, employer_instructed_resume BOOLEAN,
+              release_datetime TIMESTAMP, double_time_repriced_hours DOUBLE,
+              double_time_topup DOUBLE, paid_absence_rostered_hours DOUBLE,
+              payment_status STRING, status STRING, clause STRING,
+              overtime_clause STRING, evidence_reference STRING, notes STRING,
+              scenario_id STRING, classification_family STRING,
+              scenario_classification_code STRING, scenario_classification_name STRING,
+              scenario_level INT, scenario_pay_point INT,
+              scenario_employment_type STRING, criterion_group STRING,
+              audit_run_id STRING, audit_window_start STRING,
+              audit_window_end STRING, run_type STRING, run_finished_at TIMESTAMP
+            ) USING DELTA
+            """,
+        ),
+        (
             "creating ops.readiness_findings",
             """
             CREATE TABLE IF NOT EXISTS ops.readiness_findings (
@@ -200,7 +266,6 @@ def ensure_output_tables(spark):
 
 
 def create_views(spark):
-    # Reporting views select the latest successful run for each audit window.
     statements = [
         (
             "creating gold.v_latest_audit_runs",
@@ -219,65 +284,52 @@ def create_views(spark):
             WHERE __audithero_row_number = 1
             """,
         ),
-        (
-            "creating gold.v_audit_detail_latest",
-            """
-            CREATE OR REPLACE VIEW gold.v_audit_detail_latest AS
-            SELECT d.* FROM gold.audit_detail d
-            INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            """,
-        ),
-        (
-            "creating gold.v_reconciliation_latest",
-            """
-            CREATE OR REPLACE VIEW gold.v_reconciliation_latest AS
-            SELECT d.* FROM gold.pay_period_reconciliation d
-            INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            """,
-        ),
-        (
-            "creating gold.v_event_adjustments_latest",
-            """
-            CREATE OR REPLACE VIEW gold.v_event_adjustments_latest AS
-            SELECT d.* FROM gold.audit_event_adjustments d
-            INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            """,
-        ),
-        (
-            "creating gold.v_toil_findings_latest",
-            """
-            CREATE OR REPLACE VIEW gold.v_toil_findings_latest AS
-            SELECT d.* FROM gold.toil_findings d
-            INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            """,
-        ),
-        (
-            "creating gold.v_rest_break_findings_latest",
-            """
-            CREATE OR REPLACE VIEW gold.v_rest_break_findings_latest AS
-            SELECT d.* FROM gold.rest_break_findings d
-            INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
-            """,
-        ),
-        (
-            "creating gold.v_exception_periods",
-            """
-            CREATE OR REPLACE VIEW gold.v_exception_periods AS
-            SELECT * FROM gold.v_reconciliation_latest
-            WHERE status IN ('UNDERPAID','OVERPAID','REQUIRES_REVIEW','ACTUAL_PAY_UNAVAILABLE')
-            """,
-        ),
-        (
-            "creating gold.v_employee_month",
-            """
-            CREATE OR REPLACE VIEW gold.v_employee_month AS
-            SELECT date_trunc('MONTH',shift_start) month, employee_id, employee_name,
-                   sum(expected_amount) expected_amount, count(*) shifts,
-                   sum(CASE WHEN entitlement_status='REQUIRES_REVIEW' THEN 1 ELSE 0 END) review_shifts
-            FROM gold.v_audit_detail_latest
-            GROUP BY date_trunc('MONTH',shift_start), employee_id, employee_name
-            """,
-        ),
     ]
+
+    latest_tables = {
+        "gold.v_audit_detail_latest": "gold.audit_detail",
+        "gold.v_reconciliation_latest": "gold.pay_period_reconciliation",
+        "gold.v_event_adjustments_latest": "gold.audit_event_adjustments",
+        "gold.v_toil_findings_latest": "gold.toil_findings",
+        "gold.v_rest_break_findings_latest": "gold.rest_break_findings",
+        "gold.v_award_scenario_detail_latest": "gold.award_scenario_detail",
+        "gold.v_award_criteria_detail_latest": "gold.award_criteria_detail",
+        "gold.v_award_scenario_rest_findings_latest": "gold.award_scenario_rest_findings",
+    }
+    for view, table in latest_tables.items():
+        statements.append(
+            (
+                f"creating {view}",
+                f"""
+                CREATE OR REPLACE VIEW {view} AS
+                SELECT d.* FROM {table} d
+                INNER JOIN gold.v_latest_audit_runs r ON d.audit_run_id=r.audit_run_id
+                """,
+            )
+        )
+
+    statements.extend(
+        [
+            (
+                "creating gold.v_exception_periods",
+                """
+                CREATE OR REPLACE VIEW gold.v_exception_periods AS
+                SELECT * FROM gold.v_reconciliation_latest
+                WHERE status IN ('UNDERPAID','OVERPAID','REQUIRES_REVIEW','ACTUAL_PAY_UNAVAILABLE','ENTITLEMENT_ONLY')
+                """,
+            ),
+            (
+                "creating gold.v_employee_month",
+                """
+                CREATE OR REPLACE VIEW gold.v_employee_month AS
+                SELECT date_trunc('MONTH',shift_start) month, employee_id, employee_name,
+                       sum(expected_amount) expected_amount, count(*) shifts,
+                       sum(CASE WHEN entitlement_status='REQUIRES_REVIEW' THEN 1 ELSE 0 END) review_shifts
+                FROM gold.v_audit_detail_latest
+                GROUP BY date_trunc('MONTH',shift_start), employee_id, employee_name
+                """,
+            ),
+        ]
+    )
     for label, statement in statements:
         _sql(spark, label, statement)
