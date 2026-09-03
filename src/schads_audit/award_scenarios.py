@@ -30,13 +30,13 @@ def _classification_catalog(lib) -> list[dict[str, str | None]]:
 
 
 def _level_pay_point(code: str):
-    m = re.search(r"-L(\d+)-P(\d+)$", str(code))
-    return (int(m.group(1)), int(m.group(2))) if m else (None, None)
+    match = re.search(r"-L(\d+)-P(\d+)$", str(code))
+    return (int(match.group(1)), int(match.group(2))) if match else (None, None)
 
 
 def _level_hint(value: Any):
-    m = re.search(r"\blevel\s*(\d+)\b", str(value or ""), re.I)
-    return int(m.group(1)) if m else None
+    match = re.search(r"\blevel\s*(\d+)\b", str(value or ""), re.I)
+    return int(match.group(1)) if match else None
 
 
 def _first_shift(timesheets: pd.DataFrame, employee_id: Any):
@@ -51,66 +51,70 @@ def _effective_start(timesheets: pd.DataFrame, employee_id: Any, fallback):
     return fallback if pd.isna(value) else value
 
 
-def _supplied_base_rates(pay_details: pd.DataFrame) -> dict[str, float | None]:
-    if pay_details is None or pay_details.empty or "supplied_hourly_rate" not in pay_details.columns:
-        return {}
-    out = {}
-    for eid, group in pay_details.groupby(pay_details["employee_id"].astype(str)):
-        values = pd.to_numeric(group["supplied_hourly_rate"], errors="coerce").dropna()
-        out[str(eid)] = None if values.empty else float(values.iloc[-1])
-    return out
+def _effective_record(frame: pd.DataFrame | None, employee_id: Any, when: Any, date_col: str):
+    if frame is None or frame.empty or "employee_id" not in frame.columns or date_col not in frame.columns:
+        return None
+    at = pd.to_datetime(when, errors="coerce")
+    q = frame[frame["employee_id"].astype(str) == str(employee_id)].copy()
+    if q.empty:
+        return None
+    q["_effective"] = pd.to_datetime(q[date_col], errors="coerce")
+    dated = q[q["_effective"].notna()].copy()
+    if not pd.isna(at):
+        dated = dated[dated["_effective"] <= at]
+    if not dated.empty:
+        return dated.sort_values("_effective").iloc[-1].to_dict()
+    undated = q[q["_effective"].isna()]
+    return undated.iloc[-1].to_dict() if not undated.empty else None
 
 
-def _known_classifications(pay_details: pd.DataFrame) -> tuple[dict[str, str | None], dict[str, int | None]]:
-    codes, hints = {}, {}
-    if pay_details is None or pay_details.empty:
-        return codes, hints
-    for eid, group in pay_details.groupby(pay_details["employee_id"].astype(str)):
-        code_values = group.get("classification_code", pd.Series(dtype=object)).dropna().astype(str)
-        codes[str(eid)] = None if code_values.empty else code_values.iloc[-1]
-        text_values = group.get("classification_name", pd.Series(dtype=object)).dropna().astype(str)
-        hints[str(eid)] = None if text_values.empty else _level_hint(text_values.iloc[-1])
-    return codes, hints
+def _source_pay_facts(pay_details: pd.DataFrame | None, employee_id: Any, shift_start: Any) -> dict[str, Any]:
+    record = _effective_record(pay_details, employee_id, shift_start, "effective_from")
+    if not record:
+        return {
+            "supplied_base_hourly_rate": None,
+            "source_rate_effective_from": None,
+            "source_rate_reference": None,
+            "source_classification_code": None,
+            "source_classification_name": None,
+            "source_level_hint": None,
+        }
+    rate = pd.to_numeric(pd.Series([record.get("supplied_hourly_rate")]), errors="coerce").iloc[0]
+    return {
+        "supplied_base_hourly_rate": None if pd.isna(rate) else float(rate),
+        "source_rate_effective_from": record.get("effective_from"),
+        "source_rate_reference": record.get("source_reference"),
+        "source_classification_code": record.get("classification_code"),
+        "source_classification_name": record.get("classification_name"),
+        "source_level_hint": _level_hint(record.get("classification_name")),
+    }
 
 
-def _known_employment_types(employment_history: pd.DataFrame | None, employees: pd.DataFrame) -> dict[str, str | None]:
-    result = {}
-    if employment_history is not None and not employment_history.empty and "employment_type" in employment_history.columns:
-        for eid, group in employment_history.groupby(employment_history["employee_id"].astype(str)):
-            values = group["employment_type"].dropna().astype(str)
-            result[str(eid)] = None if values.empty else values.iloc[-1]
-    for _, row in employees.iterrows():
-        eid = str(row.get("employee_id"))
-        if not result.get(eid):
-            value = row.get("employment_type_current")
-            result[eid] = None if pd.isna(value) else str(value)
-    return result
+def _source_employment_type(employment_history: pd.DataFrame | None, employees: pd.DataFrame, employee_id: Any, shift_start: Any):
+    record = _effective_record(employment_history, employee_id, shift_start, "start_date")
+    if record and record.get("employment_type") not in (None, "", "UNKNOWN"):
+        return str(record.get("employment_type"))
+    q = employees[employees["employee_id"].astype(str) == str(employee_id)]
+    if q.empty:
+        return None
+    value = q.iloc[0].get("employment_type_current")
+    return None if pd.isna(value) else str(value)
 
 
 def _observed_shift_pay(timesheets: pd.DataFrame) -> dict[str, float]:
-    if timesheets is None or timesheets.empty:
+    """Return only explicit actual shift amounts.
+
+    A supplied base hourly rate is deliberately not multiplied by hours here. A
+    base-rate file proves the employee's nominal hourly rate, not the complete
+    amount paid for penalties, overtime, allowances or other Award components.
+    """
+    if timesheets is None or timesheets.empty or "source_actual_amount" not in timesheets.columns:
         return {}
     result = {}
     for _, row in timesheets.iterrows():
-        tid = str(row.get("timesheet_id"))
         amount = pd.to_numeric(pd.Series([row.get("source_actual_amount")]), errors="coerce").iloc[0]
         if not pd.isna(amount):
-            result[tid] = round(float(amount), 2)
-            continue
-        rate = pd.to_numeric(pd.Series([row.get("source_actual_hourly_rate")]), errors="coerce").iloc[0]
-        if pd.isna(rate):
-            continue
-        hours = pd.to_numeric(pd.Series([row.get("units")]), errors="coerce").iloc[0]
-        if pd.isna(hours):
-            start = pd.to_datetime(row.get("start_datetime"), errors="coerce")
-            end = pd.to_datetime(row.get("end_datetime"), errors="coerce")
-            if pd.isna(start) or pd.isna(end) or end <= start:
-                continue
-            hours = (end - start).total_seconds() / 3600
-            brk = pd.to_numeric(pd.Series([row.get("unpaid_break_minutes")]), errors="coerce").iloc[0]
-            if not pd.isna(brk):
-                hours -= float(brk) / 60
-        result[tid] = round(float(rate) * max(0.0, float(hours)), 2)
+            result[str(row.get("timesheet_id"))] = round(float(amount), 2)
     return result
 
 
@@ -149,7 +153,31 @@ def _criteria_from_detail(detail: pd.DataFrame, scenario_meta: dict[str, Any]) -
             "entitlement_status": row.get("entitlement_status"),
             "review_flags": row.get("review_flags"),
         }
-        rows.append({**base, "criterion_group": "CLASSIFICATION_AND_RATE", "criterion": "MINIMUM_BASE_RATE", "clause": None, "hours": row.get("worked_hours"), "multiplier": 1.0, "effective_hourly_rate": row.get("base_hourly_rate"), "criterion_amount": None, "day_type": None, "shift_type": None, "detail": "Award minimum base hourly rate for the selected classification scenario."})
+        rate_variance = pd.to_numeric(pd.Series([row.get("base_rate_variance")]), errors="coerce").iloc[0]
+        worked = pd.to_numeric(pd.Series([row.get("worked_hours")]), errors="coerce").iloc[0]
+        base_shortfall = None
+        if not pd.isna(rate_variance) and not pd.isna(worked):
+            base_shortfall = round(max(0.0, -float(rate_variance)) * max(0.0, float(worked)), 2)
+        rows.append({
+            **base,
+            "criterion_group": "CLASSIFICATION_AND_RATE",
+            "criterion": "MINIMUM_BASE_RATE",
+            "clause": None,
+            "hours": row.get("worked_hours"),
+            "multiplier": 1.0,
+            "effective_hourly_rate": row.get("base_hourly_rate"),
+            "criterion_amount": base_shortfall,
+            "day_type": None,
+            "shift_type": None,
+            "detail": json.dumps({
+                "award_minimum_base_rate": row.get("base_hourly_rate"),
+                "supplied_base_hourly_rate": row.get("supplied_base_hourly_rate"),
+                "base_rate_variance": row.get("base_rate_variance"),
+                "base_rate_status": row.get("base_rate_status"),
+                "source_rate_effective_from": row.get("source_rate_effective_from"),
+                "source_rate_reference": row.get("source_rate_reference"),
+            }, default=str, separators=(",", ":")),
+        })
         try:
             evidence = json.loads(row.get("calculation_evidence") or "[]")
         except Exception:
@@ -193,13 +221,7 @@ def calculate_award_scenarios(
     classification_codes: list[str] | None = None,
     employment_types: tuple[str, ...] = EMPLOYMENT_TYPES,
 ) -> dict[str, pd.DataFrame]:
-    """Calculate selectable SCHADS classification/employment scenarios.
-
-    Every supplied shift can be explored under each available SCHADS classification
-    and employment type. This does not overwrite the definitive employee audit: it
-    provides an analytical matrix when source classification or employment facts are
-    missing, disputed, or intentionally being compared.
-    """
+    """Calculate selectable SCHADS classification/employment scenarios."""
     if employees is None or employees.empty or timesheets is None or timesheets.empty:
         return {"detail": pd.DataFrame(), "criteria": pd.DataFrame(), "rest_findings": pd.DataFrame()}
 
@@ -207,13 +229,10 @@ def calculate_award_scenarios(
     if classification_codes:
         wanted = {str(x) for x in classification_codes}
         catalog = [x for x in catalog if x["classification_code"] in wanted]
-    supplied_rates = _supplied_base_rates(pay_details if pay_details is not None else pd.DataFrame())
-    known_codes, level_hints = _known_classifications(pay_details if pay_details is not None else pd.DataFrame())
-    known_types = _known_employment_types(employment_history, employees)
     observed_pay = _observed_shift_pay(timesheets)
     all_detail, all_criteria, all_rest = [], [], []
-
     earliest = pd.to_datetime(timesheets["start_datetime"], errors="coerce").min()
+
     for cls in catalog:
         code = str(cls["classification_code"])
         level, pay_point = _level_pay_point(code)
@@ -238,15 +257,22 @@ def calculate_award_scenarios(
             detail["scenario_level"] = level
             detail["scenario_pay_point"] = pay_point
             detail["scenario_employment_type"] = emp_type
-            detail["supplied_base_hourly_rate"] = detail["employee_id"].astype(str).map(supplied_rates)
+
+            source_rows = []
+            for _, row in detail.iterrows():
+                facts = _source_pay_facts(pay_details, row.get("employee_id"), row.get("shift_start"))
+                facts["source_employment_type"] = _source_employment_type(employment_history, employees, row.get("employee_id"), row.get("shift_start"))
+                source_rows.append(facts)
+            source_df = pd.DataFrame(source_rows, index=detail.index)
+            for column in source_df.columns:
+                detail[column] = source_df[column]
+
             detail["base_rate_variance"] = (pd.to_numeric(detail["supplied_base_hourly_rate"], errors="coerce") - pd.to_numeric(detail["base_hourly_rate"], errors="coerce")).round(2)
             detail["base_rate_status"] = detail["base_rate_variance"].map(lambda v: None if pd.isna(v) else "BELOW_MINIMUM" if v < -0.005 else "ABOVE_MINIMUM" if v > 0.005 else "AT_MINIMUM")
-            detail["source_classification_code"] = detail["employee_id"].astype(str).map(known_codes)
-            detail["source_level_hint"] = detail["employee_id"].astype(str).map(level_hints)
-            detail["source_employment_type"] = detail["employee_id"].astype(str).map(known_types)
             detail["matches_source_classification"] = detail.apply(lambda r: bool(r.get("source_classification_code")) and str(r.get("source_classification_code")) == code, axis=1)
             detail["matches_source_level_hint"] = detail["source_level_hint"].map(lambda v: False if pd.isna(v) else int(v) == int(level or -1))
-            detail["matches_source_employment_type"] = detail["source_employment_type"].astype(str).str.upper().str.replace(" ", "_").eq(emp_type)
+            normalized_source_type = detail["source_employment_type"].fillna("").astype(str).str.upper().str.replace(" ", "_", regex=False).str.replace("-", "_", regex=False)
+            detail["matches_source_employment_type"] = normalized_source_type.eq(emp_type)
             detail["observed_shift_pay"] = detail["timesheet_id"].astype(str).map(observed_pay)
             detail["shift_variance_actual_minus_expected"] = (pd.to_numeric(detail["observed_shift_pay"], errors="coerce") - pd.to_numeric(detail["expected_amount"], errors="coerce")).round(2)
 
@@ -268,6 +294,7 @@ def calculate_award_scenarios(
             detail["scenario_status"] = detail.apply(scenario_status, axis=1)
             meta = {"scenario_id": scenario_id, "classification_family": cls.get("classification_family"), "scenario_classification_code": code, "scenario_classification_name": cls.get("classification_name"), "scenario_level": level, "scenario_pay_point": pay_point, "scenario_employment_type": emp_type}
             criteria = _criteria_from_detail(detail, meta)
+
             if rest is not None and not rest.empty:
                 rest = rest.copy()
                 for key, value in meta.items():
