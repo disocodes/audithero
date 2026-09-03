@@ -85,7 +85,10 @@ spark.sql(f"""CREATE TABLE IF NOT EXISTS `{catalog}`.`gold`.`award_scenario_deta
  sleepover_span_hours DOUBLE,base_hourly_rate DOUBLE,expected_amount DOUBLE,entitlement_status STRING,
  review_flags STRING,calculation_evidence STRING,scenario_id STRING,classification_family STRING,
  scenario_classification_code STRING,scenario_classification_name STRING,scenario_level INT,scenario_pay_point INT,
- scenario_employment_type STRING,supplied_base_hourly_rate DOUBLE,base_rate_variance DOUBLE,
+ scenario_employment_type STRING,supplied_base_hourly_rate DOUBLE,source_rate_effective_from TIMESTAMP,
+ source_rate_reference STRING,source_classification_code STRING,source_classification_name STRING,
+ source_level_hint INT,source_employment_type STRING,base_rate_variance DOUBLE,base_rate_status STRING,
+ matches_source_classification BOOLEAN,matches_source_level_hint BOOLEAN,matches_source_employment_type BOOLEAN,
  observed_shift_pay DOUBLE,shift_variance_actual_minus_expected DOUBLE,scenario_status STRING,
  audit_run_id STRING,audit_window_start STRING,audit_window_end STRING,run_type STRING,run_finished_at TIMESTAMP
 ) USING DELTA""")
