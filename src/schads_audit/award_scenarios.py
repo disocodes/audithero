@@ -10,9 +10,15 @@ from .engine import calculate_entitlements
 from .roster_overtime import apply_rostered_and_daily_overtime, allocate_period_overtime, flag_period_overtime
 from .broken_sleepover import apply_broken_shift_rules, apply_sleepover_group_rules
 from .rest_breaks import apply_rest_between_work
+from .part_time_patterns import apply_part_time_pattern_checks
+from .rest_meal import apply_meal_break_events
 
 
 EMPLOYMENT_TYPES = ("FULL_TIME", "PART_TIME", "CASUAL")
+FAMILY_WORK_GROUPS = {
+    "SACS": ("SACS_NON_DISABILITY",),
+    "HOME_CARE_DISABILITY": ("DISABILITY_SERVICES", "HOME_CARE"),
+}
 
 
 def _classification_catalog(lib) -> list[dict[str, str | None]]:
@@ -23,7 +29,14 @@ def _classification_catalog(lib) -> list[dict[str, str | None]]:
             code = str(rate.get("classification_code") or "").strip()
             if not code:
                 continue
-            existing = rows.setdefault(code, {"classification_code": code, "classification_family": family, "classification_name": rate.get("classification_name")})
+            existing = rows.setdefault(
+                code,
+                {
+                    "classification_code": code,
+                    "classification_family": family,
+                    "classification_name": rate.get("classification_name"),
+                },
+            )
             if rate.get("classification_name"):
                 existing["classification_name"] = rate.get("classification_name")
     return sorted(rows.values(), key=lambda x: x["classification_code"])
@@ -101,6 +114,22 @@ def _source_employment_type(employment_history: pd.DataFrame | None, employees: 
     return None if pd.isna(value) else str(value)
 
 
+def _source_work_group(timesheets: pd.DataFrame, employees: pd.DataFrame, timesheet_id: Any, employee_id: Any):
+    if timesheets is not None and not timesheets.empty and "timesheet_id" in timesheets.columns:
+        q = timesheets[timesheets["timesheet_id"].astype(str) == str(timesheet_id)]
+        if not q.empty:
+            value = q.iloc[0].get("work_group")
+            if value is not None and not pd.isna(value) and str(value).strip():
+                return str(value).strip()
+    if employees is not None and not employees.empty:
+        q = employees[employees["employee_id"].astype(str) == str(employee_id)]
+        if not q.empty:
+            value = q.iloc[0].get("work_group")
+            if value is not None and not pd.isna(value) and str(value).strip():
+                return str(value).strip()
+    return None
+
+
 def _observed_shift_pay(timesheets: pd.DataFrame) -> dict[str, float]:
     """Return only explicit actual shift amounts.
 
@@ -134,7 +163,7 @@ def _flag_group(flag: str) -> str:
         return "PART_TIME"
     if "PUBLIC_HOLIDAY" in upper or "STATE_MISSING" in upper:
         return "PUBLIC_HOLIDAYS"
-    if "CLASSIFICATION" in upper or "RATE" in upper:
+    if "CLASSIFICATION" in upper or "RATE" in upper or "WORK_GROUP" in upper:
         return "CLASSIFICATION_AND_RATE"
     return "EVIDENCE_REQUIRED"
 
@@ -176,6 +205,7 @@ def _criteria_from_detail(detail: pd.DataFrame, scenario_meta: dict[str, Any]) -
                 "base_rate_status": row.get("base_rate_status"),
                 "source_rate_effective_from": row.get("source_rate_effective_from"),
                 "source_rate_reference": row.get("source_rate_reference"),
+                "scenario_work_group": row.get("scenario_work_group"),
             }, default=str, separators=(",", ":")),
         })
         try:
@@ -201,9 +231,33 @@ def _criteria_from_detail(detail: pd.DataFrame, scenario_meta: dict[str, Any]) -
                 group = "MEAL_BREAKS"
             elif "ALLOWANCE" in component:
                 group = "ALLOWANCES"
-            rows.append({**base, "criterion_group": group, "criterion": component, "clause": item.get("clause"), "hours": item.get("hours") or item.get("affected_hours"), "multiplier": item.get("multiplier") or item.get("overtime_multiplier"), "effective_hourly_rate": item.get("effective_hourly_rate") or item.get("overtime_rate") or item.get("minimum_rate"), "criterion_amount": item.get("amount") if item.get("amount") is not None else item.get("amount_added"), "day_type": item.get("day_type"), "shift_type": item.get("shift_type"), "detail": json.dumps(item, default=str, separators=(",", ":"))})
+            rows.append({
+                **base,
+                "criterion_group": group,
+                "criterion": component,
+                "clause": item.get("clause"),
+                "hours": item.get("hours") or item.get("affected_hours"),
+                "multiplier": item.get("multiplier") or item.get("overtime_multiplier"),
+                "effective_hourly_rate": item.get("effective_hourly_rate") or item.get("overtime_rate") or item.get("minimum_rate"),
+                "criterion_amount": item.get("amount") if item.get("amount") is not None else item.get("amount_added"),
+                "day_type": item.get("day_type"),
+                "shift_type": item.get("shift_type"),
+                "detail": json.dumps(item, default=str, separators=(",", ":")),
+            })
         for flag in [x.strip() for x in str(row.get("review_flags") or "").split(";") if x.strip()]:
-            rows.append({**base, "criterion_group": _flag_group(flag), "criterion": "EVIDENCE_OR_RULE_REVIEW", "clause": None, "hours": None, "multiplier": None, "effective_hourly_rate": None, "criterion_amount": None, "day_type": None, "shift_type": None, "detail": flag})
+            rows.append({
+                **base,
+                "criterion_group": _flag_group(flag),
+                "criterion": "EVIDENCE_OR_RULE_REVIEW",
+                "clause": None,
+                "hours": None,
+                "multiplier": None,
+                "effective_hourly_rate": None,
+                "criterion_amount": None,
+                "day_type": None,
+                "shift_type": None,
+                "detail": flag,
+            })
     return pd.DataFrame(rows)
 
 
@@ -216,12 +270,15 @@ def calculate_award_scenarios(
     pay_details: pd.DataFrame | None = None,
     employment_history: pd.DataFrame | None = None,
     rosters: pd.DataFrame | None = None,
+    part_time_patterns: pd.DataFrame | None = None,
+    part_time_variations: pd.DataFrame | None = None,
+    meal_break_events: pd.DataFrame | None = None,
     rest_break_controls: pd.DataFrame | None = None,
     overtime_rest_controls: pd.DataFrame | None = None,
     classification_codes: list[str] | None = None,
     employment_types: tuple[str, ...] = EMPLOYMENT_TYPES,
 ) -> dict[str, pd.DataFrame]:
-    """Calculate selectable SCHADS classification/employment scenarios."""
+    """Calculate selectable SCHADS classification, work-area and employment scenarios."""
     if employees is None or employees.empty or timesheets is None or timesheets.empty:
         return {"detail": pd.DataFrame(), "criteria": pd.DataFrame(), "rest_findings": pd.DataFrame()}
 
@@ -235,81 +292,173 @@ def calculate_award_scenarios(
 
     for cls in catalog:
         code = str(cls["classification_code"])
+        family = str(cls.get("classification_family") or "OTHER")
         level, pay_point = _level_pay_point(code)
-        for emp_type in employment_types:
-            scenario_id = f"{code}:{emp_type}"
-            synthetic_pay = pd.DataFrame([{"employee_id": str(row["employee_id"]), "effective_from": _effective_start(timesheets, row["employee_id"], earliest), "classification_code": code, "classification_name": cls.get("classification_name")} for _, row in employees.iterrows()])
-            synthetic_history = pd.DataFrame([{"employee_id": str(row["employee_id"]), "start_date": _effective_start(timesheets, row["employee_id"], earliest), "end_date": pd.NaT, "employment_type": emp_type} for _, row in employees.iterrows()])
+        work_groups = FAMILY_WORK_GROUPS.get(family, ("OTHER",))
+        for scenario_work_group in work_groups:
+            scenario_timesheets = timesheets.copy()
+            scenario_timesheets["work_group"] = scenario_work_group
+            for emp_type in employment_types:
+                scenario_id = f"{code}:{scenario_work_group}:{emp_type}"
+                synthetic_pay = pd.DataFrame([
+                    {
+                        "employee_id": str(row["employee_id"]),
+                        "effective_from": _effective_start(timesheets, row["employee_id"], earliest),
+                        "classification_code": code,
+                        "classification_name": cls.get("classification_name"),
+                    }
+                    for _, row in employees.iterrows()
+                ])
+                synthetic_history = pd.DataFrame([
+                    {
+                        "employee_id": str(row["employee_id"]),
+                        "start_date": _effective_start(timesheets, row["employee_id"], earliest),
+                        "end_date": pd.NaT,
+                        "employment_type": emp_type,
+                    }
+                    for _, row in employees.iterrows()
+                ])
 
-            detail = calculate_entitlements(employees, synthetic_history, synthetic_pay, timesheets, holidays, lib)
-            detail = apply_broken_shift_rules(detail, timesheets, lib)
-            detail = apply_sleepover_group_rules(detail, timesheets, lib)
-            detail = apply_rostered_and_daily_overtime(detail, timesheets, holidays, lib)
-            detail = allocate_period_overtime(detail, holidays, lib)
-            detail = flag_period_overtime(detail)
-            detail, rest = apply_rest_between_work(detail, timesheets, rosters if rosters is not None else pd.DataFrame(), rest_break_controls if rest_break_controls is not None else pd.DataFrame(), overtime_rest_controls if overtime_rest_controls is not None else pd.DataFrame(), lib)
+                detail = calculate_entitlements(employees, synthetic_history, synthetic_pay, scenario_timesheets, holidays, lib)
+                detail = apply_broken_shift_rules(detail, scenario_timesheets, lib)
+                detail = apply_sleepover_group_rules(detail, scenario_timesheets, lib)
+                detail = apply_rostered_and_daily_overtime(detail, scenario_timesheets, holidays, lib)
+                detail = allocate_period_overtime(detail, holidays, lib)
+                detail = flag_period_overtime(detail)
+                detail = apply_part_time_pattern_checks(
+                    detail,
+                    part_time_patterns if part_time_patterns is not None else pd.DataFrame(),
+                    part_time_variations if part_time_variations is not None else pd.DataFrame(),
+                )
+                detail = apply_meal_break_events(
+                    detail,
+                    scenario_timesheets,
+                    meal_break_events if meal_break_events is not None else pd.DataFrame(),
+                    holidays,
+                    lib,
+                )
+                detail, rest = apply_rest_between_work(
+                    detail,
+                    scenario_timesheets,
+                    rosters if rosters is not None else pd.DataFrame(),
+                    rest_break_controls if rest_break_controls is not None else pd.DataFrame(),
+                    overtime_rest_controls if overtime_rest_controls is not None else pd.DataFrame(),
+                    lib,
+                )
 
-            detail = detail.copy()
-            detail["scenario_id"] = scenario_id
-            detail["classification_family"] = cls.get("classification_family")
-            detail["scenario_classification_code"] = code
-            detail["scenario_classification_name"] = cls.get("classification_name")
-            detail["scenario_level"] = level
-            detail["scenario_pay_point"] = pay_point
-            detail["scenario_employment_type"] = emp_type
+                detail = detail.copy()
+                detail["scenario_id"] = scenario_id
+                detail["classification_family"] = family
+                detail["scenario_classification_code"] = code
+                detail["scenario_classification_name"] = cls.get("classification_name")
+                detail["scenario_level"] = level
+                detail["scenario_pay_point"] = pay_point
+                detail["scenario_work_group"] = scenario_work_group
+                detail["scenario_employment_type"] = emp_type
 
-            source_rows = []
-            for _, row in detail.iterrows():
-                facts = _source_pay_facts(pay_details, row.get("employee_id"), row.get("shift_start"))
-                facts["source_employment_type"] = _source_employment_type(employment_history, employees, row.get("employee_id"), row.get("shift_start"))
-                source_rows.append(facts)
-            source_df = pd.DataFrame(source_rows, index=detail.index)
-            for column in source_df.columns:
-                detail[column] = source_df[column]
+                source_rows = []
+                for _, row in detail.iterrows():
+                    facts = _source_pay_facts(pay_details, row.get("employee_id"), row.get("shift_start"))
+                    facts["source_employment_type"] = _source_employment_type(
+                        employment_history, employees, row.get("employee_id"), row.get("shift_start")
+                    )
+                    facts["source_work_group"] = _source_work_group(
+                        timesheets, employees, row.get("timesheet_id"), row.get("employee_id")
+                    )
+                    source_rows.append(facts)
+                source_df = pd.DataFrame(source_rows, index=detail.index)
+                for column in source_df.columns:
+                    detail[column] = source_df[column]
 
-            detail["base_rate_variance"] = (pd.to_numeric(detail["supplied_base_hourly_rate"], errors="coerce") - pd.to_numeric(detail["base_hourly_rate"], errors="coerce")).round(2)
-            detail["base_rate_status"] = detail["base_rate_variance"].map(lambda v: None if pd.isna(v) else "BELOW_MINIMUM" if v < -0.005 else "ABOVE_MINIMUM" if v > 0.005 else "AT_MINIMUM")
-            detail["matches_source_classification"] = detail.apply(lambda r: bool(r.get("source_classification_code")) and str(r.get("source_classification_code")) == code, axis=1)
-            detail["matches_source_level_hint"] = detail["source_level_hint"].map(lambda v: False if pd.isna(v) else int(v) == int(level or -1))
-            normalized_source_type = detail["source_employment_type"].fillna("").astype(str).str.upper().str.replace(" ", "_", regex=False).str.replace("-", "_", regex=False)
-            detail["matches_source_employment_type"] = normalized_source_type.eq(emp_type)
-            detail["observed_shift_pay"] = detail["timesheet_id"].astype(str).map(observed_pay)
-            detail["shift_variance_actual_minus_expected"] = (pd.to_numeric(detail["observed_shift_pay"], errors="coerce") - pd.to_numeric(detail["expected_amount"], errors="coerce")).round(2)
+                detail["base_rate_variance"] = (
+                    pd.to_numeric(detail["supplied_base_hourly_rate"], errors="coerce")
+                    - pd.to_numeric(detail["base_hourly_rate"], errors="coerce")
+                ).round(2)
+                detail["base_rate_status"] = detail["base_rate_variance"].map(
+                    lambda value: None if pd.isna(value) else "BELOW_MINIMUM" if value < -0.005 else "ABOVE_MINIMUM" if value > 0.005 else "AT_MINIMUM"
+                )
+                detail["matches_source_classification"] = detail.apply(
+                    lambda row: bool(row.get("source_classification_code")) and str(row.get("source_classification_code")) == code,
+                    axis=1,
+                )
+                detail["matches_source_level_hint"] = detail["source_level_hint"].map(
+                    lambda value: False if pd.isna(value) else int(value) == int(level or -1)
+                )
+                normalized_source_type = (
+                    detail["source_employment_type"].fillna("").astype(str).str.upper()
+                    .str.replace(" ", "_", regex=False).str.replace("-", "_", regex=False)
+                )
+                detail["matches_source_employment_type"] = normalized_source_type.eq(emp_type)
+                detail["matches_source_work_group"] = detail["source_work_group"].fillna("").astype(str).eq(scenario_work_group)
+                detail["observed_shift_pay"] = detail["timesheet_id"].astype(str).map(observed_pay)
+                detail["shift_variance_actual_minus_expected"] = (
+                    pd.to_numeric(detail["observed_shift_pay"], errors="coerce")
+                    - pd.to_numeric(detail["expected_amount"], errors="coerce")
+                ).round(2)
 
-            def scenario_status(row):
-                actual = row.get("observed_shift_pay")
-                if pd.isna(actual):
-                    return "CALCULATED_REVIEW" if row.get("entitlement_status") == "REQUIRES_REVIEW" else "CALCULATED"
-                if row.get("entitlement_status") == "REQUIRES_REVIEW":
-                    return "REQUIRES_REVIEW"
-                variance = row.get("shift_variance_actual_minus_expected")
-                if pd.isna(variance):
-                    return "CALCULATED"
-                if float(variance) < -0.05:
-                    return "UNDERPAID"
-                if float(variance) > 0.05:
-                    return "OVERPAID"
-                return "COMPLIANT"
+                def scenario_status(row):
+                    actual = row.get("observed_shift_pay")
+                    if pd.isna(actual):
+                        return "CALCULATED_REVIEW" if row.get("entitlement_status") == "REQUIRES_REVIEW" else "CALCULATED"
+                    if row.get("entitlement_status") == "REQUIRES_REVIEW":
+                        return "REQUIRES_REVIEW"
+                    variance = row.get("shift_variance_actual_minus_expected")
+                    if pd.isna(variance):
+                        return "CALCULATED"
+                    if float(variance) < -0.05:
+                        return "UNDERPAID"
+                    if float(variance) > 0.05:
+                        return "OVERPAID"
+                    return "COMPLIANT"
 
-            detail["scenario_status"] = detail.apply(scenario_status, axis=1)
-            meta = {"scenario_id": scenario_id, "classification_family": cls.get("classification_family"), "scenario_classification_code": code, "scenario_classification_name": cls.get("classification_name"), "scenario_level": level, "scenario_pay_point": pay_point, "scenario_employment_type": emp_type}
-            criteria = _criteria_from_detail(detail, meta)
+                detail["scenario_status"] = detail.apply(scenario_status, axis=1)
+                meta = {
+                    "scenario_id": scenario_id,
+                    "classification_family": family,
+                    "scenario_classification_code": code,
+                    "scenario_classification_name": cls.get("classification_name"),
+                    "scenario_level": level,
+                    "scenario_pay_point": pay_point,
+                    "scenario_work_group": scenario_work_group,
+                    "scenario_employment_type": emp_type,
+                }
+                criteria = _criteria_from_detail(detail, meta)
 
-            if rest is not None and not rest.empty:
-                rest = rest.copy()
-                for key, value in meta.items():
-                    rest[key] = value
-                rest["criterion_group"] = "REST_AND_BREAKS"
-                all_rest.append(rest)
-                rest_criteria = []
-                for _, finding in rest.iterrows():
-                    rest_criteria.append({**meta, "timesheet_id": finding.get("next_timesheet_ids"), "employee_id": finding.get("employee_id"), "employee_name": finding.get("employee_name"), "shift_start": finding.get("next_shift_start"), "shift_end": None, "worked_hours": None, "entitlement_status": finding.get("status"), "review_flags": finding.get("notes"), "criterion_group": "REST_AND_BREAKS", "criterion": finding.get("finding_type") or "REST_BETWEEN_WORK", "clause": finding.get("clause") or finding.get("overtime_clause"), "hours": finding.get("rest_shortfall_hours"), "multiplier": 2.0 if float(finding.get("double_time_repriced_hours") or 0) > 0 else None, "effective_hourly_rate": None, "criterion_amount": finding.get("double_time_topup"), "day_type": None, "shift_type": None, "detail": json.dumps(finding.to_dict(), default=str, separators=(",", ":"))})
-                if rest_criteria:
-                    criteria = pd.concat([criteria, pd.DataFrame(rest_criteria)], ignore_index=True, sort=False)
+                if rest is not None and not rest.empty:
+                    rest = rest.copy()
+                    for key, value in meta.items():
+                        rest[key] = value
+                    rest["criterion_group"] = "REST_AND_BREAKS"
+                    all_rest.append(rest)
+                    rest_criteria = []
+                    for _, finding in rest.iterrows():
+                        rest_criteria.append({
+                            **meta,
+                            "timesheet_id": finding.get("next_timesheet_ids"),
+                            "employee_id": finding.get("employee_id"),
+                            "employee_name": finding.get("employee_name"),
+                            "shift_start": finding.get("next_shift_start"),
+                            "shift_end": None,
+                            "worked_hours": None,
+                            "entitlement_status": finding.get("status"),
+                            "review_flags": finding.get("notes"),
+                            "criterion_group": "REST_AND_BREAKS",
+                            "criterion": finding.get("finding_type") or "REST_BETWEEN_WORK",
+                            "clause": finding.get("clause") or finding.get("overtime_clause"),
+                            "hours": finding.get("rest_shortfall_hours"),
+                            "multiplier": 2.0 if float(finding.get("double_time_repriced_hours") or 0) > 0 else None,
+                            "effective_hourly_rate": None,
+                            "criterion_amount": finding.get("double_time_topup"),
+                            "day_type": None,
+                            "shift_type": None,
+                            "detail": json.dumps(finding.to_dict(), default=str, separators=(",", ":")),
+                        })
+                    if rest_criteria:
+                        criteria = pd.concat([criteria, pd.DataFrame(rest_criteria)], ignore_index=True, sort=False)
 
-            all_detail.append(detail)
-            if not criteria.empty:
-                all_criteria.append(criteria)
+                all_detail.append(detail)
+                if not criteria.empty:
+                    all_criteria.append(criteria)
 
     return {
         "detail": pd.concat(all_detail, ignore_index=True, sort=False) if all_detail else pd.DataFrame(),
