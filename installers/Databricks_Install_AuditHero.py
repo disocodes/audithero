@@ -31,6 +31,7 @@ existing_cluster_id = ""
 
 # COMMAND ----------
 import base64
+import importlib.util
 import json
 from pathlib import Path
 import tempfile
@@ -52,9 +53,6 @@ print(f"Release: {release_ref}")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Download the AuditHero release
-# MAGIC
-# MAGIC The selected public repository release is downloaded into temporary driver storage for installation.
-
 # COMMAND ----------
 archive_url = f"https://api.github.com/repos/disocodes/audithero/zipball/{release_ref}"
 work_dir = Path(tempfile.mkdtemp(prefix="audithero-install-"))
@@ -70,12 +68,19 @@ if len(roots) != 1:
 repo_root = roots[0]
 print(f"Release downloaded: {repo_root.name}")
 
+required_release_files = [
+    repo_root / "dashboard" / "payroll_compliance.spec.json",
+    repo_root / "dashboard" / "lakeview_builder.py",
+    repo_root / "notebooks" / "02f_auto_intake.py",
+    repo_root / "resources" / "jobs.yml",
+]
+missing_release_files = [str(p.relative_to(repo_root)) for p in required_release_files if not p.exists()]
+if missing_release_files:
+    raise RuntimeError("The selected AuditHero release is incomplete: " + ", ".join(missing_release_files))
+
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Workspace access
-# MAGIC
-# MAGIC Installation uses the current Databricks notebook identity. A personal access token does not need to be entered in this notebook.
-
 # COMMAND ----------
 def call(method: str, path: str, body=None, query=None):
     return api.do(method, path, body=body, query=query)
@@ -111,9 +116,6 @@ mkdirs(install_root)
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Install AuditHero workspace files and notebooks
-# MAGIC
-# MAGIC Audit notebooks are installed as runnable Databricks notebooks. Shared Python code, rule packs and configuration files are installed under `/Shared/AuditHero`. Managed administration notebooks are installed under `/Shared/AuditHero/admin`.
-
 # COMMAND ----------
 for name in ("databricks.yml", "pyproject.toml", "README.md"):
     path = repo_root / name
@@ -149,15 +151,11 @@ import_notebook(
     repo_root / "installers" / "Databricks_Uninstall_AuditHero.py",
     f"{install_root}/admin/AuditHero - Uninstall",
 )
-
 print("AuditHero workspace files and administration notebooks installed.")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Select the SQL warehouse
-# MAGIC
-# MAGIC AuditHero uses the configured warehouse ID when supplied. Otherwise it selects **AuditHero SQL Warehouse**, a running warehouse, or another available warehouse. If no warehouse exists and automatic creation is enabled, the installer creates one when permitted.
-
 # COMMAND ----------
 def list_warehouses():
     payload = call("GET", "/api/2.0/sql/warehouses") or {}
@@ -204,11 +202,18 @@ print(f"AuditHero SQL warehouse: {warehouse_id}")
 # MAGIC %md
 # MAGIC ## Create or update the AI/BI dashboard
 # MAGIC
-# MAGIC The dashboard is published with embedded credentials disabled and uses the selected AuditHero SQL warehouse.
-
+# MAGIC The installer builds the dashboard from AuditHero's version-controlled Award-oriented specification. Setup subsequently verifies the stored definition and republishes it after the governed reporting views are prepared.
 # COMMAND ----------
 dashboard_name = "AuditHero - SCHADS Payroll Compliance"
-serialized_dashboard = (repo_root / "dashboard" / "payroll_compliance.lvdash.json").read_text(encoding="utf-8")
+dashboard_spec_path = repo_root / "dashboard" / "payroll_compliance.spec.json"
+dashboard_builder_path = repo_root / "dashboard" / "lakeview_builder.py"
+module_spec = importlib.util.spec_from_file_location("audithero_lakeview_builder", dashboard_builder_path)
+if module_spec is None or module_spec.loader is None:
+    raise RuntimeError("AuditHero dashboard builder could not be loaded")
+dashboard_builder = importlib.util.module_from_spec(module_spec)
+module_spec.loader.exec_module(dashboard_builder)
+dashboard_spec = json.loads(dashboard_spec_path.read_text(encoding="utf-8"))
+serialized_dashboard = dashboard_builder.build_dashboard_text(dashboard_spec)
 
 
 def list_dashboards():
@@ -234,7 +239,12 @@ dashboard_body = {
 }
 if existing_dashboard:
     dashboard_body["dashboard_id"] = existing_dashboard["dashboard_id"]
-    dashboard = call("PATCH", f"/api/2.0/lakeview/dashboards/{existing_dashboard['dashboard_id']}", dashboard_body)
+    dashboard = call(
+        "PATCH",
+        f"/api/2.0/lakeview/dashboards/{existing_dashboard['dashboard_id']}",
+        dashboard_body,
+        query={"dataset_catalog": catalog, "dataset_schema": "gold"},
+    )
 else:
     dashboard = call(
         "POST",
@@ -253,9 +263,6 @@ print(f"AI/BI dashboard published: {dashboard_id}")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Create or update AuditHero Jobs
-# MAGIC
-# MAGIC AuditHero Job definitions are loaded from `resources/jobs.yml`. Deployment variables and notebook paths are resolved for the installed workspace. Notebook tasks use serverless Jobs unless `existing_cluster_id` is configured.
-
 # COMMAND ----------
 jobs_doc = yaml.safe_load((repo_root / "resources" / "jobs.yml").read_text(encoding="utf-8"))
 job_defs = jobs_doc["resources"]["jobs"]
@@ -302,12 +309,22 @@ def list_jobs():
             return jobs
 
 
-existing_by_name = {j.get("settings", {}).get("name"): j for j in list_jobs()}
+legacy_job_names = {
+    "AuditHero - Build Source Mapping Workbook (Advanced)": "AuditHero - Build Source Mapping Workbook",
+    "AuditHero - Convert Source Files (Advanced)": "AuditHero - Convert Source Files",
+    "AuditHero - Convert Mapped Files and Run Audit (Advanced)": "AuditHero - Convert Mapped Files and Run Audit",
+    "AuditHero - File Readiness (Advanced)": "AuditHero - File Readiness",
+    "AuditHero - Audit Canonical CSV Excel (Advanced)": "AuditHero - Audit Uploaded CSV Excel",
+}
+existing_jobs = list_jobs()
+existing_by_name = {j.get("settings", {}).get("name"): j for j in existing_jobs}
 installed_jobs = {}
 for resource_key, raw_settings in job_defs.items():
     settings = resolve(raw_settings)
     name = settings["name"]
     existing = existing_by_name.get(name)
+    if existing is None and name in legacy_job_names:
+        existing = existing_by_name.get(legacy_job_names[name])
     if existing:
         call("POST", "/api/2.2/jobs/reset", {"job_id": existing["job_id"], "new_settings": settings})
         job_id = existing["job_id"]
@@ -322,8 +339,7 @@ for resource_key, raw_settings in job_defs.items():
 # MAGIC %md
 # MAGIC ## Run Setup and Self Test
 # MAGIC
-# MAGIC Setup prepares the Unity Catalog structures, rule references, semantic metric views and Genie space. Self Test validates representative SCHADS calculations. Installation stops if either validation step fails.
-
+# MAGIC Setup prepares Unity Catalog structures, effective-dated SCHADS rules, Award scenario views, the semantic layer, dashboard and Genie. Self Test validates representative deterministic calculations inside the installed workspace.
 # COMMAND ----------
 def run_job_and_wait(job_id: int, label: str):
     run = call("POST", "/api/2.2/jobs/run-now", {"job_id": job_id})
@@ -349,9 +365,6 @@ run_job_and_wait(installed_jobs["self_test"], "AuditHero Self Test")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Save installation state
-# MAGIC
-# MAGIC Resource IDs and installation settings are saved for upgrades and uninstall.
-
 # COMMAND ----------
 state = {
     "release_ref": release_ref,
@@ -372,13 +385,13 @@ call("POST", "/api/2.0/workspace/import", {
 })
 
 print("\nAuditHero installation completed successfully.")
-print("For uploaded CSV/Excel audits, use:")
-print("  • AuditHero - Build Source Mapping Workbook")
-print("  • AuditHero - Convert Mapped Files and Run Audit")
-print("  • AuditHero - Audit Uploaded CSV Excel")
-print("Review results in:")
-print("  • AuditHero - SCHADS Payroll Compliance (AI/BI)")
-print("  • AuditHero - Payroll Compliance (Genie)")
+print("Primary uploaded-file workflow:")
+print("  1. Upload ordinary CSV/XLSX files to the raw import folder")
+print("  2. Run AuditHero - Auto Audit Uploaded Files")
+print("  3. Open AuditHero - SCHADS Payroll Compliance (AI/BI) or Genie")
+print("Advanced import tools remain available for unusual source layouts:")
+print("  • AuditHero - Build Source Mapping Workbook (Advanced)")
+print("  • AuditHero - Convert Mapped Files and Run Audit (Advanced)")
 print("Administration notebooks are installed under /Shared/AuditHero/admin:")
 print("  • AuditHero - Install or Upgrade")
 print("  • AuditHero - Uninstall")
