@@ -38,6 +38,11 @@ try:
         "Audit Detail": "gold.current_audit_detail",
         "Award Scenarios": "gold.current_award_scenario_detail",
         "Award Criteria": "gold.current_award_criteria_detail",
+        "Penalties & Shiftwork": "gold.current_penalties_shiftwork",
+        "Overtime Criteria": "gold.current_overtime_criteria",
+        "Meal Break Criteria": "gold.current_meal_break_criteria",
+        "Sleepover Broken Shift & Allowances": "gold.current_sleep_broken_allowances",
+        "Evidence Required": "gold.current_evidence_required",
         "Award Scenario Rest": "gold.current_award_scenario_rest_findings",
         "Rest Break Findings": "gold.current_rest_break_findings",
         "Supplemental Entitlements": "gold.current_event_adjustments",
@@ -64,6 +69,19 @@ try:
 
     stage = "STEP 3 — Define payroll and Award analysis measures"
     print(stage)
+
+    component_measures = {
+        "Award Components": ("COUNTROWS('__TABLE__')", "0", "Award calculation or review components in the current reporting area."),
+        "Criterion Hours": ("SUM('__TABLE__'[hours])", "0.00", "Hours associated with the selected Award components."),
+        "Criterion Amount": ("SUM('__TABLE__'[criterion_amount])", "$#,##0.00;($#,##0.00)", "Calculated monetary amount for the selected Award components where applicable."),
+    }
+
+    def component_table_measures(table_name):
+        return {
+            name: (expr.replace("__TABLE__", table_name), fmt, description)
+            for name, (expr, fmt, description) in component_measures.items()
+        }
+
     MEASURES = {
         "Pay Period Reconciliation": {
             "Employees Audited": ("DISTINCTCOUNT('Pay Period Reconciliation'[employee_id])", "0", "Distinct employees in the current successful audit snapshot."),
@@ -93,16 +111,21 @@ try:
             "At Minimum Rate Rows": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[base_rate_status] = \"AT_MINIMUM\")", "0", "Shift rows where the supplied base rate equals the selected SCHADS minimum within tolerance."),
             "Above Minimum Rate Rows": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[base_rate_status] = \"ABOVE_MINIMUM\")", "0", "Shift rows where the supplied base rate exceeds the selected SCHADS minimum."),
             "Rate Not Supplied Rows": ("CALCULATE(COUNTROWS('Award Scenarios'), ISBLANK('Award Scenarios'[supplied_base_hourly_rate]))", "0", "Shift rows without an employee base rate supplied for that effective date."),
-            "Base Rate Shortfall Estimate": ("SUMX(FILTER('Award Scenarios', 'Award Scenarios'[base_rate_variance] < 0), -'Award Scenarios'[base_rate_variance] * 'Award Scenarios'[worked_hours])", "$#,##0.00;($#,##0.00)", "Simple base-rate-only shortfall for worked hours. Penalties, overtime and other components are calculated separately in the scenario entitlement."),
+            "Base Rate Shortfall Estimate": ("SUMX(FILTER('Award Scenarios', 'Award Scenarios'[base_rate_variance] < 0), -'Award Scenarios'[base_rate_variance] * 'Award Scenarios'[worked_hours])", "$#,##0.00;($#,##0.00)", "Base-rate-only shortfall for worked hours. Penalties, overtime and other components are calculated separately in the scenario entitlement."),
             "Explicit Shift Underpaid": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[scenario_status] = \"UNDERPAID\")", "0", "Scenario shift rows underpaid where an explicit actual shift amount was supplied."),
             "Explicit Shift Shortfall": ("SUMX(FILTER('Award Scenarios', 'Award Scenarios'[scenario_status] = \"UNDERPAID\"), -'Award Scenarios'[shift_variance_actual_minus_expected])", "$#,##0.00;($#,##0.00)", "Scenario shortfall where an explicit actual shift amount was supplied."),
             "Scenario Review Shifts": ("CALCULATE(COUNTROWS('Award Scenarios'), 'Award Scenarios'[entitlement_status] = \"REQUIRES_REVIEW\")", "0", "Scenario shift rows requiring additional evidence."),
         },
         "Award Criteria": {
-            "Award Components": ("COUNTROWS('Award Criteria')", "0", "Calculated or review components exposed by Award criteria."),
-            "Criterion Hours": ("SUM('Award Criteria'[hours])", "0.00", "Hours associated with the selected Award components."),
-            "Criterion Amount": ("SUM('Award Criteria'[criterion_amount])", "$#,##0.00;($#,##0.00)", "Calculated monetary amount for the selected Award components where applicable."),
+            **component_table_measures("Award Criteria"),
             "Evidence Findings": ("CALCULATE(COUNTROWS('Award Criteria'), 'Award Criteria'[criterion] = \"EVIDENCE_OR_RULE_REVIEW\")", "0", "Criteria requiring evidence or review rather than an assumed fact."),
+        },
+        "Penalties & Shiftwork": component_table_measures("Penalties & Shiftwork"),
+        "Overtime Criteria": component_table_measures("Overtime Criteria"),
+        "Meal Break Criteria": component_table_measures("Meal Break Criteria"),
+        "Sleepover Broken Shift & Allowances": component_table_measures("Sleepover Broken Shift & Allowances"),
+        "Evidence Required": {
+            "Evidence Findings": ("COUNTROWS('Evidence Required')", "0", "Employee/shift scenario facts requiring evidence or review."),
         },
         "Award Scenario Rest": {
             "Scenario Rest Intervals": ("COUNTROWS('Award Scenario Rest')", "0", "Rest intervals assessed for the selected Award scenario."),
