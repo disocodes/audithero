@@ -22,21 +22,22 @@ from schads_audit.databricks_io import write_df, create_views
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 1. Set the input folder and audit dates
-# MAGIC
-# MAGIC If `input_root` is blank, AuditHero reads `/Volumes/<catalog>/bronze/landing/input`. The start and end dates define the timesheet evidence included in this audit run.
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("input_root", "")
 dbutils.widgets.text("start_date", "2023-07-01")
 dbutils.widgets.text("end_date", "2026-06-30")
+dbutils.widgets.text("run_type", "MANUAL_FILE")
 
 catalog = dbutils.widgets.get("catalog")
 input_root = dbutils.widgets.get("input_root").strip() or f"/Volumes/{catalog}/bronze/landing/input"
 start_date = dbutils.widgets.get("start_date")
 end_date = dbutils.widgets.get("end_date")
+run_type = dbutils.widgets.get("run_type").strip() or "MANUAL_FILE"
 
 print(f"Input folder: {input_root}")
 print(f"Audit window: {start_date} to {end_date}")
+print(f"Run type: {run_type}")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 2. Run the file-based audit engine
@@ -66,7 +67,7 @@ for frame in (
         frame["audit_run_id"] = run_id
         frame["audit_window_start"] = start_date
         frame["audit_window_end"] = end_date
-        frame["run_type"] = "MANUAL_FILE"
+        frame["run_type"] = run_type
         frame["run_finished_at"] = finished
 # COMMAND ----------
 # MAGIC %md
@@ -106,7 +107,7 @@ actual_source = "FILES" if result.get("actual_pay_usable", False) else "NONE"
 run = pd.DataFrame([
     {
         "audit_run_id": run_id,
-        "run_type": "MANUAL_FILE",
+        "run_type": run_type,
         "audit_window_start": start_date,
         "audit_window_end": end_date,
         "started_at": started,
@@ -118,7 +119,7 @@ run = pd.DataFrame([
         "underpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "UNDERPAID").sum()),
         "overpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "OVERPAID").sum()),
         "review_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()),
-        "message": f"manual input={input_root}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}",
+        "message": f"input={input_root}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}",
     }
 ])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
