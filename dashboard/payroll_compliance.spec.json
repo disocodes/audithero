@@ -1,213 +1,200 @@
 {
   "datasets": [
-    {
-      "name": "investigation",
-      "display_name": "Audit Investigation",
-      "query": "SELECT * FROM v_audit_investigation_latest"
-    },
-    {
-      "name": "rest",
-      "display_name": "Rest Between Work",
-      "query": "SELECT finding_id,finding_type,employee_id,employee_name,previous_timesheet_ids,next_timesheet_ids,previous_shift_end,next_shift_start,required_rest_hours,actual_rest_hours,rest_shortfall_hours,sleepover_adjacent_exception_eligible,sleepover_8h_agreement,sleepover_blocked_rest,historical_sleepover_interaction,overtime_rest_rule_applies,employer_instructed_resume,release_datetime,double_time_repriced_hours,double_time_topup,paid_absence_rostered_hours,payment_status,status,clause,overtime_clause,evidence_reference,notes,audit_run_id,run_type FROM v_rest_break_findings_latest ORDER BY next_shift_start DESC"
-    },
-    {
-      "name": "runs",
-      "display_name": "Audit Runs",
-      "query": "SELECT audit_run_id,run_type,audit_window_start,audit_window_end,finished_at,status,actual_pay_source,employees,timesheets,underpaid_periods,overpaid_periods,review_periods,message FROM v_audit_runs ORDER BY finished_at DESC"
-    },
-    {
-      "name": "readiness",
-      "display_name": "Readiness",
-      "query": "SELECT finding_type,source_key,status,detail,checked_at FROM v_readiness_findings ORDER BY checked_at DESC"
-    },
-    {
-      "name": "rules",
-      "display_name": "Rule Coverage",
-      "query": "SELECT pack_type,pack_id,operative_date,verification_status,source_publisher,source_url FROM v_rule_coverage ORDER BY pack_type,operative_date"
-    }
+    {"name":"investigation","display_name":"Definitive Audit Investigation","query":"SELECT * FROM v_audit_investigation_latest"},
+    {"name":"scenario","display_name":"SCHADS Award Scenarios","query":"SELECT * FROM v_award_scenario_detail_latest"},
+    {"name":"criteria","display_name":"SCHADS Award Criteria","query":"SELECT * FROM v_award_criteria_detail_latest"},
+    {"name":"penalties","display_name":"Penalties and Shiftwork","query":"SELECT * FROM v_award_criteria_detail_latest WHERE criterion_group IN ('PENALTIES_AND_SHIFTWORK','PUBLIC_HOLIDAYS','MINIMUM_ENGAGEMENT')"},
+    {"name":"overtime","display_name":"Overtime Criteria","query":"SELECT * FROM v_award_criteria_detail_latest WHERE criterion_group='OVERTIME'"},
+    {"name":"meal_breaks","display_name":"Meal Break Criteria","query":"SELECT * FROM v_award_criteria_detail_latest WHERE criterion_group='MEAL_BREAKS'"},
+    {"name":"sleep_broken","display_name":"Sleepover Broken Shift and Minimum Engagement","query":"SELECT * FROM v_award_criteria_detail_latest WHERE criterion_group IN ('SLEEPOVER','BROKEN_SHIFT','MINIMUM_ENGAGEMENT','ALLOWANCES')"},
+    {"name":"evidence","display_name":"Evidence Required","query":"SELECT * FROM v_award_criteria_detail_latest WHERE criterion='EVIDENCE_OR_RULE_REVIEW'"},
+    {"name":"scenario_rest","display_name":"Scenario Rest Between Work","query":"SELECT * FROM v_award_scenario_rest_findings_latest ORDER BY next_shift_start DESC"},
+    {"name":"reconciliation","display_name":"Definitive Actual versus Expected","query":"SELECT * FROM v_reconciliation_latest"},
+    {"name":"runs","display_name":"Audit Runs","query":"SELECT audit_run_id,run_type,audit_window_start,audit_window_end,finished_at,status,actual_pay_source,employees,timesheets,underpaid_periods,overpaid_periods,review_periods,message FROM v_audit_runs ORDER BY finished_at DESC"},
+    {"name":"readiness","display_name":"Readiness","query":"SELECT finding_type,source_key,status,detail,checked_at FROM v_readiness_findings ORDER BY checked_at DESC"},
+    {"name":"rules","display_name":"Rule Coverage","query":"SELECT pack_type,pack_id,operative_date,verification_status,source_publisher,source_url FROM v_rule_coverage ORDER BY pack_type,operative_date"}
   ],
   "pages": [
     {
-      "name": "global_filters",
-      "display_name": "Global Filters",
-      "page_type": "PAGE_TYPE_GLOBAL_FILTERS",
-      "widgets": [
-        {"type":"filter","name":"date_filter","dataset":"investigation","field":"pay_period_start","title":"Pay Period","filter_type":"date-range","position":[0,0,2,1]},
-        {"type":"filter","name":"status_filter","dataset":"investigation","field":"reconciliation_status","title":"Audit Status","selection":"multi","position":[2,0,2,1]},
-        {"type":"filter","name":"employee_filter","dataset":"investigation","field":"employee_name","title":"Employee","selection":"multi","position":[4,0,2,1]},
-        {"type":"filter","name":"employment_filter","dataset":"investigation","field":"employment_type","title":"Employment Type","selection":"multi","position":[0,1,2,1]},
-        {"type":"filter","name":"classification_filter","dataset":"investigation","field":"classification_code","title":"Classification","selection":"multi","position":[2,1,2,1]},
-        {"type":"filter","name":"work_group_filter","dataset":"investigation","field":"work_group","title":"Work Group","selection":"multi","position":[4,1,1,1]},
-        {"type":"filter","name":"state_filter","dataset":"investigation","field":"state","title":"State","selection":"multi","position":[5,1,1,1]}
+      "name":"global_filters","display_name":"Award Scenario Filters","page_type":"PAGE_TYPE_GLOBAL_FILTERS",
+      "widgets":[
+        {"type":"filter","name":"scenario_date_filter","dataset":"scenario","field":"shift_start","title":"Shift Date","filter_type":"date-range","position":[0,0,2,1]},
+        {"type":"filter","name":"scenario_employee_filter","dataset":"scenario","field":"employee_name","title":"Employee","selection":"multi","position":[2,0,2,1]},
+        {"type":"filter","name":"scenario_family_filter","dataset":"scenario","field":"classification_family","title":"SCHADS Stream","selection":"multi","position":[4,0,2,1]},
+        {"type":"filter","name":"scenario_level_filter","dataset":"scenario","field":"scenario_level","title":"Level","selection":"multi","position":[0,1,1,1]},
+        {"type":"filter","name":"scenario_paypoint_filter","dataset":"scenario","field":"scenario_pay_point","title":"Pay Point","selection":"multi","position":[1,1,1,1]},
+        {"type":"filter","name":"scenario_emp_type_filter","dataset":"scenario","field":"scenario_employment_type","title":"Employment Type","selection":"multi","position":[2,1,2,1]},
+        {"type":"filter","name":"scenario_rate_status_filter","dataset":"scenario","field":"base_rate_status","title":"Base Rate Status","selection":"multi","position":[4,1,1,1]},
+        {"type":"filter","name":"scenario_status_filter","dataset":"scenario","field":"scenario_status","title":"Scenario Status","selection":"multi","position":[5,1,1,1]}
       ]
     },
     {
-      "name": "overview",
-      "display_name": "Interactive Overview",
-      "widgets": [
-        {"type":"text","name":"overview_title","text":"## AuditHero — SCHADS Payroll Compliance\nCross-filter a chart or right-click a pay-period result to drill into the underlying shift evidence.","position":[0,0,6,1]},
-        {"type":"counter","name":"period_count","dataset":"investigation","title":"Audited Pay Periods","expression":"SUM(`pay_period_marker`)","decimals":0,"position":[0,1,1,2]},
-        {"type":"counter","name":"employee_count","dataset":"investigation","title":"Employees","expression":"COUNT(DISTINCT `employee_id`)","decimals":0,"position":[1,1,1,2]},
-        {"type":"counter","name":"review_shift_count","dataset":"investigation","title":"Review Shifts","expression":"SUM(`review_shift_marker`)","decimals":0,"position":[2,1,1,2]},
-        {"type":"counter","name":"expected_pay","dataset":"investigation","title":"Expected Pay","expression":"SUM(`period_expected_amount_once`)","format":"currency","decimals":2,"position":[3,1,1,2]},
-        {"type":"counter","name":"potential_underpayment","dataset":"investigation","title":"Potential Underpayment","expression":"SUM(`underpayment_amount_once`)","format":"currency","decimals":2,"position":[4,1,1,2]},
-        {"type":"counter","name":"potential_overpayment","dataset":"investigation","title":"Potential Overpayment","expression":"SUM(`overpayment_amount_once`)","format":"currency","decimals":2,"position":[5,1,1,2]},
-        {"type":"bar","name":"status_chart","dataset":"investigation","title":"Pay Periods by Audit Status","x":"reconciliation_status","x_title":"Audit Status","y_expression":"SUM(`pay_period_marker`)","y_name":"pay_periods","y_title":"Pay Periods","color":"reconciliation_status","position":[0,3,3,6]},
-        {"type":"bar","name":"underpayment_employee_chart","dataset":"investigation","title":"Potential Underpayment by Employee","x":"employee_name","x_title":"Employee","y_expression":"SUM(`underpayment_amount_once`)","y_name":"underpayment","y_title":"Underpayment","format":"currency","decimals":2,"orientation":"horizontal","position":[3,3,3,6]},
-        {"type":"line","name":"variance_trend","dataset":"investigation","title":"Variance Trend by Pay Period","x":"pay_period_start","x_title":"Pay Period","x_scale":"temporal","y_expression":"SUM(`variance_amount_once`)","y_name":"variance","y_title":"Variance","format":"currency","decimals":2,"position":[0,9,3,6]},
-        {"type":"bar","name":"review_classification_chart","dataset":"investigation","title":"Review Shifts by Classification","x":"classification_code","x_title":"Classification","y_expression":"SUM(`review_shift_marker`)","y_name":"review_shifts","y_title":"Review Shifts","orientation":"horizontal","position":[3,9,3,6]},
-        {
-          "type":"table","name":"period_summary","dataset":"investigation","title":"Pay Period Investigation Summary","description":"Right-click a result and choose Drill to → Employee / Pay Period Investigation.","disaggregated":false,"position":[0,15,6,10],
-          "columns":[
-            {"field":"employee_pay_period","title":"Employee / Pay Period"},
-            {"field":"employee_name","title":"Employee"},
-            {"field":"pay_period_start","title":"Period Start"},
-            {"field":"pay_period_end","title":"Period End"},
-            {"field":"reconciliation_status","title":"Audit Status"},
-            {"field":"pay_period_expected_amount","title":"Expected","kind":"number","number_format":"$0,0.00"},
-            {"field":"actual_auditable_amount","title":"Actual Auditable","kind":"number","number_format":"$0,0.00"},
-            {"field":"variance_actual_minus_expected","title":"Variance","kind":"number","number_format":"$0,0.00"},
-            {"field":"unmapped_pay_categories","title":"Unmapped Pay Categories"}
-          ]
-        }
+      "name":"award_explorer","display_name":"Award Explorer",
+      "widgets":[
+        {"type":"text","name":"award_explorer_title","text":"## SCHADS Award Explorer\nSelect an employee, stream, level, pay point and employment type. AuditHero recalculates the same supplied shifts under that scenario.","position":[0,0,6,2]},
+        {"type":"counter","name":"scenario_rows","dataset":"scenario","title":"Scenario Shift Rows","expression":"COUNT(`timesheet_id`)","decimals":0,"position":[0,2,1,2]},
+        {"type":"counter","name":"scenario_expected","dataset":"scenario","title":"Scenario Expected Pay","expression":"SUM(`expected_amount`)","format":"currency","decimals":2,"position":[1,2,1,2]},
+        {"type":"counter","name":"below_minimum","dataset":"scenario","title":"Below Minimum Rate","expression":"SUM(CASE WHEN `base_rate_status`='BELOW_MINIMUM' THEN 1 ELSE 0 END)","decimals":0,"position":[2,2,1,2]},
+        {"type":"counter","name":"scenario_reviews","dataset":"scenario","title":"Review Shifts","expression":"SUM(CASE WHEN `entitlement_status`='REQUIRES_REVIEW' THEN 1 ELSE 0 END)","decimals":0,"position":[3,2,1,2]},
+        {"type":"counter","name":"explicit_underpaid","dataset":"scenario","title":"Explicit Shift Underpaid","expression":"SUM(CASE WHEN `scenario_status`='UNDERPAID' THEN 1 ELSE 0 END)","decimals":0,"position":[4,2,1,2]},
+        {"type":"counter","name":"explicit_shortfall","dataset":"scenario","title":"Explicit Shift Shortfall","expression":"SUM(CASE WHEN `scenario_status`='UNDERPAID' THEN GREATEST(-COALESCE(`shift_variance_actual_minus_expected`,0),0) ELSE 0 END)","format":"currency","decimals":2,"position":[5,2,1,2]},
+        {"type":"bar","name":"expected_by_level","dataset":"scenario","title":"Expected Entitlement by SCHADS Level","x":"scenario_level","x_title":"Level","y_expression":"SUM(`expected_amount`)","y_name":"expected_pay","y_title":"Expected Pay","format":"currency","decimals":2,"position":[0,4,3,6]},
+        {"type":"bar","name":"rate_status_employee","dataset":"scenario","title":"Base-Rate Findings by Employee","x":"employee_name","x_title":"Employee","y_expression":"SUM(CASE WHEN `base_rate_status`='BELOW_MINIMUM' THEN 1 ELSE 0 END)","y_name":"below_minimum_rows","y_title":"Below-Minimum Shifts","orientation":"horizontal","position":[3,4,3,6]},
+        {"type":"table","name":"scenario_shift_table","dataset":"scenario","title":"Scenario Shift Results","description":"Filter to the intended SCHADS scenario. Actual shift variance is populated only when an explicit actual shift amount was supplied.","position":[0,10,6,12],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"shift_start","title":"Shift Start"},{"field":"shift_end","title":"Shift End"},{"field":"worked_hours","title":"Hours","kind":"number"},{"field":"classification_family","title":"SCHADS Stream"},{"field":"scenario_level","title":"Level","kind":"integer"},{"field":"scenario_pay_point","title":"Pay Point","kind":"integer"},{"field":"scenario_employment_type","title":"Employment Type"},{"field":"base_hourly_rate","title":"Award Base Rate","kind":"number","number_format":"$0.00"},{"field":"supplied_base_hourly_rate","title":"Supplied Base Rate","kind":"number","number_format":"$0.00"},{"field":"base_rate_status","title":"Base Rate Status"},{"field":"expected_amount","title":"Expected Shift Pay","kind":"number","number_format":"$0,0.00"},{"field":"observed_shift_pay","title":"Explicit Actual Shift Pay","kind":"number","number_format":"$0,0.00"},{"field":"scenario_status","title":"Scenario Status"},{"field":"review_flags","title":"Review Flags"}
+        ]}
       ]
     },
     {
-      "name": "investigation",
-      "display_name": "Employee / Pay Period Investigation",
-      "widgets": [
-        {"type":"text","name":"investigation_title","text":"## Employee / Pay Period Investigation\nUse drill-through from Overview or select a specific employee/pay period below.","position":[0,0,6,1]},
-        {"type":"filter","name":"pay_period_filter","dataset":"investigation","field":"employee_pay_period","title":"Employee + Pay Period","selection":"single","position":[0,1,3,1]},
-        {"type":"filter","name":"entitlement_status_filter","dataset":"investigation","field":"entitlement_status","title":"Shift Status","selection":"multi","position":[3,1,1,1]},
-        {"type":"filter","name":"weekday_filter","dataset":"investigation","field":"weekday_name","title":"Weekday","selection":"multi","position":[4,1,1,1]},
-        {"type":"filter","name":"run_type_filter","dataset":"investigation","field":"run_type","title":"Run Type","selection":"multi","position":[5,1,1,1]},
-        {"type":"counter","name":"investigation_shifts","dataset":"investigation","title":"Shifts","expression":"COUNT(`timesheet_id`)","decimals":0,"position":[0,2,1,2]},
-        {"type":"counter","name":"investigation_hours","dataset":"investigation","title":"Worked Hours","expression":"SUM(`worked_hours`)","decimals":2,"position":[1,2,1,2]},
-        {"type":"counter","name":"investigation_shift_expected","dataset":"investigation","title":"Shift Expected","expression":"SUM(`shift_expected_amount`)","format":"currency","decimals":2,"position":[2,2,1,2]},
-        {"type":"counter","name":"investigation_period_expected","dataset":"investigation","title":"Period Expected","expression":"SUM(`period_expected_amount_once`)","format":"currency","decimals":2,"position":[3,2,1,2]},
-        {"type":"counter","name":"investigation_actual","dataset":"investigation","title":"Actual Auditable","expression":"SUM(`actual_auditable_amount_once`)","format":"currency","decimals":2,"position":[4,2,1,2]},
-        {"type":"counter","name":"investigation_variance","dataset":"investigation","title":"Variance","expression":"SUM(`variance_amount_once`)","format":"currency","decimals":2,"position":[5,2,1,2]},
-        {"type":"bar","name":"weekday_hours_chart","dataset":"investigation","title":"Worked Hours by Weekday","x":"weekday_name","x_title":"Weekday","y_expression":"SUM(`worked_hours`)","y_name":"worked_hours_total","y_title":"Hours","position":[0,4,3,6]},
-        {"type":"bar","name":"status_expected_chart","dataset":"investigation","title":"Expected Entitlement by Shift Status","x":"entitlement_status","x_title":"Shift Status","y_expression":"SUM(`shift_expected_amount`)","y_name":"expected_total","y_title":"Expected","format":"currency","decimals":2,"color":"entitlement_status","position":[3,4,3,6]},
-        {
-          "type":"table","name":"shift_detail","dataset":"investigation","title":"Underlying Shift Evidence","position":[0,10,6,11],
-          "columns":[
-            {"field":"timesheet_id","title":"Timesheet ID"},
-            {"field":"shift_start","title":"Shift Start"},
-            {"field":"shift_end","title":"Shift End"},
-            {"field":"worked_hours","title":"Hours","kind":"number","number_format":"0.00"},
-            {"field":"employment_type","title":"Employment Type"},
-            {"field":"classification_code","title":"Classification"},
-            {"field":"work_group","title":"Work Group"},
-            {"field":"base_hourly_rate","title":"Base Rate","kind":"number","number_format":"$0.00"},
-            {"field":"shift_expected_amount","title":"Expected","kind":"number","number_format":"$0,0.00"},
-            {"field":"entitlement_status","title":"Entitlement Status"},
-            {"field":"review_flags","title":"Review Flags"}
-          ]
-        },
-        {
-          "type":"table","name":"calculation_evidence","dataset":"investigation","title":"Calculation and Instrument Evidence","description":"Expand Calculation Evidence to inspect the components used by the deterministic audit engine.","position":[0,21,6,11],
-          "columns":[
-            {"field":"timesheet_id","title":"Timesheet ID"},
-            {"field":"award_reference_date","title":"Award Reference Date"},
-            {"field":"industrial_instrument_type","title":"Instrument Type"},
-            {"field":"industrial_instrument_name","title":"Instrument"},
-            {"field":"instrument_reference","title":"Instrument Reference"},
-            {"field":"part_time_pattern_status","title":"Part-time Pattern Status"},
-            {"field":"review_flags","title":"Review Flags"},
-            {"field":"calculation_evidence","title":"Calculation Evidence","kind":"json"}
-          ]
-        }
+      "name":"classification_rates","display_name":"Classification & Historical Rates",
+      "widgets":[
+        {"type":"text","name":"rates_title","text":"## Classification and Historical Rate Audit\nEach supplied employee rate is aligned to the shift date and compared with the effective SCHADS minimum for the selected stream, level and pay point.","position":[0,0,6,2]},
+        {"type":"counter","name":"rate_rows","dataset":"scenario","title":"Shift Rate Checks","expression":"COUNT(`timesheet_id`)","decimals":0,"position":[0,2,1,2]},
+        {"type":"counter","name":"rate_below","dataset":"scenario","title":"Below Minimum","expression":"SUM(CASE WHEN `base_rate_status`='BELOW_MINIMUM' THEN 1 ELSE 0 END)","decimals":0,"position":[1,2,1,2]},
+        {"type":"counter","name":"rate_at","dataset":"scenario","title":"At Minimum","expression":"SUM(CASE WHEN `base_rate_status`='AT_MINIMUM' THEN 1 ELSE 0 END)","decimals":0,"position":[2,2,1,2]},
+        {"type":"counter","name":"rate_above","dataset":"scenario","title":"Above Minimum","expression":"SUM(CASE WHEN `base_rate_status`='ABOVE_MINIMUM' THEN 1 ELSE 0 END)","decimals":0,"position":[3,2,1,2]},
+        {"type":"counter","name":"rate_missing","dataset":"scenario","title":"Rate Not Supplied","expression":"SUM(CASE WHEN `supplied_base_hourly_rate` IS NULL THEN 1 ELSE 0 END)","decimals":0,"position":[4,2,1,2]},
+        {"type":"counter","name":"base_shortfall","dataset":"scenario","title":"Base-Rate Shortfall Estimate","expression":"SUM(CASE WHEN `base_rate_variance` < 0 THEN -`base_rate_variance` * COALESCE(`worked_hours`,0) ELSE 0 END)","format":"currency","decimals":2,"position":[5,2,1,2]},
+        {"type":"line","name":"award_rate_history","dataset":"scenario","title":"Award Minimum Rate over Shift Dates","x":"shift_start","x_title":"Shift Date","x_scale":"temporal","y_expression":"AVG(`base_hourly_rate`)","y_name":"award_rate","y_title":"Award Base Rate","format":"currency","decimals":2,"position":[0,4,3,6]},
+        {"type":"line","name":"supplied_rate_history","dataset":"scenario","title":"Supplied Employee Rate over Shift Dates","x":"shift_start","x_title":"Shift Date","x_scale":"temporal","y_expression":"AVG(`supplied_base_hourly_rate`)","y_name":"supplied_rate","y_title":"Supplied Base Rate","format":"currency","decimals":2,"position":[3,4,3,6]},
+        {"type":"table","name":"rate_history_table","dataset":"scenario","title":"Effective-Dated Rate History by Shift","position":[0,10,6,13],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"shift_start","title":"Shift Date"},{"field":"source_rate_effective_from","title":"Rate Effective From"},{"field":"source_rate_reference","title":"Rate Source"},{"field":"source_classification_name","title":"Supplied Classification"},{"field":"classification_family","title":"SCHADS Stream"},{"field":"scenario_level","title":"Level","kind":"integer"},{"field":"scenario_pay_point","title":"Pay Point","kind":"integer"},{"field":"supplied_base_hourly_rate","title":"Supplied Rate","kind":"number","number_format":"$0.00"},{"field":"base_hourly_rate","title":"Award Minimum","kind":"number","number_format":"$0.00"},{"field":"base_rate_variance","title":"Rate Difference","kind":"number","number_format":"$0.00"},{"field":"base_rate_status","title":"Rate Status"}
+        ]}
       ]
     },
     {
-      "name": "rest_breaks",
-      "display_name": "Rest & Breaks",
-      "widgets": [
-        {"type":"text","name":"rest_title","text":"## Rest Between Work\nReview effective-dated 10-hour and agreed 8-hour rest requirements and evidence-backed rest-after-overtime payment consequences.","position":[0,0,6,1]},
-        {"type":"filter","name":"rest_employee_filter","dataset":"rest","field":"employee_name","title":"Employee","selection":"multi","position":[0,1,2,1]},
-        {"type":"filter","name":"rest_status_filter","dataset":"rest","field":"status","title":"Finding Status","selection":"multi","position":[2,1,1,1]},
-        {"type":"filter","name":"rest_payment_filter","dataset":"rest","field":"payment_status","title":"Payment Status","selection":"multi","position":[3,1,1,1]},
-        {"type":"filter","name":"rest_overtime_filter","dataset":"rest","field":"overtime_rest_rule_applies","title":"Overtime Rest Rule","selection":"multi","position":[4,1,1,1]},
-        {"type":"filter","name":"rest_run_filter","dataset":"rest","field":"run_type","title":"Run Type","selection":"multi","position":[5,1,1,1]},
-        {"type":"counter","name":"rest_intervals","dataset":"rest","title":"Intervals Assessed","expression":"COUNT(`finding_id`)","decimals":0,"position":[0,2,1,2]},
-        {"type":"counter","name":"short_rest_intervals","dataset":"rest","title":"Short Rest","expression":"SUM(CASE WHEN `rest_shortfall_hours` > 0 THEN 1 ELSE 0 END)","decimals":0,"position":[1,2,1,2]},
-        {"type":"counter","name":"rest_reviews","dataset":"rest","title":"Requires Review","expression":"SUM(CASE WHEN `status` = 'REQUIRES_REVIEW' THEN 1 ELSE 0 END)","decimals":0,"position":[2,2,1,2]},
-        {"type":"counter","name":"rest_overtime_cases","dataset":"rest","title":"Overtime Rest Cases","expression":"SUM(CASE WHEN `overtime_rest_rule_applies` THEN 1 ELSE 0 END)","decimals":0,"position":[3,2,1,2]},
-        {"type":"counter","name":"rest_repriced_hours","dataset":"rest","title":"Repriced Hours","expression":"SUM(`double_time_repriced_hours`)","decimals":2,"position":[4,2,1,2]},
-        {"type":"counter","name":"rest_topup","dataset":"rest","title":"Double-Time Top-up","expression":"SUM(`double_time_topup`)","format":"currency","decimals":2,"position":[5,2,1,2]},
-        {"type":"bar","name":"rest_status_chart","dataset":"rest","title":"Rest Intervals by Status","x":"status","x_title":"Status","y_expression":"COUNT(`finding_id`)","y_name":"intervals","y_title":"Intervals","color":"status","position":[0,4,3,6]},
-        {"type":"bar","name":"rest_employee_shortfall","dataset":"rest","title":"Rest Shortfall Hours by Employee","x":"employee_name","x_title":"Employee","y_expression":"SUM(`rest_shortfall_hours`)","y_name":"shortfall_hours","y_title":"Shortfall Hours","orientation":"horizontal","position":[3,4,3,6]},
-        {
-          "type":"table","name":"rest_findings_table","dataset":"rest","title":"Rest Between Work Findings","description":"General short-rest findings are compliance findings. A monetary top-up is shown only where the applicable payment rule and supporting evidence allow AuditHero to calculate it.","position":[0,10,6,13],
-          "columns":[
-            {"field":"employee_name","title":"Employee"},
-            {"field":"previous_shift_end","title":"Previous Work End"},
-            {"field":"next_shift_start","title":"Next Work Start"},
-            {"field":"required_rest_hours","title":"Required Rest","kind":"number","number_format":"0.00"},
-            {"field":"actual_rest_hours","title":"Actual Rest","kind":"number","number_format":"0.00"},
-            {"field":"rest_shortfall_hours","title":"Shortfall","kind":"number","number_format":"0.00"},
-            {"field":"status","title":"Finding Status"},
-            {"field":"sleepover_adjacent_exception_eligible","title":"8h Exception Eligible","kind":"boolean"},
-            {"field":"sleepover_8h_agreement","title":"8h Agreement","kind":"boolean"},
-            {"field":"overtime_rest_rule_applies","title":"Overtime Rest Rule","kind":"boolean"},
-            {"field":"employer_instructed_resume","title":"Employer Instructed Resume","kind":"boolean"},
-            {"field":"release_datetime","title":"Release Time"},
-            {"field":"double_time_repriced_hours","title":"Repriced Hours","kind":"number","number_format":"0.00"},
-            {"field":"double_time_topup","title":"Double-Time Top-up","kind":"number","number_format":"$0,0.00"},
-            {"field":"paid_absence_rostered_hours","title":"Rostered Hours in Paid Absence Window","kind":"number","number_format":"0.00"},
-            {"field":"payment_status","title":"Payment Status"},
-            {"field":"clause","title":"Rest Clause"},
-            {"field":"overtime_clause","title":"Overtime Clause"},
-            {"field":"evidence_reference","title":"Evidence Reference"},
-            {"field":"notes","title":"Notes"}
-          ]
-        }
+      "name":"penalties_shiftwork","display_name":"Penalties & Shiftwork",
+      "widgets":[
+        {"type":"text","name":"penalties_title","text":"## Penalties, Shiftwork, Public Holidays and Minimum Engagement\nSelect the scenario and inspect the Award components calculated from each supplied shift timestamp.","position":[0,0,6,2]},
+        {"type":"filter","name":"pen_employee","dataset":"penalties","field":"employee_name","title":"Employee","selection":"multi","position":[0,2,2,1]},
+        {"type":"filter","name":"pen_family","dataset":"penalties","field":"classification_family","title":"SCHADS Stream","selection":"multi","position":[2,2,1,1]},
+        {"type":"filter","name":"pen_level","dataset":"penalties","field":"scenario_level","title":"Level","selection":"multi","position":[3,2,1,1]},
+        {"type":"filter","name":"pen_paypoint","dataset":"penalties","field":"scenario_pay_point","title":"Pay Point","selection":"multi","position":[4,2,1,1]},
+        {"type":"filter","name":"pen_type","dataset":"penalties","field":"scenario_employment_type","title":"Employment Type","selection":"multi","position":[5,2,1,1]},
+        {"type":"counter","name":"penalty_components","dataset":"penalties","title":"Award Components","expression":"COUNT(`criterion`)","decimals":0,"position":[0,3,1,2]},
+        {"type":"counter","name":"penalty_hours","dataset":"penalties","title":"Component Hours","expression":"SUM(COALESCE(`hours`,0))","decimals":2,"position":[1,3,1,2]},
+        {"type":"counter","name":"penalty_amount","dataset":"penalties","title":"Calculated Component Amount","expression":"SUM(COALESCE(`criterion_amount`,0))","format":"currency","decimals":2,"position":[2,3,2,2]},
+        {"type":"bar","name":"penalty_by_component","dataset":"penalties","title":"Calculated Amount by Award Component","x":"criterion","x_title":"Award Component","y_expression":"SUM(COALESCE(`criterion_amount`,0))","y_name":"component_amount","y_title":"Calculated Amount","format":"currency","decimals":2,"orientation":"horizontal","position":[0,5,6,7]},
+        {"type":"table","name":"penalty_detail","dataset":"penalties","title":"Penalty and Shiftwork Calculation Detail","position":[0,12,6,12],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"shift_start","title":"Shift Start"},{"field":"scenario_classification_code","title":"Classification"},{"field":"scenario_employment_type","title":"Employment Type"},{"field":"criterion_group","title":"Criteria Group"},{"field":"criterion","title":"Component"},{"field":"day_type","title":"Day Type"},{"field":"shift_type","title":"Shift Type"},{"field":"hours","title":"Hours","kind":"number"},{"field":"multiplier","title":"Multiplier","kind":"number"},{"field":"effective_hourly_rate","title":"Effective Rate","kind":"number","number_format":"$0.00"},{"field":"criterion_amount","title":"Amount","kind":"number","number_format":"$0,0.00"},{"field":"clause","title":"Clause"},{"field":"detail","title":"Calculation Evidence","kind":"json"}
+        ]}
       ]
     },
     {
-      "name": "controls",
-      "display_name": "Controls & Rules",
-      "widgets": [
-        {"type":"text","name":"controls_title","text":"## Audit Operations, Readiness & Rule Coverage","position":[0,0,6,1]},
-        {
-          "type":"table","name":"runs_table","dataset":"runs","title":"Audit Run History","position":[0,1,6,9],
-          "columns":[
-            {"field":"audit_run_id","title":"Audit Run"},
-            {"field":"run_type","title":"Run Type"},
-            {"field":"audit_window_start","title":"Window Start"},
-            {"field":"audit_window_end","title":"Window End"},
-            {"field":"finished_at","title":"Finished"},
-            {"field":"status","title":"Run Status"},
-            {"field":"actual_pay_source","title":"Actual Pay Source"},
-            {"field":"employees","title":"Employees","kind":"integer"},
-            {"field":"timesheets","title":"Timesheets","kind":"integer"},
-            {"field":"underpaid_periods","title":"Underpaid","kind":"integer"},
-            {"field":"review_periods","title":"Review","kind":"integer"},
-            {"field":"message","title":"Message"}
-          ]
-        },
-        {
-          "type":"table","name":"readiness_table","dataset":"readiness","title":"Readiness Findings","position":[0,10,6,8],
-          "columns":[
-            {"field":"finding_type","title":"Finding Type"},
-            {"field":"source_key","title":"Source"},
-            {"field":"status","title":"Status"},
-            {"field":"detail","title":"Detail"},
-            {"field":"checked_at","title":"Checked"}
-          ]
-        },
-        {
-          "type":"table","name":"rules_table","dataset":"rules","title":"SCHADS Rule Coverage","position":[0,18,6,9],
-          "columns":[
-            {"field":"pack_type","title":"Pack Type"},
-            {"field":"pack_id","title":"Pack ID"},
-            {"field":"operative_date","title":"Operative Date"},
-            {"field":"verification_status","title":"Verification"},
-            {"field":"source_publisher","title":"Publisher"},
-            {"field":"source_url","title":"Source URL"}
-          ]
-        }
+      "name":"overtime_page","display_name":"Overtime",
+      "widgets":[
+        {"type":"text","name":"overtime_title","text":"## Overtime Audit\nReview daily, roster-based and period overtime calculations for each SCHADS scenario. Missing roster or agreement evidence is shown for review rather than silently assumed.","position":[0,0,6,2]},
+        {"type":"filter","name":"ot_employee","dataset":"overtime","field":"employee_name","title":"Employee","selection":"multi","position":[0,2,2,1]},
+        {"type":"filter","name":"ot_family","dataset":"overtime","field":"classification_family","title":"SCHADS Stream","selection":"multi","position":[2,2,1,1]},
+        {"type":"filter","name":"ot_level","dataset":"overtime","field":"scenario_level","title":"Level","selection":"multi","position":[3,2,1,1]},
+        {"type":"filter","name":"ot_paypoint","dataset":"overtime","field":"scenario_pay_point","title":"Pay Point","selection":"multi","position":[4,2,1,1]},
+        {"type":"filter","name":"ot_type","dataset":"overtime","field":"scenario_employment_type","title":"Employment Type","selection":"multi","position":[5,2,1,1]},
+        {"type":"counter","name":"ot_components","dataset":"overtime","title":"Overtime Components","expression":"COUNT(`criterion`)","decimals":0,"position":[0,3,1,2]},
+        {"type":"counter","name":"ot_hours","dataset":"overtime","title":"Overtime Hours","expression":"SUM(COALESCE(`hours`,0))","decimals":2,"position":[1,3,1,2]},
+        {"type":"counter","name":"ot_amount","dataset":"overtime","title":"Overtime Amount","expression":"SUM(COALESCE(`criterion_amount`,0))","format":"currency","decimals":2,"position":[2,3,2,2]},
+        {"type":"bar","name":"ot_employee_chart","dataset":"overtime","title":"Overtime Amount by Employee","x":"employee_name","x_title":"Employee","y_expression":"SUM(COALESCE(`criterion_amount`,0))","y_name":"overtime_amount","y_title":"Overtime Amount","format":"currency","decimals":2,"orientation":"horizontal","position":[0,5,6,7]},
+        {"type":"table","name":"ot_detail","dataset":"overtime","title":"Overtime Calculation Detail","position":[0,12,6,12],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"shift_start","title":"Shift Start"},{"field":"scenario_classification_code","title":"Classification"},{"field":"scenario_employment_type","title":"Employment Type"},{"field":"criterion","title":"Overtime Rule"},{"field":"hours","title":"Hours","kind":"number"},{"field":"multiplier","title":"Multiplier","kind":"number"},{"field":"effective_hourly_rate","title":"Overtime Rate","kind":"number","number_format":"$0.00"},{"field":"criterion_amount","title":"Amount","kind":"number","number_format":"$0,0.00"},{"field":"clause","title":"Clause"},{"field":"detail","title":"Calculation Evidence","kind":"json"}
+        ]}
+      ]
+    },
+    {
+      "name":"rest_breaks","display_name":"Rest & Meal Breaks",
+      "widgets":[
+        {"type":"text","name":"rest_title","text":"## Rest and Meal Break Audit\nAuditHero identifies insufficient rest between work from shift timestamps. Monetary consequences are calculated where the Award rule and supplied evidence support them.","position":[0,0,6,2]},
+        {"type":"filter","name":"rest_employee","dataset":"scenario_rest","field":"employee_name","title":"Employee","selection":"multi","position":[0,2,2,1]},
+        {"type":"filter","name":"rest_level","dataset":"scenario_rest","field":"scenario_level","title":"Level","selection":"multi","position":[2,2,1,1]},
+        {"type":"filter","name":"rest_paypoint","dataset":"scenario_rest","field":"scenario_pay_point","title":"Pay Point","selection":"multi","position":[3,2,1,1]},
+        {"type":"filter","name":"rest_type","dataset":"scenario_rest","field":"scenario_employment_type","title":"Employment Type","selection":"multi","position":[4,2,1,1]},
+        {"type":"filter","name":"rest_status","dataset":"scenario_rest","field":"status","title":"Finding Status","selection":"multi","position":[5,2,1,1]},
+        {"type":"counter","name":"rest_intervals","dataset":"scenario_rest","title":"Intervals Assessed","expression":"COUNT(`finding_id`)","decimals":0,"position":[0,3,1,2]},
+        {"type":"counter","name":"short_rest","dataset":"scenario_rest","title":"Short Rest","expression":"SUM(CASE WHEN `rest_shortfall_hours` > 0 THEN 1 ELSE 0 END)","decimals":0,"position":[1,3,1,2]},
+        {"type":"counter","name":"rest_shortfall","dataset":"scenario_rest","title":"Rest Shortfall Hours","expression":"SUM(COALESCE(`rest_shortfall_hours`,0))","decimals":2,"position":[2,3,1,2]},
+        {"type":"counter","name":"rest_repriced","dataset":"scenario_rest","title":"Double-Time Hours","expression":"SUM(COALESCE(`double_time_repriced_hours`,0))","decimals":2,"position":[3,3,1,2]},
+        {"type":"counter","name":"rest_topup","dataset":"scenario_rest","title":"Double-Time Top-up","expression":"SUM(COALESCE(`double_time_topup`,0))","format":"currency","decimals":2,"position":[4,3,1,2]},
+        {"type":"counter","name":"rest_review","dataset":"scenario_rest","title":"Requires Review","expression":"SUM(CASE WHEN `status`='REQUIRES_REVIEW' THEN 1 ELSE 0 END)","decimals":0,"position":[5,3,1,2]},
+        {"type":"bar","name":"rest_employee_shortfall","dataset":"scenario_rest","title":"Rest Shortfall by Employee","x":"employee_name","x_title":"Employee","y_expression":"SUM(COALESCE(`rest_shortfall_hours`,0))","y_name":"rest_shortfall","y_title":"Shortfall Hours","orientation":"horizontal","position":[0,5,6,7]},
+        {"type":"table","name":"rest_detail","dataset":"scenario_rest","title":"Rest Between Work Findings","position":[0,12,6,11],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"previous_shift_end","title":"Previous Finish"},{"field":"next_shift_start","title":"Next Start"},{"field":"required_rest_hours","title":"Required Rest","kind":"number"},{"field":"actual_rest_hours","title":"Actual Rest","kind":"number"},{"field":"rest_shortfall_hours","title":"Shortfall","kind":"number"},{"field":"overtime_rest_rule_applies","title":"Overtime Rest Rule"},{"field":"double_time_repriced_hours","title":"Repriced Hours","kind":"number"},{"field":"double_time_topup","title":"Top-up","kind":"number","number_format":"$0,0.00"},{"field":"payment_status","title":"Payment Status"},{"field":"status","title":"Finding Status"},{"field":"clause","title":"Rest Clause"},{"field":"overtime_clause","title":"Overtime Clause"},{"field":"notes","title":"Evidence / Notes"}
+        ]},
+        {"type":"text","name":"meal_title","text":"### Meal Break Findings\nWhere ordinary timesheet evidence can establish or indicate a meal-break issue, the result appears below.","position":[0,23,6,2]},
+        {"type":"table","name":"meal_detail","dataset":"meal_breaks","title":"Meal Break Criteria and Review Findings","position":[0,25,6,9],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"shift_start","title":"Shift Start"},{"field":"scenario_classification_code","title":"Classification"},{"field":"scenario_employment_type","title":"Employment Type"},{"field":"criterion","title":"Finding / Component"},{"field":"hours","title":"Hours","kind":"number"},{"field":"effective_hourly_rate","title":"Rate","kind":"number","number_format":"$0.00"},{"field":"criterion_amount","title":"Amount","kind":"number","number_format":"$0,0.00"},{"field":"clause","title":"Clause"},{"field":"detail","title":"Evidence","kind":"json"}
+        ]}
+      ]
+    },
+    {
+      "name":"sleep_broken_page","display_name":"Sleepovers, Broken Shifts & Allowances",
+      "widgets":[
+        {"type":"text","name":"sleep_title","text":"## Sleepovers, Broken Shifts, Minimum Engagement and Allowances\nTimestamp-derived components are calculated automatically; agreement-dependent components remain explicit review items when evidence is absent.","position":[0,0,6,2]},
+        {"type":"filter","name":"sb_employee","dataset":"sleep_broken","field":"employee_name","title":"Employee","selection":"multi","position":[0,2,2,1]},
+        {"type":"filter","name":"sb_group","dataset":"sleep_broken","field":"criterion_group","title":"Criteria Group","selection":"multi","position":[2,2,1,1]},
+        {"type":"filter","name":"sb_level","dataset":"sleep_broken","field":"scenario_level","title":"Level","selection":"multi","position":[3,2,1,1]},
+        {"type":"filter","name":"sb_paypoint","dataset":"sleep_broken","field":"scenario_pay_point","title":"Pay Point","selection":"multi","position":[4,2,1,1]},
+        {"type":"filter","name":"sb_type","dataset":"sleep_broken","field":"scenario_employment_type","title":"Employment Type","selection":"multi","position":[5,2,1,1]},
+        {"type":"bar","name":"sb_amount","dataset":"sleep_broken","title":"Calculated Amount by Award Component","x":"criterion","x_title":"Award Component","y_expression":"SUM(COALESCE(`criterion_amount`,0))","y_name":"amount","y_title":"Calculated Amount","format":"currency","decimals":2,"orientation":"horizontal","position":[0,3,6,8]},
+        {"type":"table","name":"sb_detail","dataset":"sleep_broken","title":"Sleepover, Broken Shift, Minimum Engagement and Allowance Detail","position":[0,11,6,13],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"shift_start","title":"Shift Start"},{"field":"scenario_classification_code","title":"Classification"},{"field":"scenario_employment_type","title":"Employment Type"},{"field":"criterion_group","title":"Criteria Group"},{"field":"criterion","title":"Component"},{"field":"hours","title":"Hours","kind":"number"},{"field":"multiplier","title":"Multiplier","kind":"number"},{"field":"effective_hourly_rate","title":"Rate","kind":"number","number_format":"$0.00"},{"field":"criterion_amount","title":"Amount","kind":"number","number_format":"$0,0.00"},{"field":"clause","title":"Clause"},{"field":"detail","title":"Calculation Evidence","kind":"json"}
+        ]}
+      ]
+    },
+    {
+      "name":"actual_expected","display_name":"Actual vs Expected",
+      "widgets":[
+        {"type":"text","name":"actual_title","text":"## Actual versus Expected Pay\nFull under/overpayment status is definitive only where actual payroll evidence is available. A supplied base-rate file is audited separately and is never treated as complete shift pay.","position":[0,0,6,2]},
+        {"type":"counter","name":"def_periods","dataset":"reconciliation","title":"Employee Pay Periods","expression":"COUNT(`employee_id`)","decimals":0,"position":[0,2,1,2]},
+        {"type":"counter","name":"def_expected","dataset":"reconciliation","title":"Expected Pay","expression":"SUM(COALESCE(`expected_amount`,0))","format":"currency","decimals":2,"position":[1,2,1,2]},
+        {"type":"counter","name":"def_actual","dataset":"reconciliation","title":"Actual Auditable","expression":"SUM(COALESCE(`actual_auditable_amount`,0))","format":"currency","decimals":2,"position":[2,2,1,2]},
+        {"type":"counter","name":"def_under","dataset":"reconciliation","title":"Underpaid Periods","expression":"SUM(CASE WHEN `status`='UNDERPAID' THEN 1 ELSE 0 END)","decimals":0,"position":[3,2,1,2]},
+        {"type":"counter","name":"def_over","dataset":"reconciliation","title":"Overpaid Periods","expression":"SUM(CASE WHEN `status`='OVERPAID' THEN 1 ELSE 0 END)","decimals":0,"position":[4,2,1,2]},
+        {"type":"counter","name":"def_review","dataset":"reconciliation","title":"Review / Entitlement Only","expression":"SUM(CASE WHEN `status` IN ('REQUIRES_REVIEW','ENTITLEMENT_ONLY','ACTUAL_PAY_UNAVAILABLE') THEN 1 ELSE 0 END)","decimals":0,"position":[5,2,1,2]},
+        {"type":"bar","name":"def_status_chart","dataset":"reconciliation","title":"Pay Periods by Reconciliation Status","x":"status","x_title":"Status","y_expression":"COUNT(`employee_id`)","y_name":"periods","y_title":"Pay Periods","color":"status","position":[0,4,6,7]},
+        {"type":"table","name":"def_reconciliation_table","dataset":"reconciliation","title":"Definitive Pay-Period Reconciliation","position":[0,11,6,12],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"pay_period_start","title":"Period Start"},{"field":"pay_period_end","title":"Period End"},{"field":"expected_amount","title":"Expected","kind":"number","number_format":"$0,0.00"},{"field":"actual_auditable_amount","title":"Actual Auditable","kind":"number","number_format":"$0,0.00"},{"field":"variance_actual_minus_expected","title":"Variance","kind":"number","number_format":"$0,0.00"},{"field":"status","title":"Status"},{"field":"unmapped_pay_categories","title":"Evidence / Unmapped Categories"}
+        ]}
+      ]
+    },
+    {
+      "name":"evidence_required","display_name":"Evidence Required",
+      "widgets":[
+        {"type":"text","name":"evidence_title","text":"## Evidence Required\nThese are facts AuditHero could not safely infer from ordinary uploaded files. They do not stop the rest of the Award audit.","position":[0,0,6,2]},
+        {"type":"filter","name":"ev_employee","dataset":"evidence","field":"employee_name","title":"Employee","selection":"multi","position":[0,2,2,1]},
+        {"type":"filter","name":"ev_group","dataset":"evidence","field":"criterion_group","title":"Area","selection":"multi","position":[2,2,1,1]},
+        {"type":"filter","name":"ev_level","dataset":"evidence","field":"scenario_level","title":"Level","selection":"multi","position":[3,2,1,1]},
+        {"type":"filter","name":"ev_type","dataset":"evidence","field":"scenario_employment_type","title":"Employment Type","selection":"multi","position":[4,2,2,1]},
+        {"type":"counter","name":"ev_count","dataset":"evidence","title":"Evidence Findings","expression":"COUNT(`criterion`)","decimals":0,"position":[0,3,1,2]},
+        {"type":"bar","name":"ev_area_chart","dataset":"evidence","title":"Evidence Findings by Audit Area","x":"criterion_group","x_title":"Audit Area","y_expression":"COUNT(`criterion`)","y_name":"findings","y_title":"Findings","orientation":"horizontal","position":[1,3,5,7]},
+        {"type":"table","name":"ev_detail","dataset":"evidence","title":"Employee / Shift Evidence Required","position":[0,10,6,12],"columns":[
+          {"field":"employee_name","title":"Employee"},{"field":"shift_start","title":"Shift Start"},{"field":"scenario_classification_code","title":"Classification"},{"field":"scenario_employment_type","title":"Employment Type"},{"field":"criterion_group","title":"Audit Area"},{"field":"detail","title":"Evidence Required / Review Reason"}
+        ]},
+        {"type":"text","name":"readiness_title","text":"### Source-Level Findings","position":[0,22,6,1]},
+        {"type":"table","name":"readiness_table","dataset":"readiness","title":"Source and Readiness Findings","position":[0,23,6,8],"columns":[
+          {"field":"finding_type","title":"Finding Type"},{"field":"source_key","title":"Source"},{"field":"status","title":"Status"},{"field":"detail","title":"Detail"},{"field":"checked_at","title":"Checked At"}
+        ]}
+      ]
+    },
+    {
+      "name":"definitive_investigation","display_name":"Definitive Shift Investigation",
+      "widgets":[
+        {"type":"text","name":"def_inv_title","text":"## Definitive Shift Investigation\nWhere classification and employment facts are known, this page shows the governed shift-level calculation used for the definitive audit.","position":[0,0,6,2]},
+        {"type":"filter","name":"def_inv_employee","dataset":"investigation","field":"employee_name","title":"Employee","selection":"multi","position":[0,2,2,1]},
+        {"type":"filter","name":"def_inv_period","dataset":"investigation","field":"employee_pay_period","title":"Employee + Pay Period","selection":"single","position":[2,2,3,1]},
+        {"type":"filter","name":"def_inv_status","dataset":"investigation","field":"entitlement_status","title":"Shift Status","selection":"multi","position":[5,2,1,1]},
+        {"type":"table","name":"def_inv_detail","dataset":"investigation","title":"Underlying Shift Evidence","position":[0,3,6,12],"columns":[
+          {"field":"timesheet_id","title":"Timesheet ID"},{"field":"shift_start","title":"Shift Start"},{"field":"shift_end","title":"Shift End"},{"field":"worked_hours","title":"Hours","kind":"number"},{"field":"employment_type","title":"Employment Type"},{"field":"classification_code","title":"Classification"},{"field":"base_hourly_rate","title":"Award Base Rate","kind":"number","number_format":"$0.00"},{"field":"shift_expected_amount","title":"Expected","kind":"number","number_format":"$0,0.00"},{"field":"entitlement_status","title":"Entitlement Status"},{"field":"review_flags","title":"Review Flags"},{"field":"calculation_evidence","title":"Calculation Evidence","kind":"json"}
+        ]}
+      ]
+    },
+    {
+      "name":"controls_rules","display_name":"Rules & Audit History",
+      "widgets":[
+        {"type":"text","name":"controls_title","text":"## Audit Runs and Effective-Dated Rule Coverage","position":[0,0,6,1]},
+        {"type":"table","name":"runs_table","dataset":"runs","title":"Audit Run History","position":[0,1,6,9],"columns":[
+          {"field":"finished_at","title":"Finished"},{"field":"run_type","title":"Run Type"},{"field":"audit_window_start","title":"Start"},{"field":"audit_window_end","title":"End"},{"field":"status","title":"Status"},{"field":"actual_pay_source","title":"Actual Pay Source"},{"field":"employees","title":"Employees","kind":"integer"},{"field":"timesheets","title":"Timesheets","kind":"integer"},{"field":"message","title":"Run Detail"}
+        ]},
+        {"type":"table","name":"rules_table","dataset":"rules","title":"SCHADS Rule Pack Coverage","position":[0,10,6,10],"columns":[
+          {"field":"pack_type","title":"Rule Type"},{"field":"pack_id","title":"Pack"},{"field":"operative_date","title":"Operative Date"},{"field":"verification_status","title":"Verification"},{"field":"source_publisher","title":"Publisher"},{"field":"source_url","title":"Source"}
+        ]}
       ]
     }
   ]
