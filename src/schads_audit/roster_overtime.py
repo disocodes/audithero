@@ -101,6 +101,14 @@ def _flag(existing, flag):
     return '; '.join(sorted(set([x for x in str(existing or '').split('; ') if x]+[flag])))
 
 
+def _mark_review(out, idx, flag):
+    out.at[idx,'review_flags']=_flag(out.at[idx].get('review_flags'),flag);out.at[idx,'entitlement_status']='REQUIRES_REVIEW'
+
+
+def _conditions_complete(c):
+    return bool(c and isinstance(c.get('ordinary_penalties'),dict) and isinstance(c.get('shiftwork'),dict) and isinstance(c.get('overtime'),dict))
+
+
 def _reprice_interval(expected,evidence,base,c,emp_type,work_group,state,holidays,location_key,shift_start,shift_end,a,b,ot_before,component='OVERTIME_REPRICE'):
     stype=_shift_type(shift_start,shift_end);remaining=(b-a).total_seconds()/3600;cursor=a;cumulative=ot_before
     while remaining>1e-9:
@@ -108,6 +116,7 @@ def _reprice_interval(expected,evidence,base,c,emp_type,work_group,state,holiday
         if day in ('SUNDAY','PUBLIC_HOLIDAY'):chunk=min(remaining,day_room)
         else:
             first=float(c['overtime']['full_time'].get(work_group,c['overtime']['full_time']['OTHER'])['monday_to_saturday_first_band_hours']) if emp_type=='FULL_TIME' else float(c['overtime']['part_time_casual']['first_band_hours']);room=max(0,first-cumulative);chunk=min(remaining,day_room,room) if room>1e-9 else min(remaining,day_room)
+        if chunk<=1e-9:break
         ord_rate=effective_hourly_rate(base,ord_mult);expected-=line_amount(chunk,ord_rate);mult=_ot_multiplier(c,emp_type,work_group,day,cumulative);ot_rate=effective_hourly_rate(base,mult);amt=line_amount(chunk,ot_rate);expected+=amt;evidence.append({'component':component,'start':str(cursor),'hours':round(chunk,4),'day_type':day,'ordinary_rate_removed':float(ord_rate),'overtime_multiplier':mult,'overtime_rate':float(ot_rate),'amount_added':float(amt),'clause':'28'});cursor+=pd.Timedelta(hours=chunk);cumulative+=chunk;remaining-=chunk
     return expected,evidence,cumulative
 
@@ -120,18 +129,23 @@ def apply_rostered_and_daily_overtime(detail,timesheets,holidays,lib):
         ts=tsi.get(str(r.get('timesheet_id')),{});start=_dt(r.get('shift_start'));end=_dt(r.get('shift_end'))
         if start is None or end is None:continue
         c=lib.conditions(_dt(r.get('award_reference_date')) or start);emp_type=str(r.get('employment_type'));work_group=str(r.get('work_group') or 'OTHER');base=float(r.get('base_hourly_rate'));expected=Decimal(str(r.get('expected_amount') or 0));evidence=json.loads(r.get('calculation_evidence') or '[]');intervals=[]
+        if emp_type not in ('FULL_TIME','PART_TIME','CASUAL'):
+            _mark_review(out,idx,'OVERTIME_EMPLOYMENT_TYPE_MISSING');continue
+        if not _conditions_complete(c):
+            _mark_review(out,idx,'OVERTIME_CONDITION_PACK_MISSING');continue
         if emp_type=='FULL_TIME':
             rs=_dt(ts.get('rostered_start_datetime'));re=_dt(ts.get('rostered_end_datetime'));match=ts.get('rostered_shift_match_status')
             if rs is not None and re is not None and match in ('EXPLICIT_ID','BEST_OVERLAP'):
                 if start<rs:intervals.append((start,min(end,rs)))
                 if end>re:intervals.append((max(start,re),end))
-            else:out.at[idx,'review_flags']=_flag(r.get('review_flags'),'FT_ROSTER_REQUIRED_FOR_OVERTIME')
-        elif emp_type in ('PART_TIME','CASUAL'):
+            else:_mark_review(out,idx,'FT_ROSTER_REQUIRED_FOR_OVERTIME')
+        else:
             threshold=float(c['overtime']['part_time_casual']['daily_trigger_hours'])
-            if _bool(ts.get('is_sleepover')) and c['sleepover'].get('written_agreement_can_extend_ordinary_hours_to') and _bool(ts.get('sleepover_12h_written_agreement')):threshold=float(c['sleepover']['written_agreement_can_extend_ordinary_hours_to'])
+            sleepover=c.get('sleepover') or {}
+            if _bool(ts.get('is_sleepover')) and sleepover.get('written_agreement_can_extend_ordinary_hours_to') and _bool(ts.get('sleepover_12h_written_agreement')):threshold=float(sleepover['written_agreement_can_extend_ordinary_hours_to'])
             excess=max(0,float(r.get('worked_hours') or 0)-threshold)
             if excess>0:
-                if float(ts.get('unpaid_break_minutes') or 0)>0 or float(ts.get('break_units') or 0)>0:out.at[idx,'review_flags']=_flag(r.get('review_flags'),'DAILY_OVERTIME_WITH_BREAK_ALLOCATION_REVIEW')
+                if float(ts.get('unpaid_break_minutes') or 0)>0 or float(ts.get('break_units') or 0)>0:_mark_review(out,idx,'DAILY_OVERTIME_WITH_BREAK_ALLOCATION_REVIEW')
                 else:intervals.append((end-pd.Timedelta(hours=excess),end))
         cumulative=0.0
         for a,b in intervals:expected,evidence,cumulative=_reprice_interval(expected,evidence,base,c,emp_type,work_group,r.get('state'),holidays,r.get('holiday_location_key'),start,end,a,b,cumulative)
@@ -141,21 +155,15 @@ def apply_rostered_and_daily_overtime(detail,timesheets,holidays,lib):
 
 
 def allocate_period_overtime(detail,holidays,lib):
-    """Automatically allocate PT/casual 38h-week / 76h-fortnight overtime when unique.
-
-    If both thresholds produce different allocations, or daily overtime has already
-    repriced the same shift, the row is marked for review instead of stacking rates.
-    """
+    """Automatically allocate PT/casual 38h-week / 76h-fortnight overtime when unique."""
     if detail is None or detail.empty:return detail
     out=detail.copy();out['shift_start']=pd.to_datetime(out['shift_start'],errors='coerce');out['shift_end']=pd.to_datetime(out['shift_end'],errors='coerce');out['_week']=out['shift_start'].dt.to_period('W-SUN').astype(str)
     candidate_hours={}
-    # Weekly candidates.
     for (eid,w),g in out[out['employment_type'].isin(['PART_TIME','CASUAL'])].groupby(['employee_id','_week']):
         g=g.sort_values('shift_start');cum=0.0
         for idx,r in g.iterrows():
             h=float(r.get('worked_hours') or 0);before=cum;cum+=h;ex=max(0,cum-38)-max(0,before-38)
             if ex>1e-9:candidate_hours.setdefault(idx,[]).append(('WEEKLY',ex))
-    # Fortnight candidates for mapped 14-day-ish pay periods.
     p=out[out['employment_type'].isin(['PART_TIME','CASUAL'])].copy()
     for keys,g in p.groupby(['employee_id','pay_period_start','pay_period_end'],dropna=False):
         ps=_dt(keys[1]);pe=_dt(keys[2])
@@ -166,15 +174,15 @@ def allocate_period_overtime(detail,holidays,lib):
             if ex>1e-9:candidate_hours.setdefault(idx,[]).append(('FORTNIGHT',ex))
     for idx,cands in candidate_hours.items():
         r=out.loc[idx];amounts={round(x[1],6) for x in cands}
-        if len(amounts)>1:
-            out.at[idx,'review_flags']=_flag(r.get('review_flags'),'WEEKLY_FORTNIGHTLY_OVERTIME_ALLOCATION_CONFLICT');out.at[idx,'entitlement_status']='REQUIRES_REVIEW';continue
+        if len(amounts)>1:_mark_review(out,idx,'WEEKLY_FORTNIGHTLY_OVERTIME_ALLOCATION_CONFLICT');continue
         evidence=json.loads(r.get('calculation_evidence') or '[]')
-        if any(e.get('component')=='OVERTIME_REPRICE' for e in evidence if isinstance(e,dict)):
-            out.at[idx,'review_flags']=_flag(r.get('review_flags'),'PERIOD_OVERTIME_OVERLAPS_DAILY_OR_ROSTER_OVERTIME');out.at[idx,'entitlement_status']='REQUIRES_REVIEW';continue
+        if any(e.get('component')=='OVERTIME_REPRICE' for e in evidence if isinstance(e,dict)):_mark_review(out,idx,'PERIOD_OVERTIME_OVERLAPS_DAILY_OR_ROSTER_OVERTIME');continue
         excess=max(amounts);start=_dt(r.get('shift_start'));end=_dt(r.get('shift_end'))
-        if start is None or end is None or start.date()!=end.date() or excess>float(r.get('worked_hours') or 0):
-            out.at[idx,'review_flags']=_flag(r.get('review_flags'),'PERIOD_OVERTIME_ALLOCATION_REVIEW');out.at[idx,'entitlement_status']='REQUIRES_REVIEW';continue
-        base=float(r.get('base_hourly_rate') or 0);c=lib.conditions(_dt(r.get('award_reference_date')) or start);expected=Decimal(str(r.get('expected_amount') or 0));a=end-pd.Timedelta(hours=excess);expected,evidence,_=_reprice_interval(expected,evidence,base,c,r.get('employment_type'),r.get('work_group') or 'OTHER',r.get('state'),holidays,r.get('holiday_location_key'),start,end,a,end,0.0,component='PERIOD_OVERTIME_REPRICE');out.at[idx,'expected_amount']=float(money(expected));out.at[idx,'calculation_evidence']=json.dumps(evidence,default=str,separators=(',',':'))
+        if start is None or end is None or start.date()!=end.date() or excess>float(r.get('worked_hours') or 0):_mark_review(out,idx,'PERIOD_OVERTIME_ALLOCATION_REVIEW');continue
+        base=float(r.get('base_hourly_rate') or 0);c=lib.conditions(_dt(r.get('award_reference_date')) or start)
+        if base<=0:_mark_review(out,idx,'PERIOD_OVERTIME_BASE_RATE_MISSING');continue
+        if not _conditions_complete(c):_mark_review(out,idx,'PERIOD_OVERTIME_CONDITION_PACK_MISSING');continue
+        expected=Decimal(str(r.get('expected_amount') or 0));a=end-pd.Timedelta(hours=excess);expected,evidence,_=_reprice_interval(expected,evidence,base,c,r.get('employment_type'),r.get('work_group') or 'OTHER',r.get('state'),holidays,r.get('holiday_location_key'),start,end,a,end,0.0,component='PERIOD_OVERTIME_REPRICE');out.at[idx,'expected_amount']=float(money(expected));out.at[idx,'calculation_evidence']=json.dumps(evidence,default=str,separators=(',',':'))
     return out.drop(columns=['_week'])
 
 
