@@ -25,6 +25,12 @@ def _overlap_hours(a1,a2,b1,b2):
     s=max(a1,b1);e=min(a2,b2);return max(0.0,(e-s).total_seconds()/3600) if e>s else 0.0
 
 
+def _mark_review(out, indices, flag):
+    for i in indices:
+        out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),flag)
+        out.at[i,'entitlement_status']='REQUIRES_REVIEW'
+
+
 def _single_period_rate(detail_row):
     """Return the already-calculated applicable hourly rate when unambiguous."""
     try:ev=json.loads(detail_row.get('calculation_evidence') or '[]')
@@ -42,6 +48,8 @@ def group_broken_shifts(timesheets,gap_minutes=30):
     out=timesheets.copy()
     for c in ('broken_shift_group_id','broken_shift_period_number','broken_shift_period_count','broken_shift_breaks','broken_shift_group_status'):
         if c not in out.columns:out[c]=None
+    if 'work_group' not in out.columns:
+        return out
     out['_s']=pd.to_datetime(out['start_datetime'],errors='coerce');out['_e']=pd.to_datetime(out['end_datetime'],errors='coerce');eligible=out['work_group'].astype(str).isin(['DISABILITY_SERVICES','HOME_CARE'])
     for (eid,day),g in out[eligible].dropna(subset=['_s','_e']).groupby([out.loc[eligible,'employee_id'].astype(str),out.loc[eligible,'_s'].dt.date]):
         g=g.sort_values('_s');periods=[];current=[]
@@ -73,22 +81,26 @@ def apply_broken_shift_rules(detail,timesheets,lib):
         if len(di)<2:continue
         work_group=str(out.loc[di[0]].get('work_group') or '')
         if work_group not in ('DISABILITY_SERVICES','HOME_CARE'):
-            for i in di:out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],'BROKEN_SHIFT_INELIGIBLE_WORK_GROUP');out.at[i,'entitlement_status']='REQUIRES_REVIEW'
-            continue
-        starts=[_dt(x.get('start_datetime')) for x in members];ends=[_dt(x.get('end_datetime')) for x in members];first=min(x for x in starts if x is not None);last=max(x for x in ends if x is not None);span=(last-first).total_seconds()/3600;ref=_dt(out.loc[di[0]].get('award_reference_date')) or first;c=lib.conditions(ref);breaks=len(members)-1
+            _mark_review(out,di,'BROKEN_SHIFT_INELIGIBLE_WORK_GROUP');continue
+        starts=[_dt(x.get('start_datetime')) for x in members];ends=[_dt(x.get('end_datetime')) for x in members];starts=[x for x in starts if x is not None];ends=[x for x in ends if x is not None]
+        if not starts or not ends:
+            _mark_review(out,di,'BROKEN_SHIFT_INTERVAL_EVIDENCE_MISSING');continue
+        first=min(starts);last=max(ends);span=(last-first).total_seconds()/3600;ref=_dt(out.loc[di[0]].get('award_reference_date')) or first;c=lib.conditions(ref);breaks=len(members)-1
+        if not c or not isinstance(c.get('broken_shift'),dict):
+            _mark_review(out,di,'BROKEN_SHIFT_CONDITION_PACK_MISSING');continue
         if breaks>int(c['broken_shift']['max_unpaid_breaks']):
-            for i in di:out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],'BROKEN_SHIFT_MORE_THAN_TWO_BREAKS');out.at[i,'entitlement_status']='REQUIRES_REVIEW'
-            continue
-        if breaks==2:
-            for i in di:out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],'TWO_BREAK_BROKEN_SHIFT_AGREEMENT_VERIFY');out.at[i,'entitlement_status']='REQUIRES_REVIEW'
+            _mark_review(out,di,'BROKEN_SHIFT_MORE_THAN_TWO_BREAKS');continue
+        if breaks==2:_mark_review(out,di,'TWO_BREAK_BROKEN_SHIFT_AGREEMENT_VERIFY')
         key='broken_shift_1_break' if breaks==1 else 'broken_shift_2_breaks';allowance,ap=lib.allowance(key,ref)
         if allowance:
-            first_idx=min(di,key=lambda i:_dt(out.loc[i,'shift_start']));ev=json.loads(out.loc[first_idx].get('calculation_evidence') or '[]');amt=money(allowance['amount']);out.at[first_idx,'expected_amount']=float(money(Decimal(str(out.loc[first_idx,'expected_amount'] or 0))+amt));ev.append({'component':'BROKEN_SHIFT_ALLOWANCE','group_id':gid,'breaks':breaks,'amount':float(amt),'allowance_pack_id':ap['allowance_pack_id'],'clause':'25.6'});out.at[first_idx,'calculation_evidence']=json.dumps(ev,default=str,separators=(',',':'))
+            first_idx=min(di,key=lambda i:_dt(out.loc[i,'shift_start']) or pd.Timestamp.max);ev=json.loads(out.loc[first_idx].get('calculation_evidence') or '[]');amt=money(allowance['amount']);out.at[first_idx,'expected_amount']=float(money(Decimal(str(out.loc[first_idx,'expected_amount'] or 0))+amt));ev.append({'component':'BROKEN_SHIFT_ALLOWANCE','group_id':gid,'breaks':breaks,'amount':float(amt),'allowance_pack_id':ap['allowance_pack_id'],'clause':'25.6'});out.at[first_idx,'calculation_evidence']=json.dumps(ev,default=str,separators=(',',':'))
+        else:
+            _mark_review(out,di,'BROKEN_SHIFT_ALLOWANCE_MISSING')
         for i in di:
             if out.loc[i].get('employment_type') in ('PART_TIME','CASUAL') and float(out.loc[i].get('worked_hours') or 0)<2:
                 rate=_single_period_rate(out.loc[i])
                 if rate is None:
-                    out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],'BROKEN_SHIFT_MINIMUM_MULTIRATE_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
+                    out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),'BROKEN_SHIFT_MINIMUM_MULTIRATE_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
                 short=2-float(out.loc[i].get('worked_hours') or 0);top=line_amount(short,rate);out.at[i,'expected_amount']=float(money(Decimal(str(out.loc[i,'expected_amount'] or 0))+top));ev=json.loads(out.loc[i].get('calculation_evidence') or '[]');ev.append({'component':'BROKEN_SHIFT_MINIMUM_PERIOD_TOPUP','group_id':gid,'hours':short,'rate':float(rate),'amount':float(top),'clause':'10.5 / 25.6'});out.at[i,'calculation_evidence']=json.dumps(ev,default=str,separators=(',',':'))
         if span>float(c['broken_shift']['max_span_hours']):
             boundary=first+pd.Timedelta(hours=float(c['broken_shift']['max_span_hours']))
@@ -96,11 +108,14 @@ def apply_broken_shift_rules(detail,timesheets,lib):
                 s=_dt(out.loc[i,'shift_start']);e=_dt(out.loc[i,'shift_end']);excess=_overlap_hours(s,e,boundary,last) if s and e else 0
                 if excess<=0:continue
                 if 'OVERTIME_REPRICE' in str(out.loc[i].get('calculation_evidence') or ''):
-                    out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],'BROKEN_SHIFT_12H_OVERTIME_INTERACTION_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
+                    out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),'BROKEN_SHIFT_12H_OVERTIME_INTERACTION_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
                 current=_single_period_rate(out.loc[i])
                 if current is None:
-                    out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],'BROKEN_SHIFT_12H_MULTIRATE_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
-                base=float(out.loc[i].get('base_hourly_rate') or 0);emp=out.loc[i].get('employment_type');double=effective_hourly_rate(base,2.25 if emp=='CASUAL' else 2.0);delta=line_amount(excess,double)-line_amount(excess,current);out.at[i,'expected_amount']=float(money(Decimal(str(out.loc[i,'expected_amount'] or 0))+delta));ev=json.loads(out.loc[i].get('calculation_evidence') or '[]');ev.append({'component':'BROKEN_SHIFT_BEYOND_12H_REPRICE','group_id':gid,'hours':excess,'ordinary_rate_removed':float(current),'double_time_rate':float(double),'delta':float(delta),'clause':'25.6'});out.at[i,'calculation_evidence']=json.dumps(ev,default=str,separators=(',',':'))
+                    out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),'BROKEN_SHIFT_12H_MULTIRATE_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
+                base=float(out.loc[i].get('base_hourly_rate') or 0);emp=out.loc[i].get('employment_type')
+                if base<=0 or emp not in ('FULL_TIME','PART_TIME','CASUAL'):
+                    out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),'BROKEN_SHIFT_12H_RATE_OR_EMPLOYMENT_TYPE_MISSING');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
+                double=effective_hourly_rate(base,2.25 if emp=='CASUAL' else 2.0);delta=line_amount(excess,double)-line_amount(excess,current);out.at[i,'expected_amount']=float(money(Decimal(str(out.loc[i,'expected_amount'] or 0))+delta));ev=json.loads(out.loc[i].get('calculation_evidence') or '[]');ev.append({'component':'BROKEN_SHIFT_BEYOND_12H_REPRICE','group_id':gid,'hours':excess,'ordinary_rate_removed':float(current),'double_time_rate':float(double),'delta':float(delta),'clause':'25.6'});out.at[i,'calculation_evidence']=json.dumps(ev,default=str,separators=(',',':'))
     return out
 
 
@@ -131,22 +146,27 @@ def apply_sleepover_group_rules(detail,timesheets,lib):
         if not sleep:continue
         member_ids={str(m.get('timesheet_id')) for m in members};di=out[out['timesheet_id'].astype(str).isin(member_ids)].index.tolist()
         if not di:continue
-        ref=_dt(out.loc[di[0]].get('award_reference_date')) or _dt(sleep.get('start_datetime'));c=lib.conditions(ref);continuous=bool(c['sleepover'].get('surrounding_work_is_one_shift'));before=roles.get('BEFORE');after=roles.get('AFTER')
+        ref=_dt(out.loc[di[0]].get('award_reference_date')) or _dt(sleep.get('start_datetime'));c=lib.conditions(ref) if ref is not None else None
+        if not c or not isinstance(c.get('sleepover'),dict):
+            _mark_review(out,di,'SLEEPOVER_CONDITION_PACK_MISSING');continue
+        continuous=bool(c['sleepover'].get('surrounding_work_is_one_shift'));before=roles.get('BEFORE');after=roles.get('AFTER')
         for role,item in [('BEFORE',before),('AFTER',after)]:
             if not item:continue
-            i=out[out['timesheet_id'].astype(str)==str(item.get('timesheet_id'))].index[0];hrs=float(out.loc[i].get('worked_hours') or 0)
+            hits=out[out['timesheet_id'].astype(str)==str(item.get('timesheet_id'))].index
+            if len(hits)==0:continue
+            i=hits[0];hrs=float(out.loc[i].get('worked_hours') or 0)
             if hrs<4:
                 rate=_single_period_rate(out.loc[i])
                 if rate is None:
-                    out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],'SLEEPOVER_MINIMUM_MULTIRATE_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
+                    out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),'SLEEPOVER_MINIMUM_MULTIRATE_REVIEW');out.at[i,'entitlement_status']='REQUIRES_REVIEW';continue
                 short=4-hrs;top=line_amount(short,rate);out.at[i,'expected_amount']=float(money(Decimal(str(out.loc[i,'expected_amount'] or 0))+top));ev=json.loads(out.loc[i].get('calculation_evidence') or '[]');ev.append({'component':'SLEEPOVER_SURROUNDING_WORK_MINIMUM_TOPUP','role':role,'hours':short,'rate':float(rate),'amount':float(top),'clause':'25.7'});out.at[i,'calculation_evidence']=json.dumps(ev,default=str,separators=(',',':'))
         if continuous and before and after:
-            active=sum(float(out.loc[i].get('worked_hours') or 0) for i in di if tsi[str(out.loc[i,'timesheet_id'])].get('sleepover_period_role') in ('BEFORE','AFTER'));agreed=_bool(sleep.get('sleepover_12h_written_agreement'));threshold=12.0 if agreed else 10.0
-            if active>threshold:
-                for i in di:out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],f'SLEEPOVER_CONTINUOUS_SHIFT_OVERTIME_EXCESS:{active-threshold:.2f}H');out.at[i,'entitlement_status']='REQUIRES_REVIEW'
+            active=sum(float(out.loc[i].get('worked_hours') or 0) for i in di if tsi.get(str(out.loc[i,'timesheet_id']),{}).get('sleepover_period_role') in ('BEFORE','AFTER'));agreed=_bool(sleep.get('sleepover_12h_written_agreement'));threshold=12.0 if agreed else 10.0
+            if active>threshold:_mark_review(out,di,f'SLEEPOVER_CONTINUOUS_SHIFT_OVERTIME_EXCESS:{active-threshold:.2f}H')
             if agreed:
                 for role,item in [('BEFORE',before),('AFTER',after)]:
                     if item:
-                        i=out[out['timesheet_id'].astype(str)==str(item.get('timesheet_id'))].index[0]
-                        if float(out.loc[i].get('worked_hours') or 0)>8:out.at[i,'review_flags']=_flag(out.at[i,'review_flags'],f'SLEEPOVER_{role}_MORE_THAN_8H');out.at[i,'entitlement_status']='REQUIRES_REVIEW'
+                        hits=out[out['timesheet_id'].astype(str)==str(item.get('timesheet_id'))].index
+                        if len(hits) and float(out.loc[hits[0]].get('worked_hours') or 0)>8:
+                            i=hits[0];out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),f'SLEEPOVER_{role}_MORE_THAN_8H');out.at[i,'entitlement_status']='REQUIRES_REVIEW'
     return out
