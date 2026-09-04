@@ -8,6 +8,9 @@ from typing import Any
 
 import pandas as pd
 
+from .dates import parse_datetime_series
+from .canonical_normalization import normalize_canonical_frame
+
 
 CANONICAL_SCHEMAS: dict[str, dict[str, Any]] = {
     "employees": {
@@ -254,299 +257,160 @@ def _norm(value: Any) -> str:
 
 def _score(a: str, b: str) -> float:
     na, nb = _norm(a), _norm(b)
-    if not na or not nb:
-        return 0.0
-    if na == nb:
-        return 1.0
-    if na in nb or nb in na:
-        return 0.92
+    if not na or not nb:return 0.0
+    if na == nb:return 1.0
+    if na in nb or nb in na:return 0.92
     return SequenceMatcher(None, na, nb).ratio()
 
 
 def _safe_path(root: Path, relative_or_absolute: str) -> Path:
     candidate = Path(relative_or_absolute)
-    if not candidate.is_absolute():
-        candidate = root / candidate
-    resolved = candidate.resolve()
-    root_resolved = root.resolve()
-    try:
-        resolved.relative_to(root_resolved)
-    except ValueError as exc:
-        raise ValueError(f"Source file must be under source_root: {candidate}") from exc
+    if not candidate.is_absolute():candidate = root / candidate
+    resolved = candidate.resolve();root_resolved = root.resolve()
+    try:resolved.relative_to(root_resolved)
+    except ValueError as exc:raise ValueError(f"Source file must be under source_root: {candidate}") from exc
     return resolved
 
 
 def scan_source_items(source_root: str | Path) -> pd.DataFrame:
     """List CSV files and Excel sheets available for mapping."""
     root = Path(source_root)
-    if not root.exists():
-        raise FileNotFoundError(f"Source folder does not exist: {root}")
-    rows: list[dict[str, Any]] = []
+    if not root.exists():raise FileNotFoundError(f"Source folder does not exist: {root}")
+    rows=[]
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.name.startswith("~$"):
-            continue
-        suffix = path.suffix.lower()
-        rel = str(path.relative_to(root)).replace("\\", "/")
+        if not path.is_file() or path.name.startswith("~$"):continue
+        suffix=path.suffix.lower();rel=str(path.relative_to(root)).replace("\\", "/")
         try:
             if suffix == ".csv":
-                df = pd.read_csv(path, nrows=25)
-                rows.append({"file": rel, "sheet": None, "item_name": path.stem, "columns": list(df.columns), "sample_rows": len(df)})
+                df=pd.read_csv(path,nrows=25);rows.append({"file":rel,"sheet":None,"item_name":path.stem,"columns":list(df.columns),"sample_rows":len(df)})
             elif suffix in {".xlsx", ".xlsm"}:
-                book = pd.ExcelFile(path)
+                book=pd.ExcelFile(path)
                 for sheet in book.sheet_names:
-                    df = pd.read_excel(path, sheet_name=sheet, nrows=25)
-                    rows.append({"file": rel, "sheet": sheet, "item_name": f"{path.stem} {sheet}", "columns": list(df.columns), "sample_rows": len(df)})
-        except Exception as exc:
-            rows.append({"file": rel, "sheet": None, "item_name": path.stem, "columns": [], "sample_rows": 0, "error": str(exc)})
+                    df=pd.read_excel(path,sheet_name=sheet,nrows=25);rows.append({"file":rel,"sheet":sheet,"item_name":f"{path.stem} {sheet}","columns":list(df.columns),"sample_rows":len(df)})
+        except Exception as exc:rows.append({"file":rel,"sheet":None,"item_name":path.stem,"columns":[],"sample_rows":0,"error":str(exc)})
     return pd.DataFrame(rows)
 
 
 def _best_column(columns: list[str], aliases: list[str], canonical: str) -> tuple[str | None, float]:
-    candidates = aliases + [canonical, canonical.replace("_", " ")]
-    best_col, best = None, 0.0
+    candidates=aliases+[canonical,canonical.replace("_"," ")];best_col,best=None,0.0
     for col in columns:
-        score = max(_score(col, alias) for alias in candidates)
-        if score > best:
-            best_col, best = col, score
-    return best_col, best
+        score=max(_score(col,alias) for alias in candidates)
+        if score>best:best_col,best=col,score
+    return best_col,best
 
 
 def generate_mapping_draft(source_root: str | Path, minimum_field_confidence: float = 0.72) -> dict[str, Any]:
-    """Generate an editable mapping draft from file names, sheet names and headers."""
-    inventory = scan_source_items(source_root)
-    datasets: dict[str, Any] = {}
-    for dataset, schema in CANONICAL_SCHEMAS.items():
-        best_item = None
-        best_score = 0.0
-        for _, item in inventory.iterrows():
-            columns = list(item.get("columns") or [])
-            name_score = max(_score(item.get("item_name"), alias) for alias in DATASET_ALIASES.get(dataset, [dataset]))
-            matched = 0
-            for field, aliases in schema.get("aliases", {}).items():
-                _, field_score = _best_column(columns, aliases, field)
-                if field_score >= minimum_field_confidence:
-                    matched += 1
-            coverage = matched / max(1, len(schema.get("required", [])))
-            score = (0.45 * name_score) + (0.55 * min(1.0, coverage))
-            if score > best_score:
-                best_item, best_score = item, score
-        columns: dict[str, Any] = {}
-        suggestions: dict[str, Any] = {}
+    inventory=scan_source_items(source_root);datasets={}
+    for dataset,schema in CANONICAL_SCHEMAS.items():
+        best_item=None;best_score=0.0
+        for _,item in inventory.iterrows():
+            columns=list(item.get("columns") or []);name_score=max(_score(item.get("item_name"),alias) for alias in DATASET_ALIASES.get(dataset,[dataset]));matched=0
+            for field,aliases in schema.get("aliases",{}).items():
+                _,field_score=_best_column(columns,aliases,field)
+                if field_score>=minimum_field_confidence:matched+=1
+            coverage=matched/max(1,len(schema.get("required",[])));score=(0.45*name_score)+(0.55*min(1.0,coverage))
+            if score>best_score:best_item,best_score=item,score
+        columns={};suggestions={}
         if best_item is not None:
-            source_columns = list(best_item.get("columns") or [])
-            for field in schema.get("required", []) + schema.get("recommended", []):
-                col, confidence = _best_column(source_columns, schema.get("aliases", {}).get(field, []), field)
-                if col and confidence >= minimum_field_confidence:
-                    columns[field] = {"source": col}
-                suggestions[field] = {"suggested_source": col, "confidence": round(confidence, 3)}
-        enabled = bool(best_item is not None and best_score >= 0.45)
-        datasets[dataset] = {
-            "enabled": enabled,
-            "source": ({"file": best_item.get("file"), "sheet": best_item.get("sheet"), "header": 0} if enabled else None),
-            "columns": columns,
-            "_suggestions": suggestions,
-            "_dataset_confidence": round(best_score, 3),
-        }
-    return {
-        "version": 1,
-        "instructions": "Review every enabled dataset and field mapping before conversion. Delete _suggestions keys when satisfied if desired.",
-        "datasets": datasets,
-    }
+            source_columns=list(best_item.get("columns") or [])
+            for field in schema.get("required",[])+schema.get("recommended",[]):
+                col,confidence=_best_column(source_columns,schema.get("aliases",{}).get(field,[]),field)
+                if col and confidence>=minimum_field_confidence:columns[field]={"source":col}
+                suggestions[field]={"suggested_source":col,"confidence":round(confidence,3)}
+        enabled=bool(best_item is not None and best_score>=0.45);datasets[dataset]={"enabled":enabled,"source":({"file":best_item.get("file"),"sheet":best_item.get("sheet"),"header":0} if enabled else None),"columns":columns,"_suggestions":suggestions,"_dataset_confidence":round(best_score,3)}
+    return {"version":1,"instructions":"Review every enabled dataset and field mapping before conversion. Ambiguous numeric dates are interpreted day-first. Delete _suggestions keys when satisfied if desired.","datasets":datasets}
 
 
 def save_mapping_draft(source_root: str | Path, output_path: str | Path) -> dict[str, Any]:
-    draft = generate_mapping_draft(source_root)
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
-    return draft
+    draft=generate_mapping_draft(source_root);path=Path(output_path);path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(draft,indent=2),encoding="utf-8");return draft
 
 
 def _read_descriptor(root: Path, descriptor: dict[str, Any]) -> pd.DataFrame:
-    if not descriptor or not descriptor.get("file"):
-        raise ValueError("Dataset source.file is required")
-    path = _safe_path(root, descriptor["file"])
-    if not path.exists():
-        raise FileNotFoundError(f"Mapped source file not found: {path}")
-    header = int(descriptor.get("header", 0))
-    skiprows = descriptor.get("skiprows")
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, header=header, skiprows=skiprows)
-    if path.suffix.lower() in {".xlsx", ".xlsm"}:
-        return pd.read_excel(path, sheet_name=descriptor.get("sheet", 0), header=header, skiprows=skiprows)
+    if not descriptor or not descriptor.get("file"):raise ValueError("Dataset source.file is required")
+    path=_safe_path(root,descriptor["file"])
+    if not path.exists():raise FileNotFoundError(f"Mapped source file not found: {path}")
+    header=int(descriptor.get("header",0));skiprows=descriptor.get("skiprows")
+    if path.suffix.lower()==".csv":return pd.read_csv(path,header=header,skiprows=skiprows)
+    if path.suffix.lower() in {".xlsx",".xlsm"}:return pd.read_excel(path,sheet_name=descriptor.get("sheet",0),header=header,skiprows=skiprows)
     raise ValueError(f"Unsupported mapped source format: {path.name}")
 
 
 def _blank_mask(series: pd.Series) -> pd.Series:
-    return series.isna() | series.astype(str).str.strip().isin(["", "nan", "None", "NaT"])
+    return series.isna() | series.astype(str).str.strip().str.lower().isin(["", "nan", "none", "nat", "null"])
 
 
 def _series_from_rule(df: pd.DataFrame, rule: Any, target: str) -> pd.Series:
-    if isinstance(rule, str):
-        rule = {"source": rule}
-    if not isinstance(rule, dict):
-        raise ValueError(f"Mapping for {target} must be a source column name or object")
-
-    if "constant" in rule:
-        series = pd.Series([rule.get("constant")] * len(df), index=df.index)
+    if isinstance(rule,str):rule={"source":rule}
+    if not isinstance(rule,dict):raise ValueError(f"Mapping for {target} must be a source column name or object")
+    if "constant" in rule:series=pd.Series([rule.get("constant")]*len(df),index=df.index)
     elif "concat" in rule:
-        cols = list(rule.get("concat") or [])
-        missing = [c for c in cols if c not in df.columns]
-        if missing:
-            raise ValueError(f"{target}: concat source column(s) missing: {missing}")
-        sep = str(rule.get("separator", " "))
-        series = df[cols].fillna("").astype(str).agg(sep.join, axis=1).str.strip()
+        cols=list(rule.get("concat") or []);missing=[c for c in cols if c not in df.columns]
+        if missing:raise ValueError(f"{target}: concat source column(s) missing: {missing}")
+        sep=str(rule.get("separator"," "));series=df[cols].fillna("").astype(str).agg(sep.join,axis=1).str.strip()
     elif "date_source" in rule and "time_source" in rule:
-        dcol, tcol = rule["date_source"], rule["time_source"]
-        missing = [c for c in (dcol, tcol) if c not in df.columns]
-        if missing:
-            raise ValueError(f"{target}: date/time source column(s) missing: {missing}")
-        series = pd.to_datetime(df[dcol].astype(str).str.strip() + " " + df[tcol].astype(str).str.strip(), errors="coerce")
+        dcol,tcol=rule["date_source"],rule["time_source"];missing=[c for c in (dcol,tcol) if c not in df.columns]
+        if missing:raise ValueError(f"{target}: date/time source column(s) missing: {missing}")
+        series=parse_datetime_series(df[dcol].astype(str).str.strip()+" "+df[tcol].astype(str).str.strip())
     elif "sources" in rule:
-        sources = list(rule.get("sources") or [])
-        available = [c for c in sources if c in df.columns]
-        if not available:
-            raise ValueError(f"{target}: none of the coalesce source columns exist: {sources}")
-        series = df[available[0]].copy()
-        for col in available[1:]:
-            mask = _blank_mask(series)
-            series = series.where(~mask, df[col])
+        sources=list(rule.get("sources") or []);available=[c for c in sources if c in df.columns]
+        if not available:raise ValueError(f"{target}: none of the coalesce source columns exist: {sources}")
+        series=df[available[0]].copy()
+        for col in available[1:]:series=series.where(~_blank_mask(series),df[col])
     elif "source" in rule:
-        source = rule["source"]
-        if source not in df.columns:
-            raise ValueError(f"{target}: source column not found: {source}")
-        series = df[source].copy()
-    else:
-        raise ValueError(f"{target}: mapping must specify source, sources, concat, date_source/time_source or constant")
-
-    if rule.get("strip", True) and series.dtype == "object":
-        series = series.map(lambda x: x.strip() if isinstance(x, str) else x)
-
-    value_map = rule.get("value_map") or rule.get("map")
+        source=rule["source"]
+        if source not in df.columns:raise ValueError(f"{target}: source column not found: {source}")
+        series=df[source].copy()
+    else:raise ValueError(f"{target}: mapping must specify source, sources, concat, date_source/time_source or constant")
+    if rule.get("strip",True) and series.dtype=="object":series=series.map(lambda x:x.strip() if isinstance(x,str) else x)
+    value_map=rule.get("value_map") or rule.get("map")
     if value_map:
-        original = series.copy()
-        mapped = series.map(value_map)
-        keep_unmapped = bool(rule.get("keep_unmapped", True))
-        series = mapped.where(mapped.notna(), original if keep_unmapped else None)
-
-    if "default" in rule:
-        mask = _blank_mask(series)
-        series = series.where(~mask, rule.get("default"))
-
-    dtype = str(rule.get("type") or "").lower()
-    if dtype in {"string", "str"}:
-        series = series.where(series.isna(), series.astype(str))
-    elif dtype in {"number", "float", "decimal"}:
-        series = pd.to_numeric(series, errors="coerce")
-    elif dtype in {"integer", "int"}:
-        series = pd.to_numeric(series, errors="coerce").astype("Int64")
-    elif dtype in {"date", "datetime"}:
-        parsed = pd.to_datetime(series, errors="coerce", dayfirst=bool(rule.get("dayfirst", False)))
-        series = parsed.dt.date if dtype == "date" else parsed
-    elif dtype in {"boolean", "bool"}:
-        truthy = {"true", "t", "yes", "y", "1", "on"}
-        falsy = {"false", "f", "no", "n", "0", "off"}
+        original=series.copy();mapped=series.map(value_map);series=mapped.where(mapped.notna(),original if bool(rule.get("keep_unmapped",True)) else None)
+    if "default" in rule:series=series.where(~_blank_mask(series),rule.get("default"))
+    dtype=str(rule.get("type") or "").lower()
+    if dtype in {"string","str"}:series=series.where(series.isna(),series.astype(str))
+    elif dtype in {"number","float","decimal"}:series=pd.to_numeric(series,errors="coerce")
+    elif dtype in {"integer","int"}:series=pd.to_numeric(series,errors="coerce").astype("Int64")
+    elif dtype in {"date","datetime"}:
+        parsed=parse_datetime_series(series);series=parsed.dt.date if dtype=="date" else parsed
+    elif dtype in {"boolean","bool"}:
+        truthy={"true","t","yes","y","1","on"};falsy={"false","f","no","n","0","off"}
         def conv(value: Any):
-            if pd.isna(value):
-                return None
-            text = str(value).strip().lower()
-            if text in truthy:
-                return True
-            if text in falsy:
-                return False
+            if pd.isna(value):return None
+            text=str(value).strip().lower()
+            if text in truthy:return True
+            if text in falsy:return False
             return None
-        series = series.map(conv)
-
+        series=series.map(conv)
     return series
 
 
-def convert_source_files(
-    source_root: str | Path,
-    mapping: dict[str, Any] | str | Path,
-    output_root: str | Path,
-    *,
-    write_workbook: bool = True,
-    strict: bool = True,
-) -> dict[str, Any]:
-    """Convert arbitrary source exports to AuditHero's canonical file model.
-
-    The function writes one canonical CSV per converted dataset plus an optional
-    ``audithero_input.xlsx`` workbook and a conversion report. It never evaluates
-    arbitrary expressions from the mapping file.
-    """
-    source_root = Path(source_root)
-    output_root = Path(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
-    if isinstance(mapping, (str, Path)):
-        mapping_path = Path(mapping)
-        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-    if int(mapping.get("version", 0)) != 1:
-        raise ValueError("Unsupported source mapping version; expected version 1")
-
-    frames: dict[str, pd.DataFrame] = {}
-    report_rows: list[dict[str, Any]] = []
-    errors: list[str] = []
-
-    for dataset, config in (mapping.get("datasets") or {}).items():
-        if dataset not in CANONICAL_SCHEMAS or not config or not config.get("enabled", False):
-            continue
+def convert_source_files(source_root: str | Path,mapping: dict[str, Any] | str | Path,output_root: str | Path,*,write_workbook: bool = True,strict: bool = True) -> dict[str, Any]:
+    """Convert arbitrary source exports to AuditHero's canonical file model."""
+    source_root=Path(source_root);output_root=Path(output_root);output_root.mkdir(parents=True,exist_ok=True)
+    if isinstance(mapping,(str,Path)):
+        from .mapping_workbook import load_mapping
+        mapping=load_mapping(mapping)
+    if int(mapping.get("version",0))!=1:raise ValueError("Unsupported source mapping version; expected version 1")
+    frames={};report_rows=[];errors=[]
+    for dataset,config in (mapping.get("datasets") or {}).items():
+        if dataset not in CANONICAL_SCHEMAS or not config or not config.get("enabled",False):continue
         try:
-            raw = _read_descriptor(source_root, config.get("source") or {})
-            out = pd.DataFrame(index=raw.index)
-            column_rules = config.get("columns") or {}
-            schema = CANONICAL_SCHEMAS[dataset]
-            missing_rules = [field for field in schema.get("required", []) if field not in column_rules]
-            if missing_rules:
-                raise ValueError(f"Required canonical field(s) are not mapped: {missing_rules}")
-            for target, rule in column_rules.items():
-                out[target] = _series_from_rule(raw, rule, target)
-                blanks = int(_blank_mask(out[target]).sum())
-                report_rows.append({
-                    "dataset": dataset,
-                    "target_field": target,
-                    "source_rule": json.dumps(rule, default=str) if isinstance(rule, dict) else str(rule),
-                    "rows": len(out),
-                    "blank_values": blanks,
-                    "status": "READY" if blanks == 0 or target not in schema.get("required", []) else "REVIEW_BLANK_REQUIRED_VALUES",
-                })
-            if config.get("drop_duplicates"):
-                out = out.drop_duplicates(subset=list(config["drop_duplicates"]))
-            frames[dataset] = out.reset_index(drop=True)
-            frames[dataset].to_csv(output_root / f"{dataset}.csv", index=False)
+            raw=_read_descriptor(source_root,config.get("source") or {});out=pd.DataFrame(index=raw.index);column_rules=config.get("columns") or {};schema=CANONICAL_SCHEMAS[dataset];missing_rules=[field for field in schema.get("required",[]) if field not in column_rules]
+            if missing_rules:raise ValueError(f"Required canonical field(s) are not mapped: {missing_rules}")
+            for target,rule in column_rules.items():
+                out[target]=_series_from_rule(raw,rule,target);blanks=int(_blank_mask(out[target]).sum());report_rows.append({"dataset":dataset,"target_field":target,"source_rule":json.dumps(rule,default=str) if isinstance(rule,dict) else str(rule),"rows":len(out),"blank_values":blanks,"status":"READY" if blanks==0 or target not in schema.get("required",[]) else "REVIEW_BLANK_REQUIRED_VALUES"})
+            if config.get("drop_duplicates"):out=out.drop_duplicates(subset=list(config["drop_duplicates"]))
+            out=normalize_canonical_frame(dataset,out);frames[dataset]=out.reset_index(drop=True);frames[dataset].to_csv(output_root/f"{dataset}.csv",index=False)
         except Exception as exc:
-            msg = f"{dataset}: {type(exc).__name__}: {exc}"
-            errors.append(msg)
-            report_rows.append({"dataset": dataset, "target_field": "*", "source_rule": "", "rows": 0, "blank_values": None, "status": f"ERROR: {exc}"})
-
-    core_required = ["employees", "pay_details", "employment_history", "timesheets"]
-    missing_datasets = [d for d in core_required if d not in frames or frames[d].empty]
-    if missing_datasets:
-        errors.append("Required canonical dataset(s) were not produced: " + ", ".join(missing_datasets))
-
-    report = pd.DataFrame(report_rows)
-    report.to_csv(output_root / "conversion_report.csv", index=False)
-    (output_root / "mapping_used.json").write_text(json.dumps(mapping, indent=2), encoding="utf-8")
-
-    workbook_path = output_root / "audithero_input.xlsx"
+            errors.append(f"{dataset}: {type(exc).__name__}: {exc}");report_rows.append({"dataset":dataset,"target_field":"*","source_rule":"","rows":0,"blank_values":None,"status":f"ERROR: {exc}"})
+    core_required=["employees","pay_details","employment_history","timesheets"];missing_datasets=[d for d in core_required if d not in frames or frames[d].empty]
+    if missing_datasets:errors.append("Required canonical dataset(s) were not produced: "+", ".join(missing_datasets))
+    report=pd.DataFrame(report_rows);report.to_csv(output_root/"conversion_report.csv",index=False);(output_root/"mapping_used.json").write_text(json.dumps(mapping,indent=2),encoding="utf-8")
+    workbook_path=output_root/"audithero_input.xlsx"
     if write_workbook and frames:
-        with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
-            guide = pd.DataFrame([
-                ["AuditHero canonical workbook generated by source mapping pipeline"],
-                ["Generated datasets", ", ".join(sorted(frames))],
-                ["Conversion report", "See conversion_report.csv beside this workbook"],
-                ["Next step", "Run AuditHero File Readiness before running an audit"],
-            ])
-            guide.to_excel(writer, sheet_name="README", header=False, index=False)
-            for dataset, frame in frames.items():
-                frame.to_excel(writer, sheet_name=dataset[:31], index=False)
-
-    result = {
-        "frames": frames,
-        "report": report,
-        "errors": errors,
-        "output_root": str(output_root),
-        "workbook": str(workbook_path) if write_workbook else None,
-    }
-    if errors and strict:
-        raise ValueError("Source conversion failed:\n - " + "\n - ".join(errors))
+        with pd.ExcelWriter(workbook_path,engine="openpyxl") as writer:
+            guide=pd.DataFrame([["AuditHero canonical workbook generated by source mapping pipeline"],["Generated datasets",", ".join(sorted(frames))],["Date interpretation","Ambiguous numeric dates use Australian day-first order (DD-MM-YYYY / DD/MM/YYYY). ISO YYYY-MM-DD is also supported."],["Conversion report","See conversion_report.csv beside this workbook"],["Next step","Run AuditHero File Readiness before running an audit"]]);guide.to_excel(writer,sheet_name="README",header=False,index=False)
+            for dataset,frame in frames.items():frame.to_excel(writer,sheet_name=dataset[:31],index=False)
+    result={"frames":frames,"report":report,"errors":errors,"output_root":str(output_root),"workbook":str(workbook_path) if write_workbook else None}
+    if errors and strict:raise ValueError("Source conversion failed:\n - "+"\n - ".join(errors))
     return result
