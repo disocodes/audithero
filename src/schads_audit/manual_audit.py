@@ -17,7 +17,7 @@ from .part_time_patterns import apply_part_time_pattern_checks
 from .rest_meal import apply_meal_break_events
 from .rest_breaks import apply_rest_between_work
 from .toil import audit_toil_register, merge_toil_adjustments
-from .award_scenarios import calculate_award_scenarios
+from .award_scenarios_fast import calculate_award_scenarios
 
 
 def _csv(path: Path):
