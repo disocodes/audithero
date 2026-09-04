@@ -82,14 +82,20 @@ def _nonblank(series: pd.Series) -> pd.Series:
 
 
 def normalize_canonical_frame(dataset: str, frame: pd.DataFrame) -> pd.DataFrame:
-    """Coerce one canonical dataset and retain flags for invalid numeric evidence."""
+    """Coerce one canonical dataset and retain flags for invalid source evidence."""
     if frame is None or frame.empty:
         return frame.copy() if frame is not None else pd.DataFrame()
     out = frame.copy()
 
     for field in DATE_FIELDS.get(dataset, ()):
-        if field in out.columns:
-            out[field] = parse_datetime_series(out[field])
+        if field not in out.columns:
+            continue
+        original = out[field].copy()
+        converted = parse_datetime_series(original)
+        invalid = _nonblank(original) & converted.isna()
+        if bool(invalid.any()):
+            out[f"_invalid_{field}"] = invalid
+        out[field] = converted
 
     for field in NUMERIC_FIELDS.get(dataset, ()):
         if field not in out.columns:
