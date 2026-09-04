@@ -24,6 +24,14 @@ def _control_present(frames,root,name):
     df=frames.get(name); return (df is not None and not df.empty) or _sidecar_present(root,name)
 
 
+def _blank_mask(series: pd.Series) -> pd.Series:
+    return series.isna() | series.astype(str).str.strip().str.lower().isin({"", "nan", "nat", "none"})
+
+
+def _invalid_datetime_mask(series: pd.Series) -> pd.Series:
+    return (~_blank_mask(series)) & pd.to_datetime(series,errors="coerce").isna()
+
+
 def assess_file_readiness(input_root,config_root):
     findings=[]
     def add(kind,key,status,detail): findings.append({"finding_type":kind,"source_key":key,"status":status,"detail":detail})
@@ -37,7 +45,20 @@ def assess_file_readiness(input_root,config_root):
         add("INPUT_LOAD","manual_files","BLOCKING",str(exc)); return pd.DataFrame(findings)
 
     for name,required in REQUIRED_COLUMNS.items():
-        missing=sorted(required-set(frames[name].columns)); add("INPUT_COLUMNS",name,"BLOCKING" if missing else "READY",("Missing columns: "+", ".join(missing)) if missing else "Required columns present")
+        frame=frames[name]
+        missing=sorted(required-set(frame.columns)); add("INPUT_COLUMNS",name,"BLOCKING" if missing else "READY",("Missing columns: "+", ".join(missing)) if missing else "Required columns present")
+        if missing:
+            continue
+        blank_fields=[]
+        for field in sorted(required):
+            count=int(_blank_mask(frame[field]).sum())
+            if count:
+                blank_fields.append(f"{field} ({count})")
+        if blank_fields:
+            add("INPUT_REQUIRED_VALUES",name,"BLOCKING","Blank required value(s): "+", ".join(blank_fields))
+        else:
+            add("INPUT_REQUIRED_VALUES",name,"READY","Required values populated")
+
     for name,cols in OPTIONAL_COLUMNS.items():
         missing=sorted(cols-set(frames[name].columns))
         if missing: add("INPUT_COLUMNS_RECOMMENDED",name,"REVIEW","Recommended columns absent: "+", ".join(missing))
@@ -51,14 +72,61 @@ def assess_file_readiness(input_root,config_root):
             count=int(frame[column].fillna(False).astype(bool).sum())
             if count:
                 field=str(column)[len("_invalid_"):]
-                add("INPUT_VALUE_TYPE",f"{dataset}.{field}","REVIEW",f"{count} non-blank value(s) could not be converted to the canonical numeric type; affected calculations will be marked for review")
+                status="BLOCKING" if field in REQUIRED_COLUMNS.get(dataset,set()) else "REVIEW"
+                add("INPUT_VALUE_TYPE",f"{dataset}.{field}",status,f"{count} non-blank value(s) could not be converted to the canonical type")
+
+    # Required temporal fields must parse cleanly. A populated but unparseable date
+    # is a blocking data-quality defect, not a valid historical record.
+    temporal_fields={
+        "pay_details":["effective_from"],
+        "employment_history":["start_date"],
+        "timesheets":["start_datetime","end_datetime"],
+    }
+    for dataset,fields in temporal_fields.items():
+        frame=frames[dataset]
+        for field in fields:
+            if field in frame.columns:
+                invalid=int(_invalid_datetime_mask(frame[field]).sum())
+                if invalid:
+                    add("INPUT_DATETIME",f"{dataset}.{field}","BLOCKING",f"{invalid} populated value(s) are not valid datetimes")
+
+    ts=frames["timesheets"]
+    if {"start_datetime","end_datetime"}.issubset(ts.columns):
+        starts=pd.to_datetime(ts["start_datetime"],errors="coerce")
+        ends=pd.to_datetime(ts["end_datetime"],errors="coerce")
+        invalid_order=int((starts.notna()&ends.notna()&(ends<=starts)).sum())
+        if invalid_order:
+            add("SHIFT_INTERVAL","timesheets","BLOCKING",f"{invalid_order} shift(s) have end_datetime less than or equal to start_datetime")
+
+    # Canonical source keys must be usable for joins. Unknown employee references
+    # would otherwise silently disappear or attach to the wrong evidence chain.
+    employee_ids=set(frames["employees"]["employee_id"].dropna().astype(str).str.strip()) if "employee_id" in frames["employees"].columns else set()
+    if "employee_id" in frames["employees"].columns:
+        dup=int(frames["employees"]["employee_id"].astype(str).str.strip().duplicated(keep=False).sum())
+        if dup:
+            add("KEY_UNIQUENESS","employees.employee_id","BLOCKING",f"{dup} employee row(s) use duplicated employee_id values")
+    if "timesheet_id" in ts.columns:
+        dup=int(ts["timesheet_id"].astype(str).str.strip().duplicated(keep=False).sum())
+        if dup:
+            add("KEY_UNIQUENESS","timesheets.timesheet_id","BLOCKING",f"{dup} timesheet row(s) use duplicated timesheet_id values")
+
+    for dataset in ("pay_details","employment_history","timesheets"):
+        frame=frames[dataset]
+        if "employee_id" not in frame.columns:
+            continue
+        refs=set(frame["employee_id"].dropna().astype(str).str.strip())
+        unknown=sorted(x for x in refs if x and x not in employee_ids)
+        if unknown:
+            sample=", ".join(unknown[:10])
+            suffix=" ..." if len(unknown)>10 else ""
+            add("REFERENTIAL_INTEGRITY",f"{dataset}.employee_id","BLOCKING",f"{len(unknown)} employee ID(s) are not present in employees: {sample}{suffix}")
 
     pdets=frames["pay_details"]
     if "classification_code" in pdets.columns:
         blank=pdets["classification_code"].isna()|(pdets["classification_code"].fillna("").astype(str).str.strip()=="")
         if int(blank.sum()): add("CLASSIFICATION","classification_code","BLOCKING",f"{int(blank.sum())} pay-detail row(s) lack a canonical SCHADS classification code")
 
-    ts=frames["timesheets"]; pay_runs=frames.get("pay_runs",pd.DataFrame())
+    pay_runs=frames.get("pay_runs",pd.DataFrame())
     missing_period="pay_period_start" not in ts.columns or ts["pay_period_start"].isna().any()
     if missing_period and (pay_runs is None or pay_runs.empty): add("PAY_PERIOD","pay_period_start","REVIEW","Some/all timesheets lack pay-period start and no pay_runs sheet was supplied; first-full-pay-period Award version selection may require review")
     elif missing_period: add("PAY_PERIOD","pay_runs","READY","pay_runs supplied; unique matching periods can be assigned automatically")
@@ -68,21 +136,33 @@ def assess_file_readiness(input_root,config_root):
         add("CONTROL_REGISTER","industrial_instrument_history","BLOCKING","Historical remediation requires Award/EA/IFA coverage evidence; add the workbook sheet or sidecar CSV")
     else: add("CONTROL_REGISTER","industrial_instrument_history","READY","Instrument history evidence present")
 
-    employment=frames["employment_history"]; has_pt="employment_type" in employment.columns and employment["employment_type"].astype(str).str.upper().str.contains("PART").any()
+    employment=frames["employment_history"]; has_pt="employment_type" in employment.columns and employment["employment_type"].astype(str).str.upper().str.contains("PART",na=False).any()
     if has_pt and not _control_present(frames,root,"part_time_patterns"):
         add("CONTROL_REGISTER","part_time_patterns","BLOCKING","Part-time employees detected; add effective-dated written pattern history")
     elif has_pt: add("CONTROL_REGISTER","part_time_patterns","READY","Part-time pattern evidence present")
+
+    if "work_group" in frames["employees"].columns:
+        missing_group=int(_blank_mask(frames["employees"]["work_group"]).sum())
+        if missing_group: add("AWARD_CONTEXT","work_group","REVIEW",f"{missing_group} employee(s) lack work-group evidence; affected Award-condition calculations will require review")
+    if "state" in frames["employees"].columns:
+        missing_state=int(_blank_mask(frames["employees"]["state"]).sum())
+        if missing_state: add("AWARD_CONTEXT","state","REVIEW",f"{missing_state} employee(s) lack state evidence; public-holiday analysis may be incomplete")
 
     payroll=frames["payroll_earnings"]
     if payroll.empty:
         add("ACTUAL_PAY","payroll_earnings","REVIEW","Expected entitlements can be calculated; actual-pay reconciliation is unavailable because payroll earnings were not supplied")
     else:
         needed={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}; miss=sorted(needed-set(payroll.columns))
-        invalid_required=[field for field in needed if field in payroll.columns and payroll[field].isna().any()]
-        if miss or invalid_required:
+        invalid_required=[field for field in needed if field in payroll.columns and _blank_mask(payroll[field]).any()]
+        unknown_payroll=[]
+        if "employee_id" in payroll.columns:
+            refs=set(payroll["employee_id"].dropna().astype(str).str.strip())
+            unknown_payroll=sorted(x for x in refs if x and x not in employee_ids)
+        if miss or invalid_required or unknown_payroll:
             details=[]
             if miss: details.append("Missing: "+", ".join(miss))
             if invalid_required: details.append("Blank/invalid values: "+", ".join(sorted(invalid_required)))
+            if unknown_payroll: details.append(f"{len(unknown_payroll)} employee ID(s) do not match employee evidence")
             add("ACTUAL_PAY","payroll_earnings","REVIEW","Payroll earnings were supplied but actual-pay reconciliation is unavailable. "+"; ".join(details))
         else:
             add("ACTUAL_PAY","payroll_earnings","READY","Actual payroll earnings available")
