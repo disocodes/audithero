@@ -2,9 +2,11 @@ from __future__ import annotations
 from datetime import datetime,time
 import pandas as pd
 
+from .dates import parse_datetime_series, parse_datetime_value
+
 
 def _dt(v):
-    x=pd.to_datetime(v,errors='coerce')
+    x=parse_datetime_value(v)
     return None if pd.isna(x) else x
 
 
@@ -26,8 +28,8 @@ def _effective_rows(patterns,eid,when):
     if patterns is None or patterns.empty:return pd.DataFrame()
     q=patterns[patterns['employee_id'].astype(str)==str(eid)].copy()
     if q.empty:return q
-    q['_from']=pd.to_datetime(q['effective_from'],errors='coerce')
-    q['_to']=pd.to_datetime(q.get('effective_to'),errors='coerce') if 'effective_to' in q.columns else pd.NaT
+    q['_from']=parse_datetime_series(q['effective_from'])
+    q['_to']=parse_datetime_series(q['effective_to']) if 'effective_to' in q.columns else pd.NaT
     q=q[(q['_from']<=when)&(q['_to'].isna()|(q['_to']>=when))]
     return q
 
@@ -36,7 +38,7 @@ def _variation_match(variations,eid,start,end):
     if variations is None or variations.empty:return None
     q=variations[variations['employee_id'].astype(str)==str(eid)].copy()
     if q.empty:return None
-    q['_date']=pd.to_datetime(q['shift_date'],errors='coerce').dt.date
+    q['_date']=parse_datetime_series(q['shift_date']).dt.date
     q=q[q['_date']==start.date()]
     if q.empty:return None
     for _,r in q.iterrows():
