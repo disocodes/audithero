@@ -4,12 +4,13 @@ from datetime import time
 from decimal import Decimal
 import pandas as pd
 
+from .dates import parse_datetime_series, parse_datetime_value
 from .money import money, effective_hourly_rate, line_amount
 
 
 def _dt(v):
     if v is None or v == '': return None
-    x = pd.to_datetime(v, errors='coerce')
+    x = parse_datetime_value(v)
     return None if pd.isna(x) else x
 
 
@@ -20,7 +21,7 @@ def _bool(v):
 
 def _day_type(d, state, holidays, location_key=None):
     if holidays is not None and not holidays.empty:
-        h=holidays.copy();h['_d']=pd.to_datetime(h['holiday_date'],errors='coerce').dt.date
+        h=holidays.copy();h['_d']=parse_datetime_series(h['holiday_date']).dt.date
         q=h[(h['_d']==d)&(h['state'].astype(str).str.upper()==str(state).upper())]
         if not q.empty:
             if 'holiday_location_key' not in q.columns:return 'PUBLIC_HOLIDAY'
@@ -32,7 +33,7 @@ def _day_type(d, state, holidays, location_key=None):
 
 
 def _shift_type(start, end):
-    start,end = pd.to_datetime(start),pd.to_datetime(end)
+    start,end = parse_datetime_value(start),parse_datetime_value(end)
     if start.weekday() > 4: return 'NONE'
     if start.time() < time(6): return 'NIGHT'
     if end.date() > start.date(): return 'NIGHT'
@@ -77,7 +78,7 @@ def attach_rosters(timesheets, rosters):
     for c in ('rostered_start_datetime','rostered_end_datetime','rostered_shift_match','rostered_shift_match_status'):
         if c not in out.columns:out[c]=None
     if rosters is None or rosters.empty:out['rostered_shift_match_status']='NO_ROSTER_DATA';return out
-    rr=rosters.copy();rr['_s']=pd.to_datetime(rr['rostered_start_datetime'],errors='coerce');rr['_e']=pd.to_datetime(rr['rostered_end_datetime'],errors='coerce')
+    rr=rosters.copy();rr['_s']=parse_datetime_series(rr['rostered_start_datetime']);rr['_e']=parse_datetime_series(rr['rostered_end_datetime'])
     for idx,r in out.iterrows():
         cand=rr[rr['employee_id'].astype(str)==str(r.get('employee_id'))];explicit=str(r.get('rostered_shift_id') or '')
         if explicit:
@@ -157,7 +158,7 @@ def apply_rostered_and_daily_overtime(detail,timesheets,holidays,lib):
 def allocate_period_overtime(detail,holidays,lib):
     """Automatically allocate PT/casual 38h-week / 76h-fortnight overtime when unique."""
     if detail is None or detail.empty:return detail
-    out=detail.copy();out['shift_start']=pd.to_datetime(out['shift_start'],errors='coerce');out['shift_end']=pd.to_datetime(out['shift_end'],errors='coerce');out['_week']=out['shift_start'].dt.to_period('W-SUN').astype(str)
+    out=detail.copy();out['shift_start']=parse_datetime_series(out['shift_start']);out['shift_end']=parse_datetime_series(out['shift_end']);out['_week']=out['shift_start'].dt.to_period('W-SUN').astype(str)
     candidate_hours={}
     for (eid,w),g in out[out['employment_type'].isin(['PART_TIME','CASUAL'])].groupby(['employee_id','_week']):
         g=g.sort_values('shift_start');cum=0.0
@@ -188,7 +189,7 @@ def allocate_period_overtime(detail,holidays,lib):
 
 def flag_period_overtime(detail):
     if detail is None or detail.empty:return detail
-    out=detail.copy();out['shift_start']=pd.to_datetime(out['shift_start'],errors='coerce');out['_week']=out['shift_start'].dt.to_period('W-SUN').astype(str);weekly=out.groupby(['employee_id','_week'],dropna=False)['worked_hours'].sum().to_dict();period=out.groupby(['employee_id','pay_period_start','pay_period_end'],dropna=False)['worked_hours'].sum().to_dict()
+    out=detail.copy();out['shift_start']=parse_datetime_series(out['shift_start']);out['_week']=out['shift_start'].dt.to_period('W-SUN').astype(str);weekly=out.groupby(['employee_id','_week'],dropna=False)['worked_hours'].sum().to_dict();period=out.groupby(['employee_id','pay_period_start','pay_period_end'],dropna=False)['worked_hours'].sum().to_dict()
     for idx,r in out.iterrows():
         if r.get('employment_type') not in ('PART_TIME','CASUAL'):continue
         w=float(weekly.get((r['employee_id'],r['_week']),0))
