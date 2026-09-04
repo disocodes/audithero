@@ -19,26 +19,60 @@ SNAPSHOT_SOURCES = {
 }
 
 
-def _ensure_snapshot_table(spark, target: str, source: str) -> None:
-    """Create an empty Delta snapshot table with the source table's exact schema."""
-    try:
-        if spark.catalog.tableExists(target):
-            return
-        (
-            spark.table(source)
-            .limit(0)
-            .write.format("delta")
-            .mode("ignore")
-            .saveAsTable(target)
+def _column_sql_type(field) -> str:
+    """Translate Spark schema types into SQL types suitable for ALTER TABLE."""
+    text = field.dataType.simpleString().upper()
+    aliases = {
+        "INTEGER": "INT",
+        "LONG": "BIGINT",
+        "BOOLEAN": "BOOLEAN",
+        "STRING": "STRING",
+        "DOUBLE": "DOUBLE",
+        "FLOAT": "FLOAT",
+        "TIMESTAMP": "TIMESTAMP",
+        "DATE": "DATE",
+    }
+    return aliases.get(text, text)
+
+
+def _sync_snapshot_schema(spark, target: str, source: str) -> None:
+    """Add source columns missing from an existing Direct Lake snapshot table."""
+    source_fields = {field.name: field for field in spark.table(source).schema.fields}
+    target_fields = {field.name for field in spark.table(target).schema.fields}
+    missing = [
+        f"`{name}` {_column_sql_type(field)}"
+        for name, field in source_fields.items()
+        if name not in target_fields
+    ]
+    if missing:
+        _sql(
+            spark,
+            f"upgrading BI snapshot schema {target}",
+            f"ALTER TABLE {target} ADD COLUMNS ({', '.join(missing)})",
         )
+        print(f"Updated Direct Lake snapshot schema: {target} (+{len(missing)} column(s))")
+
+
+def _ensure_snapshot_table(spark, target: str, source: str) -> None:
+    """Create or evolve a stable Delta snapshot table from its governed source."""
+    try:
+        if not spark.catalog.tableExists(target):
+            (
+                spark.table(source)
+                .limit(0)
+                .write.format("delta")
+                .mode("ignore")
+                .saveAsTable(target)
+            )
+        _sync_snapshot_schema(spark, target, source)
     except Exception as exc:
         raise RuntimeError(
-            f"Fabric failed creating BI snapshot table {target} from {source}"
+            f"Fabric failed preparing BI snapshot table {target} from {source}"
         ) from exc
 
 
 def ensure_current_tables(spark):
-    """Create stable materialized tables used by the Direct Lake semantic model."""
+    """Create/evolve materialized tables used by the Direct Lake semantic model."""
     for target, source in SNAPSHOT_SOURCES.items():
         _ensure_snapshot_table(spark, target, source)
 
