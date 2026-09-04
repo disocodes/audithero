@@ -18,10 +18,10 @@ python "$ROOT/scripts/preflight.py" --platform fabric --fabric-config "$CONFIG"
 echo "Deploying AuditHero core to Microsoft Fabric..."
 python "$ROOT/fabric/scripts/deploy_fabric.py" --config "$CONFIG"
 
-echo "Deploying canonical CSV/XLSX audit path..."
+echo "Deploying automatic and advanced uploaded-file audit paths..."
 python "$ROOT/fabric/scripts/deploy_file_source.py" --config "$CONFIG"
 
-echo "Deploying source inspection, field mapping and conversion/audit pipelines..."
+echo "Deploying advanced source inspection, field mapping and conversion pipelines..."
 python "$ROOT/fabric/scripts/deploy_source_mapping.py" --config "$CONFIG"
 
 echo "Deploying AuditHero administration notebooks..."
@@ -31,18 +31,23 @@ cat <<'EOF'
 
 AuditHero Fabric deployment complete.
 
-Normal operator path in Fabric:
-  1. Upload original payroll/HR/rostering/timekeeping exports to Lakehouse Files/import/raw.
-  2. Run "AuditHero - Build Source Mapping Workbook".
-  3. Review the generated Excel mapping and upload the approved version as source_mapping.xlsx.
-  4. Run "AuditHero - Convert Mapped Files and Run Audit" for the required dates.
-  5. Review the Power BI report.
+Primary operator path in Fabric:
+  1. Upload ordinary timesheet, employee, rate-history and optional payroll CSV/XLSX files to Lakehouse Files/import/raw.
+  2. Run "AuditHero - Auto Audit Uploaded Files".
+  3. Open the AuditHero Power BI report.
+  4. Select the employee, SCHADS stream, level, pay point and employment type as required to review Award scenarios and detailed findings.
+
+AuditHero automatically aligns effective-dated employee rates to shift dates, calculates supported SCHADS penalties/overtime/rest/break/sleepover/broken-shift/minimum-engagement outcomes, and identifies unresolved evidence as review findings rather than blocking the rest of the audit.
+
+Advanced import tools remain available for unusual source layouts:
+  - AuditHero - Build Source Mapping Workbook
+  - AuditHero - Convert Source Files
+  - AuditHero - Convert Mapped Files and Run Audit
+  - AuditHero - Canonical Files Audit (Advanced)
 
 Administration notebooks:
   - AuditHero - Install or Upgrade
   - AuditHero - Uninstall
 
-Use "AuditHero - Convert Source Files" when you only want to test conversion/readiness.
-If files already use the AuditHero canonical workbook/CSV format, upload them to Files/input and run the direct uploaded-file audit pipeline.
 Employment Hero API connectivity is optional.
 EOF
