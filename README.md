@@ -17,6 +17,124 @@ AuditHero is evidence-driven and fail-closed:
 - Award scenarios are analytical comparators and do not establish an employee's legal classification by themselves; and
 - rule selection uses effective-dated rule packs for the audit period.
 
+## Which job do I run?
+
+The exact deployed job names and their intended order are shown below. For normal CSV/XLSX payroll auditing, use the **Standard uploaded-file path** unless the preview identifies a mapping problem.
+
+### Standard uploaded-file path — normal monthly/operator workflow
+
+1. Upload the original CSV/XLSX exports to the raw landing folder.
+2. Run **AuditHero - Preview Uploaded Files**.
+3. Review `auto_intake_preview.csv`, `auto_intake_manifest.json`, detected file roles, mapped fields and warnings.
+4. If the interpretation is correct, run **AuditHero - Audit Reviewed Uploaded Files**.
+5. Review the dashboard/report and detailed audit evidence.
+
+Run order:
+
+```text
+AuditHero - Preview Uploaded Files
+        ↓
+review preview and warnings
+        ↓
+AuditHero - Audit Reviewed Uploaded Files
+        ↓
+review results
+```
+
+Do not use **AuditHero - Build Source Mapping Workbook (Advanced)** for every run. It is only required when the preview is incorrect, incomplete or needs additional controlled context.
+
+### Advanced Mapping path — when the preview needs correction
+
+1. Run **AuditHero - Preview Uploaded Files** first.
+2. If the interpretation is not acceptable, run **AuditHero - Build Source Mapping Workbook (Advanced)**.
+3. Review and correct the generated workbook using the controlled dropdowns.
+4. Upload/save the approved workbook as `source_mapping.xlsx`.
+5. Run **AuditHero - Convert Mapped Files and Run Audit (Advanced)**.
+6. Review the resulting readiness, audit and reconciliation evidence.
+
+Run order:
+
+```text
+AuditHero - Preview Uploaded Files
+        ↓
+preview needs correction
+        ↓
+AuditHero - Build Source Mapping Workbook (Advanced)
+        ↓
+review and approve source_mapping.xlsx
+        ↓
+AuditHero - Convert Mapped Files and Run Audit (Advanced)
+        ↓
+review results
+```
+
+**AuditHero - Convert Source Files (Advanced)** is available when conversion and readiness need to be inspected without running the payroll audit.
+
+### Canonical-file path — when AuditHero canonical files already exist
+
+Use this only when the input is already in AuditHero canonical format.
+
+Databricks:
+
+```text
+AuditHero - File Readiness (Advanced)
+        ↓
+AuditHero - Audit Canonical CSV Excel (Advanced)
+```
+
+The canonical audit job already includes a readiness task. The standalone **AuditHero - File Readiness (Advanced)** job is useful when readiness needs to be inspected without starting an audit.
+
+Fabric uses the deployed **AuditHero - Canonical Files Audit (Advanced)** pipeline, which performs readiness, audit and BI refresh in sequence.
+
+### Employment Hero API — first-time or changed configuration
+
+Run these in order:
+
+```text
+AuditHero - Employment Hero Connection Test (Optional API)
+        ↓
+AuditHero - API Audit Readiness (Optional API)
+        ↓
+AuditHero - Historical SCHADS Audit (Optional API)
+```
+
+Use **AuditHero - Historical SCHADS Audit (Optional API)** for a selected historical date range after connectivity and readiness have been validated.
+
+### Employment Hero API — recurring monthly payroll
+
+After a representative payroll period has been validated, run:
+
+**AuditHero - Monthly Payroll Audit (Optional API)**
+
+The recurring schedule is paused/disabled by default and should only be enabled after the organisation's mappings, evidence controls and representative results have been approved.
+
+### Installation and validation jobs
+
+These are installation/administration jobs rather than routine payroll-audit jobs:
+
+- **AuditHero - Setup**
+- **AuditHero - Self Test**
+
+They are run during installation/upgrade validation and do not replace the operator workflows above.
+
+### Databricks job inventory
+
+The Databricks deployment currently defines these exact jobs:
+
+- **AuditHero - Setup**
+- **AuditHero - Self Test**
+- **AuditHero - Preview Uploaded Files**
+- **AuditHero - Audit Reviewed Uploaded Files**
+- **AuditHero - Build Source Mapping Workbook (Advanced)**
+- **AuditHero - Convert Source Files (Advanced)**
+- **AuditHero - Convert Mapped Files and Run Audit (Advanced)**
+- **AuditHero - File Readiness (Advanced)**
+- **AuditHero - Audit Canonical CSV Excel (Advanced)**
+- **AuditHero - Employment Hero Connection Test (Optional API)**
+- **AuditHero - API Audit Readiness (Optional API)**
+- **AuditHero - Historical SCHADS Audit (Optional API)**
+- **AuditHero - Monthly Payroll Audit (Optional API)**
+
 ## Standard CSV / Excel workflow
 
 The normal file workflow is preview-first:
