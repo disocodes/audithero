@@ -1,4 +1,6 @@
 import time,requests
+from .dates import as_date, iso_date
+
 class EmploymentHeroPayrollClient:
     def __init__(self,api_key,business_id,base_url='https://api.yourpayroll.com.au/api/v2',timeout=60,min_interval=.22):self.api_key=api_key;self.business_id=str(business_id);self.base_url=base_url.rstrip('/');self.timeout=timeout;self.min_interval=min_interval;self._last=0.0
     def _get(self,path,params=None):
@@ -22,14 +24,17 @@ class EmploymentHeroPayrollClient:
             if isinstance(r,dict) and r.get(k) not in (None,''):return r[k]
     def list_pay_runs(self):return self._array(self._get(f'business/{self.business_id}/payrun'))
     def pay_runs_overlapping(self,start,end):
-        s=str(start)[:10];e=str(end)[:10];out=[]
+        s=as_date(start);e=as_date(end);out=[]
         for r in self.list_pay_runs():
-            ps=str(self._first(r,'payPeriodStarting','PayPeriodStarting','payPeriodStart','startDate') or '')[:10];pe=str(self._first(r,'payPeriodEnding','PayPeriodEnding','payPeriodEnd','endDate') or '')[:10]
-            if ps and pe and not(pe<s or ps>e):out.append(r)
+            ps=self._first(r,'payPeriodStarting','PayPeriodStarting','payPeriodStart','startDate');pe=self._first(r,'payPeriodEnding','PayPeriodEnding','payPeriodEnd','endDate')
+            if not ps or not pe:continue
+            try:ps=as_date(ps);pe=as_date(pe)
+            except ValueError:continue
+            if not(pe<s or ps>e):out.append(r)
         return out
     def earnings_lines(self,rid):return self._array(self._get(f'business/{self.business_id}/payrun/{rid}/earningslines'))
     def pull_earnings(self,start,end):
-        runs=self.pay_runs_overlapping(start,end);rows=[]
+        start=iso_date(start);end=iso_date(end);runs=self.pay_runs_overlapping(start,end);rows=[]
         for run in runs:
             rid=self._first(run,'id','Id','payRunId','PayRunId')
             if rid is None:continue
