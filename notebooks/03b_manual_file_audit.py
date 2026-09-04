@@ -39,18 +39,35 @@ end_date = dbutils.widgets.get("end_date").strip()
 generate_award_scenarios = dbutils.widgets.get("generate_award_scenarios").strip().lower() == "true"
 run_type = dbutils.widgets.get("run_type").strip() or "MANUAL_FILE"
 
+# Explicit dates are an all-or-nothing pair. Never combine one manually entered
+# boundary with the other boundary from the preview manifest, because that can
+# unexpectedly expand a short audit into the full detected source range.
+if bool(start_date) != bool(end_date):
+    raise ValueError(
+        "Supply both start_date and end_date, or leave both blank to use the date range from auto_intake_manifest.json. "
+        f"Received start_date={start_date!r}, end_date={end_date!r}."
+    )
+
 manifest_path = Path(input_root) / "auto_intake_manifest.json"
-if (not start_date or not end_date) and manifest_path.exists():
+window_source = "JOB_PARAMETERS"
+if not start_date and not end_date:
+    if not manifest_path.exists():
+        raise ValueError("Audit dates were not supplied and auto_intake_manifest.json was not found in the prepared input folder.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    start_date = start_date or str(manifest.get("audit_start_date") or manifest.get("start_date") or "")
-    end_date = end_date or str(manifest.get("audit_end_date") or manifest.get("end_date") or "")
+    start_date = str(manifest.get("audit_start_date") or manifest.get("start_date") or "").strip()
+    end_date = str(manifest.get("audit_end_date") or manifest.get("end_date") or "").strip()
+    window_source = "AUTO_INTAKE_MANIFEST"
 if not start_date or not end_date:
-    raise ValueError("Audit dates could not be determined. Supply start_date/end_date or use a prepared folder containing auto_intake_manifest.json.")
+    raise ValueError("Audit dates could not be determined. Supply both start_date/end_date or rerun the preview job with a valid date window.")
 
 start_iso = iso_date(start_date)
 end_iso = iso_date(end_date)
+if pd.Timestamp(end_iso) < pd.Timestamp(start_iso):
+    raise ValueError(f"end_date must be on or after start_date: {start_date} to {end_date}")
+
 print(f"Input folder: {input_root}")
-print(f"Audit window entered: {start_date} to {end_date}")
+print(f"Audit window source: {window_source}")
+print(f"Audit window entered/detected: {start_date} to {end_date}")
 print(f"Audit window resolved: {start_iso} to {end_iso}")
 print(f"Award scenario matrix: {'enabled' if generate_award_scenarios else 'disabled (recommended for routine/monthly audits)'}")
 print(f"Run type: {run_type}")
@@ -119,7 +136,7 @@ run = pd.DataFrame([{
     "underpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "UNDERPAID").sum()),
     "overpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "OVERPAID").sum()),
     "review_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()),
-    "message": f"input={input_root}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}; scenario_matrix_enabled={generate_award_scenarios}",
+    "message": f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}; scenario_matrix_enabled={generate_award_scenarios}",
 }])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
 create_views(spark, catalog)
