@@ -1,6 +1,6 @@
 # Importing and mapping CSV / Excel files
 
-AuditHero is designed to accept ordinary payroll, HR, roster and timekeeping CSV/XLSX exports without requiring operators to remodel them first.
+AuditHero accepts ordinary payroll, HR, roster and timekeeping CSV/XLSX exports without requiring operators to remodel them first.
 
 The preferred workflow is **preview first, correct only if needed**. Advanced Mapping is an optional correction/context layer; it is not the primary evidence source and is not required when automatic intake is already correct.
 
@@ -17,33 +17,26 @@ Interpretation correct?
    ┌───────┴────────┐
   Yes              No / incomplete
    │                    ↓
-   │          Generate Advanced Mapping workbook
+   │          Advanced Mapping workbook
    │                    ↓
-   │          Correct file role / field mapping
-   │          Add optional file context
+   │          Correct role / field / values
    │                    ↓
    └──────────────┬─────┘
                   ↓
-          Canonical conversion
-                  ↓
-             File Readiness
+         reviewed canonical evidence
                   ↓
               SCHADS audit
 ```
 
-Keep all original source exports unchanged. The Advanced Mapping workbook explains how AuditHero should interpret those files; it does not replace them.
+Keep all original source exports unchanged. Mapping describes how AuditHero should interpret evidence; it does not replace the evidence.
 
 ## Raw source locations
 
 ### Microsoft Fabric
 
-Upload files to:
-
 `/lakehouse/default/Files/import/raw`
 
 ### Databricks
-
-Upload files to:
 
 `/Volumes/schads_payroll/bronze/landing/import/raw`
 
@@ -51,53 +44,57 @@ CSV and XLSX files can be used together. Excel workbooks can contain multiple sh
 
 ## Automatic preview
 
-AuditHero scans each uploaded file/sheet, samples headings and proposes roles such as:
+Run **AuditHero - Preview Uploaded Files**. The standard preview publishes:
 
-- employee records;
-- pay details / classifications;
-- employment history;
-- timesheets;
-- rostered shifts;
-- payroll earnings / actual pay;
-- pay runs;
-- public holidays; and
-- controlled evidence datasets where configured.
+- a table showing each source file/sheet and its detected role(s);
+- the source fields recognised in that item;
+- canonical prepared files for the recognised evidence;
+- `auto_intake_preview.csv`; and
+- `auto_intake_manifest.json` containing the prepared audit window and interpretation metadata.
 
-The operator should review the preview before running an audit. When the detected role and mapped fields are correct, Advanced Mapping is not required.
+Automatic intake is conservative. It does not assume a work group, employment type, industrial instrument or classification merely because those facts are missing.
+
+A standalone payroll earning source is automatically recognised only when it contains a usable employee ID, pay-period start, pay-period end, pay category and amount.
 
 ## Advanced Mapping workbook
 
-Run **AuditHero - Build Source Mapping Workbook** only when the preview is wrong, incomplete or needs extra context.
+Run **AuditHero - Build Source Mapping Workbook (Advanced)** when the automatic interpretation is wrong, incomplete or needs additional context.
 
 The generated `source_mapping_draft.xlsx` contains:
 
-- `preview` — the automatic interpretation that existed when the workbook was generated;
-- `file_context` — lets the operator confirm/correct what an uploaded file represents and optionally describe its evidentiary purpose;
-- `field_mapping` — source-to-AuditHero field mapping;
+- `preview` — the automatic mapping proposal;
+- `file_context` — file/sheet role, primary-source and evidence context controls;
+- `field_mapping` — canonical field to source-column mapping;
 - `value_mapping` — controlled source-value translations; and
-- `pay_category_treatment` when payroll earning-line detail is available.
+- `pay_category_treatment` — added when payroll earning categories are detected.
 
-Dropdown selections are populated from the uploaded source files and AuditHero's controlled schema wherever practical. Operators should select rather than retype file roles, source headings and mapping controls.
+Dropdowns are populated from the uploaded file inventory and controlled AuditHero values wherever practical. Use the dropdown selections rather than typing internal schema identifiers.
 
-## `file_context` sheet
+## `file_context`
 
-Use this sheet when AuditHero misunderstood what a file represents or when extra audit context is useful.
+The `file_context` sheet controls whether and how an uploaded file/sheet participates in conversion.
 
-Example:
+Key fields:
 
-| Source file | Detected role | Selected role | Evidence purpose |
-|---|---|---|---|
-| payroll.xlsx | CONTEXT_ONLY | payroll_earnings | Final payroll earning lines confirming amounts paid |
-| adjustments.xlsx | CONTEXT_ONLY | supplemental_events | Back-pay and manual payroll corrections |
-| roster.xlsx | rostered_shifts | rostered_shifts | Planned shifts |
+- `selected_role` — the canonical dataset represented by the item, or a special role;
+- `use_as_primary_source` — marks the item as the primary source for the selected canonical dataset;
+- `evidence_purpose` — optional descriptive audit context;
+- `period_start` / `period_end` — optional source-document period context;
+- `document_status` — optional description such as draft/final/adjustment; and
+- `notes` — optional review notes.
 
-A corrected primary role can be used to tell AuditHero that a file is, for example, the payroll earning source required for actual-pay reconciliation.
+Special roles:
 
-This is particularly useful in historical audits where multiple payroll systems or legacy exports are supplied.
+- `CONTEXT_ONLY` — retain/document the item as supporting context but do not use it as the canonical source for a dataset;
+- `IGNORE` — exclude the item from mapping/conversion.
 
-## `field_mapping` sheet
+Only one primary source can be selected for a canonical dataset. Duplicate primary selections are rejected.
 
-Each mapping row identifies the AuditHero dataset/field and the corresponding source location.
+Selecting a canonical role changes source selection; it does not by itself create missing field mappings. Required canonical fields must still be mapped in `field_mapping`.
+
+## `field_mapping`
+
+Each row identifies one canonical AuditHero field and the corresponding source location.
 
 Example:
 
@@ -109,28 +106,22 @@ Example:
 | timesheets | end_datetime | timesheets.xlsx | Timesheets | Clock Out |
 | payroll_earnings | amount | payroll.xlsx | Earnings | Gross Amount |
 
-Source-field cells use dropdowns populated from uploaded headings where available, reducing spelling and schema-key errors.
-
-Review all required identifiers, dates, employment types, classification values, hours and amounts before approving a correction.
-
-## Supported mapping operations
-
-The converter supports controlled transformations such as:
+Supported controlled operations include:
 
 - direct source-column copy;
-- coalesce from multiple possible source columns;
-- concatenate source values;
-- combine separate date and time columns;
-- constant values;
+- coalesce across alternative columns;
+- concatenation;
+- separate date/time combination;
+- constants;
 - defaults;
-- value translation; and
+- source-value translation; and
 - basic data-type conversion.
 
 The mapping workbook does not execute arbitrary Python expressions.
 
-## `value_mapping` sheet
+## `value_mapping`
 
-Use `value_mapping` when source values need translation into AuditHero canonical values.
+Use value mapping when source codes or labels need an approved canonical translation.
 
 Examples:
 
@@ -140,66 +131,76 @@ Examples:
 | Permanent PT | PART_TIME |
 | Casual Employee | CASUAL |
 
-## Classifications
+Value translation should not be used to invent Award coverage or classification facts that are not supported by evidence.
 
-Classification mapping is a payroll-compliance control. Do not map an employee to a SCHADS classification only because a job title appears similar.
+## Classification controls
 
-The mapping must reflect the applicable classification evidence for the audit period. Historical classification changes should be supplied as effective-dated evidence where required. Uncertain classification evidence should result in review rather than an invented classification.
+Do not map an employee to a SCHADS classification only because a job title appears similar. Classification mapping must reflect the applicable evidence for the audit period. Historical changes should be effective-dated.
 
-## Pay categories and actual-pay reconciliation
+When a source label does not explicitly and reliably identify the supported SCHADS stream, level and pay point, use controlled mapping/evidence review rather than inference.
 
-Payroll earnings are supporting evidence that lets AuditHero compare expected remuneration with what was actually paid.
+## Payroll earnings and pay-category treatment
 
-Typical treatment values are:
+Payroll earning evidence supports actual-versus-expected reconciliation. Required earning-line fields are:
 
-- `AUDITABLE_WORK` — included in actual auditable pay;
-- `ALLOWANCE` — treated as a separately controlled allowance where supported; and
-- `EXCLUDE` — excluded from the worked-pay comparator, for example leave or reimbursement items.
+- employee ID;
+- pay-period start;
+- pay-period end;
+- pay category; and
+- amount.
 
-A payroll file is useful but not necessarily required to calculate award entitlements. When actual-pay evidence is absent or incomplete, AuditHero can still calculate supported entitlements but must clearly report that actual-versus-expected reconciliation is unavailable or incomplete.
+Approved treatment values are:
 
-## Supporting and contextual evidence
+- `AUDITABLE_WORK` — included in worked-pay reconciliation;
+- `ALLOWANCE` — handled as a controlled allowance category where supported; and
+- `EXCLUDE` — excluded from the worked-pay comparator.
 
-Additional files can improve audit accuracy and explain what happened without becoming mandatory inputs. Examples include rosters, leave records, payroll adjustments, allowance registers, payment confirmations, employment contracts and classification history.
+Detected payroll earnings without approved pay-category treatment remain evidence but do not enable definitive actual-pay reconciliation.
 
-For example, a main payroll file may appear to show an underpayment while a later adjustment file proves that the difference was subsequently corrected. Correct file context allows AuditHero to include that evidence in reconciliation rather than reporting a misleading outstanding variance.
+A missing payroll amount is not interpreted as zero.
+
+## Supplemental and adjustment evidence
+
+Payroll adjustments, back-pay records, allowances and other events affect calculation/reconciliation only when they are mapped into a canonical dataset the audit engine consumes (for example `payroll_earnings` or an applicable controlled supplemental dataset). Describing an item as context alone does not alter calculated pay.
+
+This distinction preserves audit traceability: descriptive context explains the source; canonical mapping determines whether the evidence enters calculation.
 
 ## Approval and conversion
 
-After correcting the workbook where required:
+After correction:
 
-1. save it as `source_mapping.xlsx`;
-2. upload it to the platform import folder; and
-3. run **AuditHero - Convert Mapped Files and Run Audit**.
+1. save the approved workbook as `source_mapping.xlsx`;
+2. upload it to the platform import location; and
+3. run **AuditHero - Convert Mapped Files and Run Audit (Advanced)**.
 
-Use **AuditHero - Convert Source Files** when conversion and File Readiness need to be checked without starting the payroll audit.
+Use **AuditHero - Convert Source Files (Advanced)** when conversion/readiness should be reviewed without starting calculation.
 
 ## Conversion outputs and traceability
 
-The converter writes canonical CSV files and `audithero_input.xlsx` to the canonical input folder. It also writes conversion information such as `mapping_used.json` and `conversion_report.csv` where supported.
+Conversion writes canonical CSV files, `audithero_input.xlsx`, `conversion_report.csv` and `mapping_used.json` where supported. The mapping record preserves the approved file-context information as well as dataset mappings.
 
-The intended evidence chain is:
+Evidence chain:
 
 ```text
 Original source files
         +
-Approved interpretation/correction mapping (when used)
+Approved mapping/context (when required)
         ↓
-Canonical transformed data
+Canonical transformed evidence
         ↓
-Audit results and reconciliation
+Readiness / audit calculation
+        ↓
+Run-scoped results and calculation evidence
 ```
-
-This allows a later reviewer to understand both the original evidence and how AuditHero interpreted it.
 
 ## File Readiness
 
-Successful field conversion does not by itself confirm that the data is audit-ready. File Readiness checks the resulting canonical data for required datasets, columns, classifications, pay-period evidence and controlled historical evidence.
+Successful conversion does not prove audit readiness. Readiness validates required datasets/values, conversions, key relationships, shift intervals, classifications, historical controls and actual-pay controls.
 
-Blocking findings must be resolved before the relevant audit conclusion proceeds. Optional evidence should improve confidence and reconciliation rather than unnecessarily block the entire audit.
+Blocking findings must be resolved for workflows requiring full readiness. Optional actual-pay evidence can remain unavailable while supported entitlement-only analysis proceeds.
 
 ## Reusing a mapping
 
-An approved mapping can be reused for later exports from the same stable source layout. Re-run the preview/mapping review when the source system, report template, sheet name, column name, value coding or file structure changes.
+Reuse an approved mapping only while the source report structure and coding remain stable. Re-run preview/mapping review after changes to the source system, report template, sheet, columns, codes or payroll categories.
 
-Keep approved mapping versions with the payroll/audit evidence for controlled historical work.
+Keep approved mappings with the relevant audit evidence when performing controlled historical work.
