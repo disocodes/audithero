@@ -85,12 +85,7 @@ def _filter_point(frame: pd.DataFrame,date_col: str,lower,upper)->pd.DataFrame:
 
 
 def _filter_effective_history(frame: pd.DataFrame,start_col: str,end_col: str|None,lower,upper)->pd.DataFrame:
-    """Keep only history that can affect the requested audit window.
-
-    For open-ended effective-dated history this retains the latest row in force at
-    the audit start plus changes occurring during the window. For records with an
-    explicit end column it retains rows overlapping the requested window.
-    """
+    """Keep only history that can affect the requested audit window."""
     if frame is None or frame.empty or start_col not in frame.columns:return frame
     if end_col and end_col in frame.columns:
         return _filter_overlap(frame,start_col,end_col,lower,upper)
@@ -114,7 +109,8 @@ def _filter_effective_history(frame: pd.DataFrame,start_col: str,end_col: str|No
     return frame.loc[sorted(keep)].copy() if keep else frame.iloc[0:0].copy()
 
 
-def _prune_to_window(frames: dict[str,pd.DataFrame],start_date=None,end_date=None)->dict[str,pd.DataFrame]:
+def prune_frames_to_window(frames: dict[str,pd.DataFrame],start_date=None,end_date=None)->dict[str,pd.DataFrame]:
+    """Return canonical frames reduced to evidence relevant to an audit window."""
     if not start_date and not end_date:return frames
     lower,upper=_range_bounds(start_date,end_date)
     out={k:(v.copy() if v is not None else pd.DataFrame()) for k,v in frames.items()}
@@ -152,7 +148,7 @@ def load_file_source(input_root: str|Path,start_date=None,end_date=None)->dict[s
     if missing:
         source=f"workbook {workbook.name}" if workbook else str(root)
         raise ValueError("Missing required manual input dataset(s): "+", ".join(missing)+f". Source checked: {source}.")
-    frames=_prune_to_window(frames,start_date,end_date)
+    frames=prune_frames_to_window(frames,start_date,end_date)
     if frames["timesheets"].empty:
         raise ValueError(f"No timesheets fall inside the requested audit window: {start_date} to {end_date}")
     return frames
