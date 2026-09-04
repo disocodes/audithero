@@ -33,6 +33,7 @@ def normalize_timesheets(items):
 def normalize_payroll_earnings(items):return pd.DataFrame([{'payroll_line_id':first(x,'id','Id','earningsLineId','EarningsLineId'),'pay_run_id':first(x,'_pay_run_id','payRunId','PayRunId'),'pay_run_status':first(x,'_pay_run_status','status','Status'),'employee_id':first(x,'employeeId','EmployeeId','employee_id'),'timesheet_id':first(x,'timesheetId','TimesheetId','timesheet_id'),'pay_period_start':first(x,'_pay_period_start','payPeriodStarting','PayPeriodStarting'),'pay_period_end':first(x,'_pay_period_end','payPeriodEnding','PayPeriodEnding'),'earning_date':first(x,'date','Date','earningDate','EarningDate'),'pay_category_id':first(x,'payCategoryId','PayCategoryId'),'pay_category':first(x,'payCategoryName','PayCategoryName','payCategory','PayCategory'),'hours':first(x,'hours','Hours','units','Units',default=0),'rate':first(x,'rate','Rate','payRate','PayRate'),'amount':first(x,'amount','Amount','earnings','Earnings',default=0),'raw_json':raw_json(x)} for x in items])
 
 def infer_schads_classification(name):
+    """Infer only when the source text explicitly identifies a supported SCHADS stream, level and pay point."""
     s=str(name or '')
     if re.search(r'home\s*care',s,re.I) and re.search(r'disability',s,re.I):
         m=re.search(r'level\s*(\d+).*?pay\s*point\s*(\d+)',s,re.I)
@@ -46,8 +47,13 @@ def apply_classification_mapping(df,mapping):
     out['classification_code']=out.apply(lambda r:next((mapping[k].get('classification_code') if isinstance(mapping[k],dict) else mapping[k] for k in [str(r.get('pay_detail_id') or ''),str(r.get('classification_name') or '')] if k in mapping),infer_schads_classification(r.get('classification_name'))),axis=1);return out
 
 def apply_employee_overrides(df,overrides):
+    """Apply explicit employee overrides without inventing an Award work group.
+
+    Missing work-group evidence remains blank. The entitlement engine converts a
+    blank work group to OTHER and marks the affected calculation for review.
+    """
     out=df.copy()
-    if 'work_group' not in out.columns:out['work_group']='DISABILITY_SERVICES'
+    if 'work_group' not in out.columns:out['work_group']=None
     for i,r in out.iterrows():
         for k,v in overrides.get(str(r['employee_id']),{}).items():out.at[i,k]=v
     return out
