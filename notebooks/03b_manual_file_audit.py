@@ -29,14 +29,12 @@ dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("input_root", "")
 dbutils.widgets.text("start_date", "")
 dbutils.widgets.text("end_date", "")
-dbutils.widgets.dropdown("generate_award_scenarios", "false", ["false", "true"])
 dbutils.widgets.text("run_type", "MANUAL_FILE")
 
 catalog = dbutils.widgets.get("catalog")
 input_root = dbutils.widgets.get("input_root").strip() or f"/Volumes/{catalog}/bronze/landing/input"
 start_date = dbutils.widgets.get("start_date").strip()
 end_date = dbutils.widgets.get("end_date").strip()
-generate_award_scenarios = dbutils.widgets.get("generate_award_scenarios").strip().lower() == "true"
 run_type = dbutils.widgets.get("run_type").strip() or "MANUAL_FILE"
 
 # Explicit dates are an all-or-nothing pair. Never combine one manually entered
@@ -69,7 +67,7 @@ print(f"Input folder: {input_root}")
 print(f"Audit window source: {window_source}")
 print(f"Audit window entered/detected: {start_date} to {end_date}")
 print(f"Audit window resolved: {start_iso} to {end_iso}")
-print(f"Award scenario matrix: {'enabled' if generate_award_scenarios else 'disabled (recommended for routine/monthly audits)'}")
+print("Audit scope: full AuditHero calculation and Award scenario analysis for the requested date window")
 print(f"Run type: {run_type}")
 # COMMAND ----------
 # MAGIC %md
@@ -84,7 +82,7 @@ result = run_manual_audit(
     start_iso,
     end_iso,
     lib,
-    generate_award_scenarios=generate_award_scenarios,
+    generate_award_scenarios=True,
 )
 finished = datetime.now(timezone.utc)
 
@@ -136,7 +134,7 @@ run = pd.DataFrame([{
     "underpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "UNDERPAID").sum()),
     "overpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "OVERPAID").sum()),
     "review_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()),
-    "message": f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}; scenario_matrix_enabled={generate_award_scenarios}",
+    "message": f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}",
 }])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
 create_views(spark, catalog)
