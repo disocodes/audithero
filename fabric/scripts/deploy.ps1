@@ -15,7 +15,8 @@ python (Join-Path $Root "fabric\scripts\deploy_source_mapping.py") --config $Con
 python (Join-Path $Root "fabric\scripts\deploy_admin_notebooks.py") --config $Config
 Write-Host ""
 Write-Host "AuditHero Fabric deployment complete."
-Write-Host "Normal UI workflow: upload raw exports -> Build Source Mapping Workbook -> approve source_mapping.xlsx -> Convert Mapped Files and Run Audit -> Power BI."
+Write-Host "Primary workflow: upload ordinary CSV/XLSX files to Files/import/raw -> run AuditHero - Auto Audit Uploaded Files -> open the AuditHero Power BI report."
+Write-Host "Use the report slicers to review employees, SCHADS stream, level, pay point, employment type and Award criteria."
+Write-Host "Mapping/conversion jobs remain available only for unusual source layouts or controlled advanced imports."
 Write-Host "Administration notebooks: AuditHero - Install or Upgrade; AuditHero - Uninstall."
-Write-Host "Use Convert Source Files when you only want to test conversion/readiness."
 Write-Host "Employment Hero API credentials are optional."
