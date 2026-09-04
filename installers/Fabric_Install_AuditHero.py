@@ -169,7 +169,8 @@ config = {
         "enabled": True,
         "source_root": "/lakehouse/default/Files/import/raw",
         "output_root": "/lakehouse/default/Files/auto_input",
-        "pipeline_name": "AuditHero - Auto Audit Uploaded Files"
+        "preview_pipeline_name": "AuditHero - Preview Uploaded Files",
+        "audit_pipeline_name": "AuditHero - Audit Reviewed Uploaded Files"
     },
     "source_mapping": {
         "source_root": "/lakehouse/default/Files/import/raw",
@@ -293,8 +294,10 @@ for step in steps:
 print("\nAuditHero installation completed successfully.")
 print("Primary file workflow:")
 print("  1. Upload ordinary CSV/XLSX files to Lakehouse Files/import/raw")
-print("  2. Run AuditHero - Auto Audit Uploaded Files")
-print("  3. Open AuditHero - SCHADS Payroll Compliance (Power BI)")
+print("  2. Run AuditHero - Preview Uploaded Files")
+print("  3. Review auto_intake_preview.csv and the prepared data")
+print("  4. Run AuditHero - Audit Reviewed Uploaded Files")
+print("  5. Open AuditHero - SCHADS Payroll Compliance (Power BI)")
 print("Advanced import tools:")
 print("  • AuditHero - Build Source Mapping Workbook (Advanced)")
 print("  • AuditHero - Convert Mapped Files and Run Audit (Advanced)")
