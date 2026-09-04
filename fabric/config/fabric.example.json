@@ -10,7 +10,8 @@
     "enabled": true,
     "source_root": "/lakehouse/default/Files/import/raw",
     "output_root": "/lakehouse/default/Files/auto_input",
-    "pipeline_name": "AuditHero - Auto Audit Uploaded Files"
+    "preview_pipeline_name": "AuditHero - Preview Uploaded Files",
+    "audit_pipeline_name": "AuditHero - Audit Reviewed Uploaded Files"
   },
   "source_mapping": {
     "source_root": "/lakehouse/default/Files/import/raw",
