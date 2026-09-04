@@ -1,5 +1,7 @@
 import json,re,pandas as pd
 
+from .dates import parse_datetime_value
+
 
 def first(x,*keys,default=None):
     for k in keys:
@@ -11,7 +13,7 @@ def raw_json(x):return json.dumps(x,default=str,separators=(',',':'))
 def _break_minutes(breaks):
     total=0.0
     for b in breaks or []:
-        s=pd.to_datetime(first(b,'start_time','startTime','start'),errors='coerce');e=pd.to_datetime(first(b,'end_time','endTime','end'),errors='coerce')
+        s=parse_datetime_value(first(b,'start_time','startTime','start'));e=parse_datetime_value(first(b,'end_time','endTime','end'))
         if not pd.isna(s) and not pd.isna(e) and e>s:total+=(e-s).total_seconds()/60
     return round(total,2)
 
