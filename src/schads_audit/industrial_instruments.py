@@ -1,9 +1,11 @@
 from __future__ import annotations
 import pandas as pd
 
+from .dates import parse_datetime_series, parse_datetime_value
+
 
 def _dt(v):
-    x = pd.to_datetime(v, errors='coerce')
+    x = parse_datetime_value(v)
     return None if pd.isna(x) else x
 
 
@@ -18,8 +20,8 @@ def _effective(history, employee_id, when):
         return None
     q=history[history['employee_id'].astype(str)==str(employee_id)].copy()
     if q.empty:return None
-    q['_from']=pd.to_datetime(q['effective_from'],errors='coerce')
-    q['_to']=pd.to_datetime(q.get('effective_to'),errors='coerce') if 'effective_to' in q.columns else pd.NaT
+    q['_from']=parse_datetime_series(q['effective_from'])
+    q['_to']=parse_datetime_series(q['effective_to']) if 'effective_to' in q.columns else pd.NaT
     q=q[(q['_from']<=when)&(q['_to'].isna()|(q['_to']>=when))]
     return None if q.empty else q.sort_values('_from',ascending=False).iloc[0].to_dict()
 
