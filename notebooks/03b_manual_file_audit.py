@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import uuid
 import pandas as pd
 
+from schads_audit.dates import iso_date
 from schads_audit.rules import RuleLibrary
 from schads_audit.manual_audit import run_manual_audit
 from schads_audit.databricks_io import write_df, create_views
@@ -28,12 +29,14 @@ dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("input_root", "")
 dbutils.widgets.text("start_date", "")
 dbutils.widgets.text("end_date", "")
+dbutils.widgets.dropdown("generate_award_scenarios", "false", ["false", "true"])
 dbutils.widgets.text("run_type", "MANUAL_FILE")
 
 catalog = dbutils.widgets.get("catalog")
 input_root = dbutils.widgets.get("input_root").strip() or f"/Volumes/{catalog}/bronze/landing/input"
 start_date = dbutils.widgets.get("start_date").strip()
 end_date = dbutils.widgets.get("end_date").strip()
+generate_award_scenarios = dbutils.widgets.get("generate_award_scenarios").strip().lower() == "true"
 run_type = dbutils.widgets.get("run_type").strip() or "MANUAL_FILE"
 
 manifest_path = Path(input_root) / "auto_intake_manifest.json"
@@ -44,8 +47,12 @@ if (not start_date or not end_date) and manifest_path.exists():
 if not start_date or not end_date:
     raise ValueError("Audit dates could not be determined. Supply start_date/end_date or use a prepared folder containing auto_intake_manifest.json.")
 
+start_iso = iso_date(start_date)
+end_iso = iso_date(end_date)
 print(f"Input folder: {input_root}")
-print(f"Audit window: {start_date} to {end_date}")
+print(f"Audit window entered: {start_date} to {end_date}")
+print(f"Audit window resolved: {start_iso} to {end_iso}")
+print(f"Award scenario matrix: {'enabled' if generate_award_scenarios else 'disabled (recommended for routine/monthly audits)'}")
 print(f"Run type: {run_type}")
 # COMMAND ----------
 # MAGIC %md
@@ -54,8 +61,20 @@ print(f"Run type: {run_type}")
 run_id = str(uuid.uuid4())
 started = datetime.now(timezone.utc)
 lib = RuleLibrary(ROOT / "rules/MA000100")
-result = run_manual_audit(input_root, ROOT / "config", start_date, end_date, lib)
+result = run_manual_audit(
+    input_root,
+    ROOT / "config",
+    start_iso,
+    end_iso,
+    lib,
+    generate_award_scenarios=generate_award_scenarios,
+)
 finished = datetime.now(timezone.utc)
+
+print("Rows retained for requested audit window:")
+for name in ("timesheets", "rostered_shifts", "payroll_earnings", "pay_details", "employment_history"):
+    frame = result.get(name)
+    print(f"  {name}: {0 if frame is None else len(frame):,}")
 # COMMAND ----------
 for frame in (
     result["detail"], result["rest_break_findings"], result["event_adjustments"],
@@ -64,8 +83,8 @@ for frame in (
 ):
     if frame is not None and not frame.empty:
         frame["audit_run_id"] = run_id
-        frame["audit_window_start"] = start_date
-        frame["audit_window_end"] = end_date
+        frame["audit_window_start"] = start_iso
+        frame["audit_window_end"] = end_iso
         frame["run_type"] = run_type
         frame["run_finished_at"] = finished
 # COMMAND ----------
@@ -93,14 +112,14 @@ rest_findings = result["rest_break_findings"]
 scenario_detail = result["award_scenario_detail"]
 actual_source = "FILES" if result.get("actual_pay_usable", False) else "NONE"
 run = pd.DataFrame([{
-    "audit_run_id": run_id, "run_type": run_type, "audit_window_start": start_date,
-    "audit_window_end": end_date, "started_at": started, "finished_at": finished,
+    "audit_run_id": run_id, "run_type": run_type, "audit_window_start": start_iso,
+    "audit_window_end": end_iso, "started_at": started, "finished_at": finished,
     "status": "SUCCESS", "actual_pay_source": actual_source,
     "employees": len(result["employees"]), "timesheets": len(result["timesheets"]),
     "underpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "UNDERPAID").sum()),
     "overpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "OVERPAID").sum()),
     "review_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()),
-    "message": f"input={input_root}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}",
+    "message": f"input={input_root}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}; scenario_matrix_enabled={generate_award_scenarios}",
 }])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
 create_views(spark, catalog)
