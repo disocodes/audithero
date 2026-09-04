@@ -1,6 +1,6 @@
 # AuditHero quick start
 
-Use this guide to install AuditHero and complete a first CSV/Excel SCHADS audit. Employment Hero credentials are required only for Employment Hero API workflows.
+Use this guide to install AuditHero and complete a first CSV/Excel SCHADS audit. Employment Hero credentials are required only for API workflows.
 
 ## 1. Install AuditHero
 
@@ -12,43 +12,31 @@ Import `installers/Fabric_Install_AuditHero.py` into the target Fabric workspace
 
 Import `installers/Databricks_Install_AuditHero.py` into the target Databricks workspace and choose **Run all**.
 
-The installer prepares the required storage, effective-dated rule library, operational jobs or pipelines, reporting assets, and administration notebooks.
+The installer prepares storage, the effective-dated rule library, operational pipelines/jobs, reporting assets, and administration notebooks.
 
 Detailed installation guides:
 
 - [Microsoft Fabric installation](docs/INSTALL_FABRIC_UI.md)
 - [Databricks installation](docs/INSTALL_DATABRICKS_UI.md)
 
-## 2. Prepare the available files
+## 2. Prepare the source files
 
-AuditHero's standard file workflow is designed for ordinary CSV/XLSX exports. A basic timesheet should contain an employee name or identifier and enough date/time information to establish shift start and end.
+AuditHero's standard file workflow accepts ordinary CSV/XLSX exports. A usable timesheet should contain an employee name or identifier and enough date/time information to establish shift start and end.
 
-Useful additional fields or files include:
+Useful additional evidence includes:
 
-- worked hours;
-- unpaid break minutes;
-- employee hourly/base rate;
-- rate effective date;
+- worked hours and unpaid breaks;
+- employee base/hourly rates and effective dates;
 - employment type;
-- classification or Award level;
-- work state/location;
-- role or work type;
-- pay-period dates; and
-- explicit payroll or shift amounts.
+- classification/Award level;
+- work group or service stream;
+- state/location;
+- roster/work type;
+- pay-period dates;
+- payroll earning category, amount, hours and rate; and
+- industrial-instrument, part-time, TOIL, break or other controlled evidence where applicable.
 
-CSV and Excel files can be uploaded together. Excel workbooks may contain multiple sheets.
-
-### Rate histories
-
-Employee rates can be embedded in timesheet rows or supplied separately. A separate rate-history file can contain multiple changes for the same employee:
-
-| Employee Name | Effective Date | Hourly Rate |
-|---|---|---:|
-| Example Employee | 2025-01-01 | 34.20 |
-| Example Employee | 2025-07-01 | 35.80 |
-| Example Employee | 2026-07-01 | 37.40 |
-
-AuditHero aligns each shift with the latest supplied employee rate effective on or before that shift date.
+CSV and Excel files can be uploaded together. Excel workbooks may contain multiple sheets. Keep the original exports unchanged.
 
 ## 3. Upload the files
 
@@ -64,27 +52,54 @@ Upload source files to:
 
 `/Volumes/schads_payroll/bronze/landing/import/raw`
 
-## 4. Run the automatic file audit
+## 4. Preview and prepare
 
 Run:
 
-**AuditHero - Auto Audit Uploaded Files**
+**AuditHero - Preview Uploaded Files**
 
-The workflow automatically:
+AuditHero will:
 
-1. identifies usable timesheet and employee/rate files;
-2. normalizes employee and shift records;
-3. retains effective-dated employee rate history;
-4. calculates the definitive audit where employee facts are known;
-5. calculates selectable SCHADS classification and employment-type scenarios;
-6. evaluates supported Award criteria including penalties, overtime, rest/break findings, sleepovers, broken shifts, minimum engagement and allowances;
-7. reconciles actual payroll only when suitable actual-pay evidence is available;
-8. stores governed results; and
-9. refreshes the reporting layer.
+1. inspect the uploaded CSV/XLSX files and sheets;
+2. identify usable timesheet, employee/rate and clearly structured payroll earning data;
+3. show the interpreted file roles and mapped source fields;
+4. prepare canonical files in the platform's `auto_input` location;
+5. write `auto_intake_preview.csv` and `auto_intake_manifest.json`; and
+6. surface evidence warnings without starting the payroll audit.
 
-Missing optional facts do not prevent unrelated Award calculations. Material facts that cannot be established from the uploaded evidence are reported in **Evidence Required** or `REQUIRES_REVIEW` findings.
+Review the preview before continuing. Missing work group, employment type, industrial instrument, classification or payroll evidence is not invented.
 
-## 5. Review the Award analysis
+## 5. Correct the interpretation only when necessary
+
+If the preview is correct, no Advanced Mapping workbook is required.
+
+If a file or field has been interpreted incorrectly, run:
+
+**AuditHero - Build Source Mapping Workbook (Advanced)**
+
+The workbook provides controlled sheets for:
+
+- automatic preview;
+- file-role/context correction;
+- source-field mapping;
+- value translation; and
+- pay-category treatment when payroll earning categories are detected.
+
+Use the workbook dropdowns rather than typing internal schema fields. Save the approved correction as `source_mapping.xlsx`, then run **AuditHero - Convert Mapped Files and Run Audit (Advanced)**.
+
+## 6. Audit reviewed files
+
+When the automatic preview is correct, run:
+
+**AuditHero - Audit Reviewed Uploaded Files**
+
+The prepared-file manifest supplies the detected audit window unless start/end dates are explicitly overridden.
+
+The audit engine calculates supported definitive outcomes, Award scenarios and evidence findings. Actual-pay reconciliation is enabled only when payroll earning evidence is usable and every relevant pay category has an approved audit treatment.
+
+## 7. Review readiness and results
+
+AuditHero validates required datasets and values, key relationships, date/time evidence, shift intervals and controlled historical evidence. Blocking findings must be resolved where the selected workflow requires full audit readiness.
 
 ### Microsoft Fabric
 
@@ -97,27 +112,7 @@ Open:
 - **AuditHero - SCHADS Payroll Compliance** in AI/BI; or
 - **AuditHero - Payroll Compliance** in Genie.
 
-The reporting layer is organized around Award investigation areas such as:
-
-- Award Explorer;
-- Classification & Historical Rates;
-- Penalties & Shiftwork;
-- Overtime;
-- Rest & Meal Breaks;
-- Sleepovers, Broken Shifts & Allowances;
-- Actual vs Expected;
-- Evidence Required; and
-- Definitive Shift Investigation.
-
-Use the employee, SCHADS stream, level, pay point and employment-type controls to compare scenarios for the same supplied shifts.
-
-## 6. Understand base-rate and actual-pay results
-
-A supplied hourly/base rate is used to compare the employee's rate with the effective SCHADS minimum for the selected scenario. It is not treated as complete actual shift pay because penalties, overtime and other components may apply.
-
-Full `UNDERPAID`, `OVERPAID` or `COMPLIANT` reconciliation requires suitable actual-pay evidence. When actual payroll is unavailable, AuditHero can still calculate expected Award entitlements and rate-compliance outcomes.
-
-Typical statuses include:
+Typical result statuses include:
 
 - `COMPLIANT`
 - `UNDERPAID`
@@ -126,53 +121,32 @@ Typical statuses include:
 - `ACTUAL_PAY_UNAVAILABLE`
 - `ENTITLEMENT_ONLY`
 
-A `REQUIRES_REVIEW` result is not a confirmed underpayment.
+`REQUIRES_REVIEW` is not a confirmed underpayment.
 
-## 7. Validate representative cases
+## 8. Validate representative cases
 
-Before using a large historical result set for remediation, review representative employee/shift cases relevant to the workforce, including applicable combinations of:
+Before using a large historical result set for remediation, verify representative employee/shift cases covering the relevant workforce conditions, including classification and rate history, weekends/public holidays, shiftwork, overtime, minimum engagement, rest, meal breaks, broken shifts, sleepovers, allowances, TOIL, and any enterprise agreement/IFA/salary arrangement evidence.
 
-- classification and effective rate;
-- Saturday/Sunday penalties;
-- public holidays;
-- shiftwork;
-- overtime;
-- minimum engagement;
-- rest between work;
-- meal breaks;
-- broken shifts;
-- sleepovers;
-- allowances; and
-- TOIL or other controlled events.
+## 9. Repeat for later payroll periods
 
-## 8. Repeat the file workflow
+For each new period:
 
-For later payroll periods:
-
-1. upload the new ordinary CSV/XLSX files to the raw folder;
-2. run **AuditHero - Auto Audit Uploaded Files**; and
-3. review the refreshed report/dashboard and evidence findings.
-
-No source-mapping workbook is required when automatic intake can identify the uploaded layout.
-
-## Advanced source mapping
-
-Use the advanced mapping workflow only when an unusual source layout cannot be identified reliably:
-
-1. **AuditHero - Build Source Mapping Workbook (Advanced)**;
-2. approve `source_mapping.xlsx`; and
-3. **AuditHero - Convert Mapped Files and Run Audit (Advanced)**.
-
-See [Import and field mapping](docs/IMPORT_AND_FIELD_MAPPING.md).
+1. retain/archive the original payroll evidence;
+2. replace or clear the AuditHero raw landing batch as appropriate;
+3. upload the new source files;
+4. run **AuditHero - Preview Uploaded Files**;
+5. review the interpretation;
+6. run **AuditHero - Audit Reviewed Uploaded Files** when correct, or use Advanced Mapping when correction is needed; and
+7. review the refreshed results and evidence findings.
 
 ## Employment Hero API workflow
 
-Employment Hero API connectivity can be configured for direct extraction and recurring monthly or historical audits.
+Employment Hero API connectivity can be configured for direct extraction and recurring monthly/historical audits.
 
-- Fabric stores API secrets in Azure Key Vault.
-- Databricks stores API secrets in Databricks Secrets.
+- Fabric stores configured API secrets in Azure Key Vault.
+- Databricks uses Databricks Secrets.
 
-See [Administration](docs/ADMINISTRATION.md).
+The Databricks monthly schedule is paused by default. Enable recurring execution only after a representative period has been validated.
 
 ## Upgrade or uninstall
 
