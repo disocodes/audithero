@@ -3,12 +3,13 @@ import json
 from decimal import Decimal
 import pandas as pd
 
+from .dates import parse_datetime_series, parse_datetime_value
 from .money import money,effective_hourly_rate,line_amount
 from .roster_overtime import _day_type,_ot_multiplier
 
 
 def _dt(v):
-    x=pd.to_datetime(v,errors='coerce')
+    x=parse_datetime_value(v)
     return None if pd.isna(x) else x
 
 
@@ -18,7 +19,7 @@ def _flag(existing,flag):
 
 
 def _review(out,i,flag):
-    out.at[i,'review_flags']=_flag(out.at[i].get('review_flags'),flag);out.at[i,'entitlement_status']='REQUIRES_REVIEW'
+    out.at[i,'review_flags']=_flag(out.loc[i].get('review_flags'),flag);out.at[i,'entitlement_status']='REQUIRES_REVIEW'
 
 
 def _has_overtime(evidence_json):
@@ -35,7 +36,7 @@ def _matching_control(register,eid,timesheet_id,start):
         hit=q[q['timesheet_id'].astype(str)==str(timesheet_id)]
         if not hit.empty:return hit.iloc[0].to_dict()
     if 'shift_start' in q.columns and start is not None:
-        q['_s']=pd.to_datetime(q['shift_start'],errors='coerce')
+        q['_s']=parse_datetime_series(q['shift_start'])
         hit=q[q['_s']==start]
         if not hit.empty:return hit.iloc[0].to_dict()
     return None
@@ -44,7 +45,7 @@ def _matching_control(register,eid,timesheet_id,start):
 def apply_rest_after_overtime(detail,rest_controls=None):
     """Apply clause 28.3 evidence checks and controlled double-time top-ups."""
     if detail is None or detail.empty:return detail
-    out=detail.copy();out['_s']=pd.to_datetime(out['shift_start'],errors='coerce');out['_e']=pd.to_datetime(out['shift_end'],errors='coerce')
+    out=detail.copy();out['_s']=parse_datetime_series(out['shift_start']);out['_e']=parse_datetime_series(out['shift_end'])
     for eid,g in out.dropna(subset=['_s','_e']).groupby(out['employee_id'].astype(str)):
         idxs=g.sort_values('_s').index.tolist()
         for prev_i,next_i in zip(idxs[:-1],idxs[1:]):
@@ -99,8 +100,7 @@ def apply_meal_break_events(detail,timesheets,meal_events,holidays,lib):
                 try:
                     from .roster_overtime import _ordinary_multiplier, _shift_type
                     ordinary_rate=float(effective_hourly_rate(base,_ordinary_multiplier(cond,emp_type,day,_shift_type(start,end))))
-                except Exception:
-                    _review(out,i,'CLIENT_MEAL_RATE_RECONSTRUCTION_REVIEW');continue
+                except Exception:_review(out,i,'CLIENT_MEAL_RATE_RECONSTRUCTION_REVIEW');continue
             amt=line_amount(mins/60,ordinary_rate);out.at[i,'expected_amount']=float(money(Decimal(str(r.get('expected_amount') or 0))+amt));evidence.append({'component':'CLIENT_MEAL_PAID_TIME','minutes':mins,'rate':ordinary_rate,'amount':float(amt),'clause':'27.1(c)'});flags=[x for x in str(out.at[i,'review_flags'] or '').split('; ') if x and x!='MEAL_BREAK_REVIEW'];out.at[i,'review_flags']='; '.join(flags);out.at[i,'calculation_evidence']=json.dumps(evidence,default=str,separators=(',',':'))
         elif mode=='WORKED_THROUGH':
             scheduled=_dt(ev.get('scheduled_break_start'));actual=_dt(ev.get('actual_break_start')) or end
