@@ -193,6 +193,7 @@ if draft_file.exists() and str(overwrite).lower() not in {"true", "1", "yes"}:
     )
 
 draft = harden_payroll_earnings_draft(generate_mapping_draft(source_root), source_root)
+draft["_source_inventory"] = inventory.where(pd.notna(inventory), None).to_dict(orient="records")
 if "pay_category_mapping" in (draft.get("datasets") or {}):
     draft["datasets"]["pay_category_mapping"]["enabled"] = False
     draft["datasets"]["pay_category_mapping"]["source"] = None
@@ -229,10 +230,11 @@ else:
 
 print("STEP 3 — Review and approve the mapping")
 print(f"Mapping draft created: {draft_path}")
-print("Download the workbook from the Lakehouse Files area and review field_mapping and value_mapping as required.")
+print("Download the workbook from the Lakehouse Files area. Start with preview, then correct file_context or field_mapping only where the automatic interpretation is wrong or incomplete.")
 if pay_categories:
     print("Also review pay_category_treatment. Each row represents a payroll earning or payroll item type found in the source payroll data.")
 print("Upload the approved workbook as source_mapping.xlsx.")
+print("Advanced Mapping is optional when automatic intake is already correct. It is a correction/context layer and never replaces the original evidence files.")
 print("Missing optional actual-pay detail does not prevent entitlement calculation; required core audit evidence is still validated by File Readiness.")
 print("Recommended next step: run 'AuditHero - Convert Mapped Files and Run Audit'.")
 print("Use 'AuditHero - Convert Source Files' when conversion and File Readiness need to be checked without running the payroll audit.")
