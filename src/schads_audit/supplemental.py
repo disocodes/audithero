@@ -5,13 +5,14 @@ from decimal import Decimal
 import pandas as pd
 import numpy as np
 
+from .dates import parse_datetime_series, parse_datetime_value
 from .money import money,effective_hourly_rate,line_amount
 from .roster_overtime import _day_type,_ot_multiplier
 
 
 def _dt(v):
     if v is None or v=='':return None
-    x=pd.to_datetime(v,errors='coerce')
+    x=parse_datetime_value(v)
     return None if pd.isna(x) else x
 
 
@@ -37,7 +38,7 @@ def calculate_supplemental_events(events,employees,classifications,holidays,lib)
         start=_dt(ev.get('start_datetime'));end=_dt(ev.get('end_datetime'));ref=_dt(ev.get('pay_period_start')) or start
         event_type=str(ev.get('event_type') or '').upper();code=ev.get('classification_code')
         if not code and classifications is not None and not classifications.empty and start is not None:
-            q=classifications[classifications['employee_id'].astype(str)==eid].copy();q['_s']=pd.to_datetime(q['effective_from'],errors='coerce');q=q[q['_s']<=start]
+            q=classifications[classifications['employee_id'].astype(str)==eid].copy();q['_s']=parse_datetime_series(q['effective_from']);q=q[q['_s']<=start]
             if not q.empty:code=q.sort_values('_s',ascending=False).iloc[0].get('classification_code')
         rate,_=lib.rate(code,ref) if code and ref is not None else (None,None);cond=lib.conditions(ref) if ref is not None else None;base=float(rate['base_hourly_rate']) if rate else None
         emp_type=_employment_type(ev.get('employment_type') or emp.get('employment_type_current'))
