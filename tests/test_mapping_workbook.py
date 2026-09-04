@@ -1,5 +1,7 @@
 from pathlib import Path
+
 import pandas as pd
+import pytest
 from openpyxl import load_workbook
 
 from schads_audit.mapping_workbook import write_mapping_workbook, load_mapping_workbook
@@ -9,33 +11,16 @@ def _draft():
     return {
         "version": 1,
         "_source_inventory": [
-            {
-                "file": "employees.csv",
-                "sheet": None,
-                "item_name": "employees",
-                "sample_rows": 2,
-                "columns": ["Employee Number", "Full Name", "Employment Type"],
-            },
-            {
-                "file": "payroll.xlsx",
-                "sheet": "Payroll Detail",
-                "item_name": "payroll Payroll Detail",
-                "sample_rows": 5,
-                "columns": ["Employee Number", "Period Start", "Period End", "Pay Item", "Amount"],
-            },
+            {"file": "employees.csv", "sheet": None, "item_name": "employees", "sample_rows": 2, "columns": ["Employee Number", "Full Name", "Employment Type"]},
+            {"file": "payroll.xlsx", "sheet": "Payroll Detail", "item_name": "payroll Payroll Detail", "sample_rows": 5, "columns": ["Employee Number", "Period Start", "Period End", "Pay Item", "Amount"]},
+            {"file": "payroll_adjustment.xlsx", "sheet": "Adjustment", "item_name": "payroll adjustment", "sample_rows": 2, "columns": ["Employee Number", "Period Start", "Period End", "Pay Item", "Amount"]},
         ],
         "datasets": {
             "employees": {
                 "enabled": True,
                 "source": {"file": "employees.csv", "sheet": None, "header": 0},
-                "columns": {
-                    "employee_id": {"source": "Employee Number"},
-                    "employee_name": {"source": "Full Name"},
-                },
-                "_suggestions": {
-                    "employee_id": {"suggested_source": "Employee Number", "confidence": 1.0},
-                    "employee_name": {"suggested_source": "Full Name", "confidence": 1.0},
-                },
+                "columns": {"employee_id": {"source": "Employee Number"}, "employee_name": {"source": "Full Name"}},
+                "_suggestions": {"employee_id": {"suggested_source": "Employee Number", "confidence": 1.0}, "employee_name": {"suggested_source": "Full Name", "confidence": 1.0}},
                 "_dataset_confidence": 0.99,
             },
             "payroll_earnings": {
@@ -56,16 +41,12 @@ def _draft():
 
 
 def test_mapping_workbook_round_trip(tmp_path: Path):
-    draft = _draft()
     path = tmp_path / "source_mapping.xlsx"
-    write_mapping_workbook(draft, path)
+    write_mapping_workbook(_draft(), path)
     assert path.exists()
 
-    # Add a value translation exactly as an operator would in Excel.
     fields = pd.read_excel(path, sheet_name="field_mapping")
-    values = pd.DataFrame([
-        {"dataset": "employees", "target_field": "employment_type_current", "source_value": "Permanent FT", "target_value": "FULL_TIME", "notes": ""}
-    ])
+    values = pd.DataFrame([{"dataset": "employees", "target_field": "employment_type_current", "source_value": "Permanent FT", "target_value": "FULL_TIME", "notes": ""}])
     readme = pd.read_excel(path, sheet_name="README", header=None)
     file_context = pd.read_excel(path, sheet_name="file_context")
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
@@ -84,10 +65,12 @@ def test_mapping_workbook_round_trip(tmp_path: Path):
 def test_advanced_mapping_workbook_has_preview_context_and_dropdowns(tmp_path: Path):
     path = tmp_path / "source_mapping_draft.xlsx"
     write_mapping_workbook(_draft(), path)
-
     wb = load_workbook(path)
+
     assert {"README", "preview", "file_context", "field_mapping", "value_mapping", "_lists"}.issubset(wb.sheetnames)
     assert wb["_lists"].sheet_state == "hidden"
+    assert "file_roles" in wb.defined_names
+    assert "source_columns_H" in wb.defined_names
 
     preview = pd.read_excel(path, sheet_name="preview")
     payroll_preview = preview[preview["dataset"] == "payroll_earnings"].iloc[0]
@@ -100,7 +83,6 @@ def test_advanced_mapping_workbook_has_preview_context_and_dropdowns(tmp_path: P
     assert payroll_context["detected_role"] == "payroll_earnings"
     assert payroll_context["selected_role"] == "payroll_earnings"
 
-    # Controlled dropdowns must exist for file role and source-field selection.
     context_validations = list(wb["file_context"].data_validations.dataValidation)
     field_validations = list(wb["field_mapping"].data_validations.dataValidation)
     assert any("E2" in str(v.sqref) for v in context_validations)
@@ -110,7 +92,6 @@ def test_advanced_mapping_workbook_has_preview_context_and_dropdowns(tmp_path: P
 def test_file_context_can_correct_primary_payroll_source(tmp_path: Path):
     path = tmp_path / "source_mapping.xlsx"
     write_mapping_workbook(_draft(), path)
-
     wb = load_workbook(path)
     ws = wb["file_context"]
     headers = {cell.value: cell.column for cell in ws[1]}
@@ -124,3 +105,34 @@ def test_file_context_can_correct_primary_payroll_source(tmp_path: Path):
     assert payroll["enabled"] is True
     assert payroll["source"]["file"] == "payroll.xlsx"
     assert payroll["source"]["sheet"] == "Payroll Detail"
+
+
+def test_context_only_disables_original_detected_source(tmp_path: Path):
+    path = tmp_path / "source_mapping.xlsx"
+    write_mapping_workbook(_draft(), path)
+    wb = load_workbook(path)
+    ws = wb["file_context"]
+    headers = {cell.value: cell.column for cell in ws[1]}
+    row = next(r for r in range(2, ws.max_row + 1) if ws.cell(r, headers["source_file"]).value == "payroll.xlsx")
+    ws.cell(row, headers["selected_role"], "CONTEXT_ONLY")
+    ws.cell(row, headers["use_as_primary_source"], "FALSE")
+    wb.save(path)
+
+    mapping = load_mapping_workbook(path)
+    assert mapping["datasets"]["payroll_earnings"]["enabled"] is False
+
+
+def test_duplicate_primary_sources_are_rejected(tmp_path: Path):
+    path = tmp_path / "source_mapping.xlsx"
+    write_mapping_workbook(_draft(), path)
+    wb = load_workbook(path)
+    ws = wb["file_context"]
+    headers = {cell.value: cell.column for cell in ws[1]}
+    for filename in ("payroll.xlsx", "payroll_adjustment.xlsx"):
+        row = next(r for r in range(2, ws.max_row + 1) if ws.cell(r, headers["source_file"]).value == filename)
+        ws.cell(row, headers["selected_role"], "payroll_earnings")
+        ws.cell(row, headers["use_as_primary_source"], "TRUE")
+    wb.save(path)
+
+    with pytest.raises(ValueError, match="Multiple primary sources"):
+        load_mapping_workbook(path)
