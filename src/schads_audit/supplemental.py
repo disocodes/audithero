@@ -20,22 +20,34 @@ def _bool(v):
     return str(v).strip().lower() in {'1','true','yes','y'}
 
 
+def _employment_type(value):
+    text=str(value or '').upper().replace(' ','_').replace('-','_')
+    if 'CASUAL' in text:return 'CASUAL'
+    if 'PART' in text:return 'PART_TIME'
+    if 'FULL' in text:return 'FULL_TIME'
+    return 'UNKNOWN'
+
+
 def calculate_supplemental_events(events,employees,classifications,holidays,lib):
     if events is None or events.empty:return pd.DataFrame()
     emp_index={str(r['employee_id']):r.to_dict() for _,r in employees.iterrows()};rows=[]
     for _,ev0 in events.iterrows():
         ev=ev0.to_dict();flags=[];evidence=[];eid=str(ev.get('employee_id'));emp=emp_index.get(eid,{})
+        if not emp:flags.append('SUPPLEMENTAL_EVENT_EMPLOYEE_NOT_FOUND')
         start=_dt(ev.get('start_datetime'));end=_dt(ev.get('end_datetime'));ref=_dt(ev.get('pay_period_start')) or start
         event_type=str(ev.get('event_type') or '').upper();code=ev.get('classification_code')
         if not code and classifications is not None and not classifications.empty and start is not None:
             q=classifications[classifications['employee_id'].astype(str)==eid].copy();q['_s']=pd.to_datetime(q['effective_from'],errors='coerce');q=q[q['_s']<=start]
             if not q.empty:code=q.sort_values('_s',ascending=False).iloc[0].get('classification_code')
         rate,_=lib.rate(code,ref) if code and ref is not None else (None,None);cond=lib.conditions(ref) if ref is not None else None;base=float(rate['base_hourly_rate']) if rate else None
-        emp_type=str(ev.get('employment_type') or emp.get('employment_type_current') or '').upper().replace(' ','_')
-        if 'CASUAL' in emp_type:emp_type='CASUAL'
-        elif 'PART' in emp_type:emp_type='PART_TIME'
-        elif 'FULL' in emp_type:emp_type='FULL_TIME'
-        work_group=str(ev.get('work_group') or emp.get('work_group') or 'DISABILITY_SERVICES');state=ev.get('state') or emp.get('state');expected=Decimal('0')
+        emp_type=_employment_type(ev.get('employment_type') or emp.get('employment_type_current'))
+        if emp_type=='UNKNOWN':flags.append('SUPPLEMENTAL_EVENT_EMPLOYMENT_TYPE_MISSING')
+        source_work_group=ev.get('work_group') or emp.get('work_group')
+        work_group=str(source_work_group).strip() if source_work_group not in (None,'') and not pd.isna(source_work_group) else 'OTHER'
+        if work_group=='OTHER':flags.append('SUPPLEMENTAL_EVENT_WORK_GROUP_MISSING')
+        state=ev.get('state') or emp.get('state')
+        if not state:flags.append('SUPPLEMENTAL_EVENT_STATE_MISSING')
+        expected=Decimal('0')
 
         if event_type=='ON_CALL':
             if ref is None:flags.append('ON_CALL_REFERENCE_DATE_MISSING')
@@ -44,15 +56,15 @@ def calculate_supplemental_events(events,employees,classifications,holidays,lib)
                 if a:expected+=money(a['amount']);evidence.append({'component':'ON_CALL_ALLOWANCE','key':key,'amount':float(money(a['amount'])),'clause':'20.11'})
                 else:flags.append('ON_CALL_ALLOWANCE_MISSING')
         elif event_type=='RECALL_WORKPLACE':
-            if base is None or cond is None or start is None:flags.append('RECALL_FACTS_OR_RATE_MISSING')
+            if base is None or cond is None or start is None or emp_type=='UNKNOWN':flags.append('RECALL_FACTS_OR_RATE_MISSING')
             else:
                 hours=max(2.0,float(ev.get('hours') or ((end-start).total_seconds()/3600 if end is not None else 0)));day=_day_type(start.date(),state,holidays);mult=_ot_multiplier(cond,emp_type,work_group,day,0);er=effective_hourly_rate(base,mult);amt=line_amount(hours,er);expected+=amt;evidence.append({'component':'RECALL_WORKPLACE','paid_hours':hours,'rate':float(er),'amount':float(amt),'clause':'28.4'})
         elif event_type=='SLEEPOVER_ACTIVE':
-            if base is None or cond is None or start is None:flags.append('SLEEPOVER_ACTIVE_FACTS_OR_RATE_MISSING')
+            if base is None or cond is None or start is None or emp_type=='UNKNOWN':flags.append('SLEEPOVER_ACTIVE_FACTS_OR_RATE_MISSING')
             else:
                 actual=float(ev.get('hours') or ((end-start).total_seconds()/3600 if end is not None else 0));hours=max(float(cond['sleepover']['active_work_minimum_hours']),actual);day=_day_type(start.date(),state,holidays);mult=_ot_multiplier(cond,emp_type,work_group,day,0);er=effective_hourly_rate(base,mult);amt=line_amount(hours,er);expected+=amt;evidence.append({'component':'SLEEPOVER_ACTIVE_WORK','actual_hours':actual,'paid_hours':hours,'rate':float(er),'amount':float(amt),'clause':'25.7'})
         elif event_type=='REMOTE_WORK':
-            if base is None or cond is None or start is None:flags.append('REMOTE_WORK_FACTS_OR_RATE_MISSING')
+            if base is None or cond is None or start is None or emp_type=='UNKNOWN':flags.append('REMOTE_WORK_FACTS_OR_RATE_MISSING')
             else:
                 actual=float(ev.get('hours') or ((end-start).total_seconds()/3600 if end is not None else 0));on_call=_bool(ev.get('on_call'));meeting=_bool(ev.get('training_or_meeting'));minimum=1.0 if meeting or not on_call else .5 if start.time()>=time(22) or start.time()<time(6) else .25;hours=np.ceil(max(actual,minimum)*4-1e-9)/4;day=_day_type(start.date(),state,holidays)
                 if day=='WEEKDAY' and time(6)<=start.time()<time(20):mult=1.25 if emp_type=='CASUAL' else 1.0
@@ -71,6 +83,7 @@ def calculate_supplemental_events(events,employees,classifications,holidays,lib)
                 if hours>8:flags.append('CARE_24H_OVERTIME_BEYOND_8H_REVIEW')
         elif event_type=='BROKEN_SHIFT_ALLOWANCE':
             if cond is None:flags.append('BROKEN_SHIFT_RULE_MISSING')
+            elif work_group=='OTHER':flags.append('BROKEN_SHIFT_WORK_GROUP_MISSING')
             else:
                 n=int(float(ev.get('unpaid_breaks') or 0))
                 if n not in (1,2):flags.append('BROKEN_SHIFT_BREAK_COUNT_INVALID')
@@ -83,7 +96,7 @@ def calculate_supplemental_events(events,employees,classifications,holidays,lib)
                     if float(ev.get('span_hours') or 0)>float(cond['broken_shift']['max_span_hours']):flags.append('BROKEN_SHIFT_BEYOND_12H_DOUBLE_TIME_REVIEW')
                     if not _bool(ev.get('period_minimums_verified')):flags.append('BROKEN_SHIFT_PERIOD_MINIMUMS_NOT_VERIFIED')
         elif event_type=='HIGHER_DUTIES':
-            higher=ev.get('higher_classification_code');hr,_=lib.rate(higher,ref) if higher else (None,None)
+            higher=ev.get('higher_classification_code');hr,_=lib.rate(higher,ref) if higher and ref is not None else (None,None)
             if base is None or not hr:flags.append('HIGHER_DUTIES_RATE_MISSING')
             else:
                 higher_base=float(hr['base_hourly_rate']);hours=float(ev.get('hours') or 0);shift_hours=float(ev.get('shift_hours') or hours)
