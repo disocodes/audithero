@@ -1,12 +1,7 @@
 from pathlib import Path
-from datetime import date,datetime
 import json
 
-
-def as_date(v):
-    if isinstance(v,datetime):return v.date()
-    if isinstance(v,date):return v
-    return datetime.fromisoformat(str(v)[:10]).date()
+from .dates import as_date
 
 
 class RuleLibrary:
