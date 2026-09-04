@@ -10,6 +10,7 @@
 # COMMAND ----------
 from pathlib import Path
 import json
+from time import perf_counter
 
 exec(open(str(Path.cwd() / "_common.py")).read())
 
@@ -37,9 +38,6 @@ start_date = dbutils.widgets.get("start_date").strip()
 end_date = dbutils.widgets.get("end_date").strip()
 run_type = dbutils.widgets.get("run_type").strip() or "MANUAL_FILE"
 
-# Explicit dates are an all-or-nothing pair. Never combine one manually entered
-# boundary with the other boundary from the preview manifest, because that can
-# unexpectedly expand a short audit into the full detected source range.
 if bool(start_date) != bool(end_date):
     raise ValueError(
         "Supply both start_date and end_date, or leave both blank to use the date range from auto_intake_manifest.json. "
@@ -76,6 +74,21 @@ print(f"Run type: {run_type}")
 run_id = str(uuid.uuid4())
 started = datetime.now(timezone.utc)
 lib = RuleLibrary(ROOT / "rules/MA000100")
+
+classification_catalog = {}
+for pack in lib.rate_packs:
+    family = str(pack.get("classification_family") or "OTHER")
+    for rate in pack.get("rates", []):
+        code = str(rate.get("classification_code") or "").strip()
+        if code:
+            classification_catalog[code] = family
+scenario_passes = 0
+for family in classification_catalog.values():
+    work_group_count = 2 if family == "HOME_CARE_DISABILITY" else 1
+    scenario_passes += work_group_count * 3
+print(f"Full Award scenario passes configured: {scenario_passes}")
+
+engine_started = perf_counter()
 result = run_manual_audit(
     input_root,
     ROOT / "config",
@@ -84,10 +97,16 @@ result = run_manual_audit(
     lib,
     generate_award_scenarios=True,
 )
+engine_seconds = perf_counter() - engine_started
 finished = datetime.now(timezone.utc)
 
+print(f"Audit calculation phase completed in {engine_seconds:.1f}s")
 print("Rows retained for requested audit window:")
 for name in ("timesheets", "rostered_shifts", "payroll_earnings", "pay_details", "employment_history"):
+    frame = result.get(name)
+    print(f"  {name}: {0 if frame is None else len(frame):,}")
+print("Calculated output sizes:")
+for name in ("detail", "reconciliation", "award_scenario_detail", "award_criteria_detail", "award_scenario_rest_findings"):
     frame = result.get(name)
     print(f"  {name}: {0 if frame is None else len(frame):,}")
 # COMMAND ----------
@@ -103,6 +122,8 @@ for frame in (
         frame["run_type"] = run_type
         frame["run_finished_at"] = finished
 # COMMAND ----------
+persist_started = perf_counter()
+print("Persisting filtered source evidence and calculated results...")
 for name, frame in (
     ("employees", result["employees"]), ("pay_details", result["pay_details"]),
     ("employment_history", result["employment_history"]), ("timesheets", result["timesheets"]),
@@ -121,6 +142,8 @@ write_df(spark, result["reconciliation"], f"{catalog}.gold.pay_period_reconcilia
 write_df(spark, result["award_scenario_detail"], f"{catalog}.gold.award_scenario_detail", "append")
 write_df(spark, result["award_criteria_detail"], f"{catalog}.gold.award_criteria_detail", "append")
 write_df(spark, result["award_scenario_rest_findings"], f"{catalog}.gold.award_scenario_rest_findings", "append")
+persist_seconds = perf_counter() - persist_started
+print(f"Data persistence phase completed in {persist_seconds:.1f}s")
 # COMMAND ----------
 reconciliation = result["reconciliation"]
 rest_findings = result["rest_break_findings"]
@@ -134,12 +157,18 @@ run = pd.DataFrame([{
     "underpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "UNDERPAID").sum()),
     "overpaid_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "OVERPAID").sum()),
     "review_periods": int((reconciliation.get("status", pd.Series(dtype=str)) == "REQUIRES_REVIEW").sum()),
-    "message": f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; award_scenarios={len(scenario_detail)}",
+    "message": (
+        f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; "
+        f"award_scenarios={len(scenario_detail)}; scenario_passes={scenario_passes}; "
+        f"engine_seconds={engine_seconds:.1f}; persist_seconds={persist_seconds:.1f}"
+    ),
 }])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
 create_views(spark, catalog)
 # COMMAND ----------
+total_seconds = (datetime.now(timezone.utc) - started).total_seconds()
 print(f"Uploaded-file audit complete: {run_id}")
+print(f"Performance summary: calculation={engine_seconds:.1f}s; persistence={persist_seconds:.1f}s; total={total_seconds:.1f}s")
 if not reconciliation.empty:
     print(reconciliation["status"].value_counts(dropna=False).to_string())
     display(reconciliation.sort_values(["status", "employee_name"]).head(200))
