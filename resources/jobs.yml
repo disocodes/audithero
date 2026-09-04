@@ -10,25 +10,18 @@ resources:
               catalog: "${var.catalog}"
               sql_warehouse_id: "${var.sql_warehouse_id}"
         - task_key: validate_rules
-          depends_on:
-            - task_key: setup
-          notebook_task:
-            notebook_path: ../notebooks/01_validate_rules.py
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../notebooks/01_validate_rules.py}
         - task_key: self_test
-          depends_on:
-            - task_key: validate_rules
-          notebook_task:
-            notebook_path: ../notebooks/01b_self_test.py
+          depends_on: [{task_key: validate_rules}]
+          notebook_task: {notebook_path: ../notebooks/01b_self_test.py}
         - task_key: setup_investigation_view
-          depends_on:
-            - task_key: self_test
+          depends_on: [{task_key: self_test}]
           notebook_task:
             notebook_path: ../notebooks/00e_setup_investigation_view.py
-            base_parameters:
-              catalog: "${var.catalog}"
+            base_parameters: {catalog: "${var.catalog}"}
         - task_key: verify_dashboard
-          depends_on:
-            - task_key: setup_investigation_view
+          depends_on: [{task_key: setup_investigation_view}]
           notebook_task:
             notebook_path: ../notebooks/00d_verify_dashboard.py
             base_parameters:
@@ -39,20 +32,16 @@ resources:
       name: "AuditHero - Self Test"
       tasks:
         - task_key: self_test
-          notebook_task:
-            notebook_path: ../notebooks/01b_self_test.py
+          notebook_task: {notebook_path: ../notebooks/01b_self_test.py}
 
-    auto_file_audit:
-      name: "AuditHero - Auto Audit Uploaded Files"
+    auto_file_preview:
+      name: "AuditHero - Preview Uploaded Files"
       parameters:
-        - name: source_root
-          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
-        - name: start_date
-          default: ""
-        - name: end_date
-          default: ""
+        - {name: source_root, default: "/Volumes/${var.catalog}/bronze/landing/import/raw"}
+        - {name: start_date, default: ""}
+        - {name: end_date, default: ""}
       tasks:
-        - task_key: auto_prepare
+        - task_key: preview_and_prepare
           notebook_task:
             notebook_path: ../notebooks/02f_auto_intake.py
             base_parameters:
@@ -61,22 +50,27 @@ resources:
               output_root: "/Volumes/${var.catalog}/bronze/landing/auto_input"
               start_date: "{{job.parameters.start_date}}"
               end_date: "{{job.parameters.end_date}}"
-        - task_key: audit_prepared_files
-          depends_on:
-            - task_key: auto_prepare
+
+    prepared_file_audit:
+      name: "AuditHero - Audit Reviewed Uploaded Files"
+      parameters:
+        - {name: input_root, default: "/Volumes/${var.catalog}/bronze/landing/auto_input"}
+        - {name: start_date, default: ""}
+        - {name: end_date, default: ""}
+      tasks:
+        - task_key: audit_reviewed_files
           notebook_task:
             notebook_path: ../notebooks/03b_manual_file_audit.py
             base_parameters:
               catalog: "${var.catalog}"
-              input_root: "{{tasks.auto_prepare.values.output_root}}"
-              start_date: "{{tasks.auto_prepare.values.start_date}}"
-              end_date: "{{tasks.auto_prepare.values.end_date}}"
+              input_root: "{{job.parameters.input_root}}"
+              start_date: "{{job.parameters.start_date}}"
+              end_date: "{{job.parameters.end_date}}"
               run_type: "AUTO_FILE"
           max_retries: 1
           min_retry_interval_millis: 30000
         - task_key: refresh_dashboard
-          depends_on:
-            - task_key: audit_prepared_files
+          depends_on: [{task_key: audit_reviewed_files}]
           dashboard_task:
             dashboard_id: ${resources.dashboards.payroll_compliance.id}
             warehouse_id: ${var.sql_warehouse_id}
@@ -84,12 +78,9 @@ resources:
     source_mapping_draft:
       name: "AuditHero - Build Source Mapping Workbook (Advanced)"
       parameters:
-        - name: source_root
-          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
-        - name: draft_path
-          default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping_draft.xlsx"
-        - name: overwrite
-          default: "false"
+        - {name: source_root, default: "/Volumes/${var.catalog}/bronze/landing/import/raw"}
+        - {name: draft_path, default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping_draft.xlsx"}
+        - {name: overwrite, default: "false"}
       tasks:
         - task_key: inspect_and_suggest
           notebook_task:
@@ -103,14 +94,10 @@ resources:
     source_file_convert:
       name: "AuditHero - Convert Source Files (Advanced)"
       parameters:
-        - name: source_root
-          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
-        - name: mapping_path
-          default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping.xlsx"
-        - name: output_root
-          default: "/Volumes/${var.catalog}/bronze/landing/input"
-        - name: strict
-          default: "true"
+        - {name: source_root, default: "/Volumes/${var.catalog}/bronze/landing/import/raw"}
+        - {name: mapping_path, default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping.xlsx"}
+        - {name: output_root, default: "/Volumes/${var.catalog}/bronze/landing/input"}
+        - {name: strict, default: "true"}
       tasks:
         - task_key: convert_and_validate
           notebook_task:
@@ -125,18 +112,12 @@ resources:
     mapped_import_audit:
       name: "AuditHero - Convert Mapped Files and Run Audit (Advanced)"
       parameters:
-        - name: source_root
-          default: "/Volumes/${var.catalog}/bronze/landing/import/raw"
-        - name: mapping_path
-          default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping.xlsx"
-        - name: output_root
-          default: "/Volumes/${var.catalog}/bronze/landing/input"
-        - name: strict
-          default: "true"
-        - name: start_date
-          default: "2023-07-01"
-        - name: end_date
-          default: "2026-06-30"
+        - {name: source_root, default: "/Volumes/${var.catalog}/bronze/landing/import/raw"}
+        - {name: mapping_path, default: "/Volumes/${var.catalog}/bronze/landing/import/source_mapping.xlsx"}
+        - {name: output_root, default: "/Volumes/${var.catalog}/bronze/landing/input"}
+        - {name: strict, default: "true"}
+        - {name: start_date, default: "2023-07-01"}
+        - {name: end_date, default: "2026-06-30"}
       tasks:
         - task_key: convert_source_files
           notebook_task:
@@ -148,8 +129,7 @@ resources:
               output_root: "{{job.parameters.output_root}}"
               strict: "{{job.parameters.strict}}"
         - task_key: audit_converted_files
-          depends_on:
-            - task_key: convert_source_files
+          depends_on: [{task_key: convert_source_files}]
           notebook_task:
             notebook_path: ../notebooks/03b_manual_file_audit.py
             base_parameters:
@@ -161,8 +141,7 @@ resources:
           max_retries: 1
           min_retry_interval_millis: 30000
         - task_key: refresh_dashboard
-          depends_on:
-            - task_key: audit_converted_files
+          depends_on: [{task_key: audit_converted_files}]
           dashboard_task:
             dashboard_id: ${resources.dashboards.payroll_compliance.id}
             warehouse_id: ${var.sql_warehouse_id}
@@ -170,8 +149,7 @@ resources:
     file_readiness:
       name: "AuditHero - File Readiness (Advanced)"
       parameters:
-        - name: input_root
-          default: "/Volumes/${var.catalog}/bronze/landing/input"
+        - {name: input_root, default: "/Volumes/${var.catalog}/bronze/landing/input"}
       tasks:
         - task_key: validate_uploaded_files
           notebook_task:
@@ -183,12 +161,9 @@ resources:
     manual_file_audit:
       name: "AuditHero - Audit Canonical CSV Excel (Advanced)"
       parameters:
-        - name: input_root
-          default: "/Volumes/${var.catalog}/bronze/landing/input"
-        - name: start_date
-          default: "2023-07-01"
-        - name: end_date
-          default: "2026-06-30"
+        - {name: input_root, default: "/Volumes/${var.catalog}/bronze/landing/input"}
+        - {name: start_date, default: "2023-07-01"}
+        - {name: end_date, default: "2026-06-30"}
       tasks:
         - task_key: validate_uploaded_files
           notebook_task:
@@ -197,8 +172,7 @@ resources:
               catalog: "${var.catalog}"
               input_root: "{{job.parameters.input_root}}"
         - task_key: audit_uploaded_files
-          depends_on:
-            - task_key: validate_uploaded_files
+          depends_on: [{task_key: validate_uploaded_files}]
           notebook_task:
             notebook_path: ../notebooks/03b_manual_file_audit.py
             base_parameters:
@@ -210,8 +184,7 @@ resources:
           max_retries: 1
           min_retry_interval_millis: 30000
         - task_key: refresh_dashboard
-          depends_on:
-            - task_key: audit_uploaded_files
+          depends_on: [{task_key: audit_uploaded_files}]
           dashboard_task:
             dashboard_id: ${resources.dashboards.payroll_compliance.id}
             warehouse_id: ${var.sql_warehouse_id}
@@ -222,8 +195,7 @@ resources:
         - task_key: test
           notebook_task:
             notebook_path: ../notebooks/02_test_employment_hero.py
-            base_parameters:
-              secret_scope: "${var.secret_scope}"
+            base_parameters: {secret_scope: "${var.secret_scope}"}
 
     audit_readiness:
       name: "AuditHero - API Audit Readiness (Optional API)"
@@ -238,12 +210,9 @@ resources:
     historical_audit:
       name: "AuditHero - Historical SCHADS Audit (Optional API)"
       parameters:
-        - name: start_date
-          default: "2023-07-01"
-        - name: end_date
-          default: "2026-06-30"
-        - name: actual_pay_source
-          default: "PAYROLL_API"
+        - {name: start_date, default: "2023-07-01"}
+        - {name: end_date, default: "2026-06-30"}
+        - {name: actual_pay_source, default: "PAYROLL_API"}
       tasks:
         - task_key: audit
           notebook_task:
@@ -257,8 +226,7 @@ resources:
           max_retries: 1
           min_retry_interval_millis: 30000
         - task_key: refresh_dashboard
-          depends_on:
-            - task_key: audit
+          depends_on: [{task_key: audit}]
           dashboard_task:
             dashboard_id: ${resources.dashboards.payroll_compliance.id}
             warehouse_id: ${var.sql_warehouse_id}
@@ -277,8 +245,7 @@ resources:
           max_retries: 1
           min_retry_interval_millis: 30000
         - task_key: refresh_and_send_dashboard
-          depends_on:
-            - task_key: audit
+          depends_on: [{task_key: audit}]
           dashboard_task:
             dashboard_id: ${resources.dashboards.payroll_compliance.id}
             warehouse_id: ${var.sql_warehouse_id}
