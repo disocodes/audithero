@@ -2,9 +2,11 @@ from __future__ import annotations
 from datetime import time
 import pandas as pd
 
+from .dates import parse_datetime_series, parse_datetime_value
+
 
 def _dt(v):
-    x=pd.to_datetime(v,errors='coerce')
+    x=parse_datetime_value(v)
     return None if pd.isna(x) else x
 
 
@@ -30,7 +32,7 @@ def aggregate_remote_work_events(events):
     remote=events[events['event_type'].astype(str).str.upper()=='REMOTE_WORK'].copy()
     other=events[events['event_type'].astype(str).str.upper()!='REMOTE_WORK'].copy()
     if remote.empty:return events
-    remote['_s']=pd.to_datetime(remote['start_datetime'],errors='coerce');remote['_e']=pd.to_datetime(remote['end_datetime'],errors='coerce')
+    remote['_s']=parse_datetime_series(remote['start_datetime']);remote['_e']=parse_datetime_series(remote['end_datetime'])
     outputs=[]
     for (eid,day),g in remote.dropna(subset=['_s']).groupby([remote['employee_id'].astype(str),remote['_s'].dt.date]):
         g=g.sort_values('_s');clusters=[];current=[];anchor=None;window=None
@@ -55,7 +57,6 @@ def aggregate_remote_work_events(events):
             if len(rows)>1:first['event_id']=f'REMOTE_GROUP:{eid}:{day}:{n}'
             first['start_datetime']=min(starts);first['end_datetime']=max(ends) if ends else first['start_datetime'];first['hours']=actual;first['remote_minimum_hours']=min_hours;first['remote_instance_count']=len(rows)
             first['remote_source_event_ids']=';'.join(str(r.get('event_id') or '') for r in rows)
-            # If total actual exceeds the minimum but intervals are separated, continuous-time rounding is not safe to infer.
             separated=False
             if len(intervals)>1:
                 intervals=sorted(intervals)
