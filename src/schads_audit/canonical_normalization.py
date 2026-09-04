@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import pandas as pd
+
+from .dates import parse_datetime_series, parse_datetime_value
 
 
 DATE_FIELDS: dict[str, tuple[str, ...]] = {
@@ -19,13 +20,16 @@ DATE_FIELDS: dict[str, tuple[str, ...]] = {
     "public_holiday_overrides": ("holiday_date",),
     "overtime_rest_controls": ("shift_start",),
     "meal_break_events": ("scheduled_break_start", "actual_break_start"),
-    "supplemental_events": ("start_datetime", "end_datetime"),
+    "supplemental_events": ("start_datetime", "end_datetime", "pay_period_start", "pay_period_end"),
     "toil_register": (
         "overtime_datetime",
         "agreement_date",
         "time_off_date",
         "payment_requested_date",
         "payment_date",
+        "employment_end_date",
+        "payment_pay_period_start",
+        "payment_pay_period_end",
     ),
 }
 
@@ -39,29 +43,6 @@ NUMERIC_FIELDS: dict[str, tuple[str, ...]] = {
     "supplemental_events": ("hours",),
     "toil_register": ("overtime_hours", "time_off_hours"),
 }
-
-_DAY_FIRST_RE = re.compile(r"^\s*\d{1,2}[-/]\d{1,2}[-/]\d{4}(?:\s|T|$)")
-_YEAR_FIRST_RE = re.compile(r"^\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\s|T|$)")
-
-
-def parse_datetime_value(value: Any):
-    """Parse canonical dates without confusing Australian and ISO date order."""
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return pd.NaT
-    if isinstance(value, pd.Timestamp):
-        return value
-    text = str(value).strip()
-    if not text or text.lower() in {"nan", "nat", "none"}:
-        return pd.NaT
-    if _DAY_FIRST_RE.match(text):
-        return pd.to_datetime(text, errors="coerce", dayfirst=True)
-    if _YEAR_FIRST_RE.match(text):
-        return pd.to_datetime(text, errors="coerce", yearfirst=True)
-    return pd.to_datetime(text, errors="coerce")
-
-
-def parse_datetime_series(series: pd.Series) -> pd.Series:
-    return series.map(parse_datetime_value)
 
 
 def numeric_value(value: Any, default: float = 0.0) -> float:
@@ -78,7 +59,7 @@ def numeric_value(value: Any, default: float = 0.0) -> float:
 
 
 def _nonblank(series: pd.Series) -> pd.Series:
-    return ~(series.isna() | series.astype(str).str.strip().str.lower().isin({"", "nan", "nat", "none"}))
+    return ~(series.isna() | series.astype(str).str.strip().str.lower().isin({"", "nan", "nat", "none", "null"}))
 
 
 def normalize_canonical_frame(dataset: str, frame: pd.DataFrame) -> pd.DataFrame:
