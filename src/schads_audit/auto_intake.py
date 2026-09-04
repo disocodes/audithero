@@ -14,22 +14,23 @@ from .normalize import infer_schads_classification
 ALIASES = {
     "employee_id": ["employee id", "employee number", "employee no", "staff id", "worker id", "emp id"],
     "employee_name": ["employee name", "full name", "staff name", "worker name", "employee", "name"],
-    "date": ["date", "shift date", "work date", "timesheet date"],
+    "date": ["date", "shift date", "work date", "timesheet date", "earning date"],
     "effective_from": ["effective from", "effective date", "rate effective date", "pay rate effective date", "rate start date", "commencement date"],
     "effective_to": ["effective to", "end date", "rate end date", "expiry date"],
     "start": ["start datetime", "shift start", "clock in", "start time", "start"],
     "end": ["end datetime", "shift end", "clock out", "finish time", "end time", "finish", "end"],
-    "hours": ["worked hours", "hours worked", "total hours", "ordinary hours", "hours", "units"],
+    "hours": ["worked hours", "hours worked", "total hours", "ordinary hours", "hours", "units", "quantity"],
     "break_minutes": ["unpaid break minutes", "break minutes", "meal break minutes"],
-    "hourly_rate": ["hourly rate", "base hourly rate", "base rate", "pay rate", "rate per hour", "rate"],
-    "actual_amount": ["paid amount", "actual amount", "gross amount", "line amount", "earnings amount", "shift amount"],
+    "hourly_rate": ["hourly rate", "base hourly rate", "base rate", "pay rate", "rate per hour", "unit rate", "rate"],
+    "actual_amount": ["paid amount", "actual amount", "gross amount", "line amount", "earnings amount", "shift amount", "amount", "gross", "value"],
+    "pay_category": ["pay category", "earnings category", "earning category", "earning name", "earning type", "earnings type", "pay item", "pay code", "pay element"],
     "employment_type": ["employment type", "employment status", "contract type", "engagement type"],
     "classification": ["classification", "award classification", "schads classification", "pay level", "award level", "level"],
     "state": ["work state", "location state", "state"],
     "work_group": ["work group", "award stream", "service type", "sector"],
     "work_type": ["work type", "shift type", "activity", "position", "role", "job title"],
-    "pay_period_start": ["pay period start", "period start", "payrun start"],
-    "pay_period_end": ["pay period end", "period end", "payrun end"],
+    "pay_period_start": ["pay period start", "period start", "payrun start", "pay run start"],
+    "pay_period_end": ["pay period end", "period end", "payrun end", "pay run end"],
 }
 
 
@@ -73,9 +74,9 @@ def _employee_id(value: Any, name: Any) -> str:
     return "AUTO-" + sha1(text.encode()).hexdigest()[:16].upper()
 
 
-def _row_id(*parts: Any) -> str:
+def _row_id(prefix: str, *parts: Any) -> str:
     text = "|".join(str(x or "").strip() for x in parts)
-    return "AUTO-TS-" + sha1(text.encode()).hexdigest()[:18].upper()
+    return f"AUTO-{prefix}-" + sha1(text.encode()).hexdigest()[:18].upper()
 
 
 def _emp_type(value: Any) -> str | None:
@@ -90,6 +91,7 @@ def _emp_type(value: Any) -> str | None:
 
 
 def _work_group(value: Any) -> str | None:
+    """Infer a work group only from source text that explicitly names the stream."""
     text = _norm(value)
     if not text:
         return None
@@ -130,12 +132,17 @@ def _describe(file: str, sheet: str | None, frame: pd.DataFrame):
     columns = list(frame.columns)
     mapped = {field: _column(columns, field) for field in ALIASES}
     identity = bool(mapped["employee_id"] or mapped["employee_name"])
+    payroll_required = (
+        mapped["employee_id"], mapped["pay_period_start"], mapped["pay_period_end"],
+        mapped["pay_category"], mapped["actual_amount"],
+    )
     return {
         "file": file,
         "sheet": sheet,
         "frame": frame,
         "mapped": mapped,
         "timesheet": bool(identity and mapped["start"] and mapped["end"]),
+        "payroll": bool(all(payroll_required)),
         "attributes": bool(identity and any(mapped[x] for x in ("hourly_rate", "employment_type", "classification", "state", "work_group", "work_type"))),
     }
 
@@ -157,13 +164,38 @@ def _first_nonblank(series):
     return None
 
 
+def _interpretation_rows(descriptions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for desc in descriptions:
+        roles = []
+        if desc.get("timesheet"):
+            roles.append("timesheets")
+        if desc.get("payroll"):
+            roles.append("payroll_earnings")
+        if desc.get("attributes"):
+            roles.append("employee_or_rate_attributes")
+        rows.append({
+            "source_file": desc["file"],
+            "source_sheet": desc["sheet"],
+            "detected_roles": roles or ["unclassified"],
+            "mapped_fields": {k: v for k, v in desc["mapped"].items() if v},
+            "sample_rows": len(desc["frame"]),
+        })
+    return rows
+
+
 def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
     """Infer canonical inputs from ordinary CSV/XLSX files.
 
-    A timesheet needs only employee name/ID plus shift start/end. Hourly rates,
-    classifications and employment types may be in the same rows or in separate
-    effective-dated files. Multiple historical rate records for the same employee
-    are retained and aligned to shifts by date by the audit engine.
+    Automatic intake is intentionally conservative. It maps only recognisable
+    structural fields and does not invent work groups, employment types,
+    industrial instruments or classifications. Missing facts remain blank and are
+    surfaced by the entitlement/readiness layers as review requirements.
+
+    A timesheet needs employee name/ID plus shift start/end. A standalone payroll
+    earning source is recognised only when employee ID, pay-period start/end,
+    pay category and amount are all present. Pay-category treatment is never
+    guessed; reconciliation remains unavailable until a controlled mapping exists.
     """
     root = Path(source_root)
     if not root.exists():
@@ -174,6 +206,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
 
     timesheet_rows: list[dict[str, Any]] = []
     attribute_rows: list[dict[str, Any]] = []
+    payroll_rows: list[dict[str, Any]] = []
     warnings: list[str] = []
 
     for desc in descriptions:
@@ -207,14 +240,14 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                 supplied_rate = pd.to_numeric(pd.Series([row.get(m["hourly_rate"]) if m["hourly_rate"] else None]), errors="coerce").iloc[0]
                 actual_amount = pd.to_numeric(pd.Series([row.get(m["actual_amount"]) if m["actual_amount"] else None]), errors="coerce").iloc[0]
                 timesheet_rows.append({
-                    "timesheet_id": _row_id(label, row_no, eid, start, end),
+                    "timesheet_id": _row_id("TS", label, row_no, eid, start, end),
                     "employee_id": eid,
                     "employee_name_source": None if _blank(name) else str(name).strip(),
                     "start_datetime": start,
                     "end_datetime": end,
                     "units": None if pd.isna(hours) else float(hours),
                     "unpaid_break_minutes": None if pd.isna(break_minutes) else round(float(break_minutes), 2),
-                    "work_group": _work_group(work_group) or _work_group(work_type) or "DISABILITY_SERVICES",
+                    "work_group": _work_group(work_group) or _work_group(work_type),
                     "location_state": None if not m["state"] or _blank(row.get(m["state"])) else str(row.get(m["state"])).strip().upper(),
                     "work_type_name": None if _blank(work_type) else str(work_type).strip(),
                     "is_sleepover": "sleepover" in _norm(work_type),
@@ -222,6 +255,35 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                     "pay_period_end": parse_datetime_value(row.get(m["pay_period_end"])) if m["pay_period_end"] and not _blank(row.get(m["pay_period_end"])) else pd.NaT,
                     "source_supplied_base_hourly_rate": None if pd.isna(supplied_rate) else float(supplied_rate),
                     "source_actual_amount": None if pd.isna(actual_amount) else float(actual_amount),
+                    "source_file": desc["file"],
+                    "source_sheet": desc["sheet"],
+                    "source_row": int(row_no) + 2,
+                })
+
+        if desc["payroll"]:
+            for row_no, row in df.iterrows():
+                source_id = row.get(m["employee_id"])
+                if _blank(source_id):
+                    continue
+                period_start = parse_datetime_value(row.get(m["pay_period_start"]))
+                period_end = parse_datetime_value(row.get(m["pay_period_end"]))
+                pay_category = row.get(m["pay_category"])
+                amount = pd.to_numeric(pd.Series([row.get(m["actual_amount"])]), errors="coerce").iloc[0]
+                if pd.isna(period_start) or pd.isna(period_end) or _blank(pay_category) or pd.isna(amount):
+                    continue
+                hours = pd.to_numeric(pd.Series([row.get(m["hours"]) if m["hours"] else None]), errors="coerce").iloc[0]
+                rate = pd.to_numeric(pd.Series([row.get(m["hourly_rate"]) if m["hourly_rate"] else None]), errors="coerce").iloc[0]
+                earning_date = parse_datetime_value(row.get(m["date"])) if m["date"] and not _blank(row.get(m["date"])) else pd.NaT
+                payroll_rows.append({
+                    "payroll_line_id": _row_id("PAY", label, row_no, source_id, period_start, period_end, pay_category, amount),
+                    "employee_id": str(source_id).strip(),
+                    "pay_period_start": period_start,
+                    "pay_period_end": period_end,
+                    "pay_category": str(pay_category).strip(),
+                    "earning_date": earning_date,
+                    "hours": None if pd.isna(hours) else float(hours),
+                    "rate": None if pd.isna(rate) else float(rate),
+                    "amount": float(amount),
                     "source_file": desc["file"],
                     "source_sheet": desc["sheet"],
                     "source_row": int(row_no) + 2,
@@ -268,7 +330,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
         eid = str(raw_eid)
         name = _first_nonblank(group.get("employee_name", pd.Series(dtype=object))) or eid
         state = _first_nonblank(group.get("state", pd.Series(dtype=object)))
-        work_group = _first_nonblank(group.get("work_group", pd.Series(dtype=object))) or "DISABILITY_SERVICES"
+        work_group = _first_nonblank(group.get("work_group", pd.Series(dtype=object)))
         dated = group.copy()
         dated["_effective"] = pd.to_datetime(dated.get("effective_from"), errors="coerce")
         dated = dated.sort_values("_effective", na_position="last")
@@ -280,7 +342,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
 
         history_candidates = dated[dated.get("employment_type", pd.Series(index=dated.index, dtype=object)).notna()].copy()
         if history_candidates.empty:
-            histories.append({"employee_id": eid, "start_date": first_shift.get(raw_eid) or first_shift.get(eid), "end_date": pd.NaT, "employment_type": "UNKNOWN", "contract_type": None, "title": _first_nonblank(group.get("work_type_name", pd.Series(dtype=object))), "auto_intake": True})
+            histories.append({"employee_id": eid, "start_date": first_shift.get(raw_eid) or first_shift.get(eid), "end_date": pd.NaT, "employment_type": None, "contract_type": None, "title": _first_nonblank(group.get("work_type_name", pd.Series(dtype=object))), "auto_intake": True})
         else:
             for _, candidate in history_candidates.drop_duplicates(subset=["_effective", "employment_type"]).iterrows():
                 eff = candidate.get("_effective")
@@ -305,7 +367,7 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
                 "effective_from": eff,
                 "classification_code": candidate.get("classification_code"),
                 "classification_name": candidate.get("classification_name"),
-                "industrial_instrument": "SCHADS",
+                "industrial_instrument": None,
                 "supplied_hourly_rate": candidate.get("supplied_hourly_rate"),
                 "source_reference": candidate.get("source_item"),
                 "source_row": candidate.get("source_row"),
@@ -319,27 +381,45 @@ def build_auto_canonical(source_root: str | Path) -> dict[str, Any]:
         if _blank(row.get("location_state")):
             timesheets.at[idx, "location_state"] = emp.get("state")
         if _blank(row.get("work_group")):
-            timesheets.at[idx, "work_group"] = emp.get("work_group") or "DISABILITY_SERVICES"
+            timesheets.at[idx, "work_group"] = emp.get("work_group")
 
+    payroll_df = pd.DataFrame(payroll_rows)
     pay_runs = pd.DataFrame()
-    if timesheets["pay_period_start"].notna().any():
+    if not payroll_df.empty:
+        pay_runs = payroll_df[["pay_period_start", "pay_period_end"]].dropna().drop_duplicates().copy()
+        pay_runs["pay_run_id"] = [f"AUTO-PP-{i+1}" for i in range(len(pay_runs))]
+    elif timesheets["pay_period_start"].notna().any():
         pay_runs = timesheets[["pay_period_start", "pay_period_end"]].dropna().drop_duplicates().copy()
         pay_runs["pay_run_id"] = [f"AUTO-PP-{i+1}" for i in range(len(pay_runs))]
 
+    if not payroll_df.empty:
+        warnings.append("Payroll earning lines were detected. Actual-pay reconciliation remains disabled until pay categories have an approved treatment mapping.")
+    if employee_df.get("work_group", pd.Series(dtype=object)).isna().any():
+        warnings.append("One or more employee work groups could not be established from source evidence and will require review for Award-condition analysis.")
+    if pd.DataFrame(histories).get("employment_type", pd.Series(dtype=object)).isna().any():
+        warnings.append("One or more employment types could not be established from source evidence and will require review.")
+
     starts = pd.to_datetime(timesheets["start_datetime"], errors="coerce").dropna()
+    frames = {
+        "employees": employee_df,
+        "pay_details": pd.DataFrame(pay_details),
+        "employment_history": pd.DataFrame(histories),
+        "timesheets": timesheets.drop(columns=["employee_name_source"], errors="ignore"),
+        "pay_runs": pay_runs,
+    }
+    if not payroll_df.empty:
+        frames["payroll_earnings"] = payroll_df
+
     return {
-        "frames": {
-            "employees": employee_df,
-            "pay_details": pd.DataFrame(pay_details),
-            "employment_history": pd.DataFrame(histories),
-            "timesheets": timesheets.drop(columns=["employee_name_source"], errors="ignore"),
-            "pay_runs": pay_runs,
-        },
+        "frames": frames,
         "metadata": {
             "source_items": [d["file"] if d["sheet"] is None else f"{d['file']}#{d['sheet']}" for d in descriptions],
             "timesheet_items": [d["file"] if d["sheet"] is None else f"{d['file']}#{d['sheet']}" for d in descriptions if d["timesheet"]],
+            "payroll_items": [d["file"] if d["sheet"] is None else f"{d['file']}#{d['sheet']}" for d in descriptions if d["payroll"]],
+            "interpretation": _interpretation_rows(descriptions),
             "employees": len(employee_df),
             "timesheets": len(timesheets),
+            "payroll_earning_rows": len(payroll_df),
             "rate_history_rows": len(pay_details),
             "warnings": warnings,
             "start_date": None if starts.empty else str(starts.min().date()),
