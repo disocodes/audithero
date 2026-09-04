@@ -19,38 +19,28 @@ Employment Hero credentials are required only for Employment Hero API workflows.
 The installer creates or updates:
 
 - `/Shared/AuditHero` workspace files and notebooks;
-- **AuditHero - Install or Upgrade** and **AuditHero - Uninstall** administration notebooks;
+- administration notebooks;
 - AuditHero Jobs;
 - a SQL warehouse when required and permitted;
-- the **AuditHero - SCHADS Payroll Compliance** AI/BI dashboard;
-- the `schads_payroll` Unity Catalog;
-- the `bronze`, `silver`, `ref`, `gold`, `ops`, and `semantic` schemas;
-- the `bronze.landing` Unity Catalog Volume;
-- `/Volumes/schads_payroll/bronze/landing/import/raw`;
-- `/Volumes/schads_payroll/bronze/landing/input`;
+- **AuditHero - SCHADS Payroll Compliance** in AI/BI;
+- the configured Unity Catalog and `bronze`, `silver`, `ref`, `gold`, `ops`, and `semantic` schemas;
+- the `bronze.landing` Volume and file landing locations;
 - effective-dated SCHADS reference tables;
 - Silver normalized-evidence tables;
 - Gold audit-result tables;
-- governed metric views under `schads_payroll.semantic`; and
-- the **AuditHero - Payroll Compliance** Genie space.
+- governed semantic metric views; and
+- **AuditHero - Payroll Compliance** in Genie.
 
-Installation finishes by running **AuditHero - Setup** and **AuditHero - Self Test**.
+Installation finishes by running Setup and Self Test.
 
 ## First installation
 
-### 1. Import the installer notebook
+1. Import `installers/Databricks_Install_AuditHero.py` into the target workspace.
+2. Review the installation settings.
+3. Choose **Run all**.
+4. Confirm Setup and Self Test complete successfully before using production payroll evidence.
 
-In Databricks:
-
-1. open **Workspace**;
-2. choose **Import**;
-3. choose **URL**;
-4. enter the raw GitHub URL for `installers/Databricks_Install_AuditHero.py`; and
-5. open the imported notebook.
-
-### 2. Review the installation settings
-
-The default settings are:
+Default settings include:
 
 ```python
 release_ref = "main"
@@ -61,139 +51,85 @@ create_sql_warehouse_if_missing = True
 existing_cluster_id = ""
 ```
 
-Leave `sql_warehouse_id` blank to use an available SQL warehouse or to create **AuditHero SQL Warehouse** when permissions allow it.
+Leave `existing_cluster_id` blank to use serverless Jobs where supported. Leave the monthly audit schedule paused until a representative period has been validated.
 
-Leave `existing_cluster_id` blank to use serverless Jobs where supported. If serverless Jobs are unavailable, enter a compatible existing cluster ID.
+## First CSV / Excel audit
 
-### 3. Run the installer
+### 1. Upload source evidence
 
-Choose **Run all**.
-
-A successful installation finishes with Setup and Self Test reported as successful.
-
-Do not use production payroll data when Setup or Self Test has failed.
-
-## First CSV/Excel audit
-
-### 1. Export source files
-
-Export the required payroll, HR, rostering, and timekeeping CSV/XLSX files.
-
-Keep the original export structure. Do not rename or rearrange columns solely to match AuditHero.
-
-### 2. Upload the files
-
-In **Catalog Explorer**, upload the files to:
+Upload unchanged source files to:
 
 `/Volumes/schads_payroll/bronze/landing/import/raw`
 
-### 3. Build a source mapping
+Do not rename/rearrange columns solely to satisfy AuditHero.
 
-For a new or changed source layout, run:
-
-**AuditHero - Build Source Mapping Workbook**
-
-The Job uses the standard raw import folder and creates:
-
-`/Volumes/schads_payroll/bronze/landing/import/source_mapping_draft.xlsx`
-
-### 4. Review and approve the mapping
-
-Review the draft workbook and confirm:
-
-- source file and sheet selection;
-- field mappings;
-- joins between datasets;
-- default or constant values;
-- value translations; and
-- required fields for the audit.
-
-Save the approved workbook as:
-
-`/Volumes/schads_payroll/bronze/landing/import/source_mapping.xlsx`
-
-### 5. Run the audit
+### 2. Preview and prepare
 
 Run:
 
-**AuditHero - Convert Mapped Files and Run Audit**
+**AuditHero - Preview Uploaded Files**
 
-Enter the audit start and end dates. The standard source, mapping, and output paths are already configured in the Job.
+Review the displayed interpretation and the generated:
 
-The Job:
+`/Volumes/schads_payroll/bronze/landing/auto_input/auto_intake_preview.csv`
 
-1. converts the approved source files to AuditHero canonical datasets;
-2. writes canonical files to `/Volumes/schads_payroll/bronze/landing/input`;
-3. runs File Readiness;
-4. stops if blocking evidence issues remain;
-5. loads normalized source evidence to Silver Delta tables;
-6. calculates expected SCHADS entitlements;
-7. reconciles expected and actual auditable pay where sufficient payroll earnings are available;
-8. writes Gold audit results and operational run history; and
-9. refreshes the AI/BI dashboard.
+AuditHero does not start the audit during this step.
 
-### 6. Review results
+### 3. Continue or correct
+
+If the interpretation is correct, run:
+
+**AuditHero - Audit Reviewed Uploaded Files**
+
+The audit reads the prepared canonical files and uses `auto_intake_manifest.json` to determine the prepared audit window unless dates are explicitly overridden.
+
+If the interpretation is incorrect or incomplete, run:
+
+**AuditHero - Build Source Mapping Workbook (Advanced)**
+
+Review the generated `source_mapping_draft.xlsx`, correct controlled file-role/field/value selections, save it as `source_mapping.xlsx`, then run:
+
+**AuditHero - Convert Mapped Files and Run Audit (Advanced)**
+
+### 4. Review results
 
 Open:
 
-**AI/BI → AuditHero - SCHADS Payroll Compliance**
+- **AI/BI → AuditHero - SCHADS Payroll Compliance**; and/or
+- **Genie → AuditHero - Payroll Compliance**.
 
-Use the dashboard for payroll totals, exceptions, trends, and audit-run review.
+Genie queries governed calculated results; it does not independently calculate SCHADS entitlements.
 
-Open:
+## Advanced conversion/readiness only
 
-**Genie → AuditHero - Payroll Compliance**
+Run **AuditHero - Convert Source Files (Advanced)** when mapped source files need to be converted and checked without starting payroll calculation.
 
-Use Genie for governed questions about completed audit results, such as:
-
-- Which employees have underpaid pay periods?
-- Which pay periods require review?
-- What is the potential underpayment for the latest successful audit?
-- Which classifications have the most review findings?
-
-Genie queries governed Gold and semantic assets. SCHADS entitlement calculations are performed by the AuditHero calculation engine before results reach Genie.
-
-## Routine monthly CSV/Excel audit
-
-After the source layout has an approved mapping:
-
-1. export the latest source files;
-2. upload them to `/Volumes/schads_payroll/bronze/landing/import/raw`;
-3. run **AuditHero - Convert Mapped Files and Run Audit**;
-4. enter the audit dates; and
-5. review AI/BI, Genie, and detailed audit evidence.
-
-Rebuild the source mapping when the source-system export structure changes.
+Run **AuditHero - File Readiness (Advanced)** to assess canonical evidence already in the input folder.
 
 ## Canonical AuditHero files
 
-If files already use the AuditHero canonical workbook/CSV structure, upload them to:
+Canonical inputs are stored under:
 
 `/Volumes/schads_payroll/bronze/landing/input`
 
-Then run:
+Use **AuditHero - Audit Canonical CSV Excel (Advanced)** when canonical files have already been prepared and the audit window is known.
 
-**AuditHero - Audit Uploaded CSV Excel**
+## Routine monthly CSV / Excel process
 
-No source-mapping step is required.
+For each period:
+
+1. archive/retain the original evidence batch;
+2. upload the new raw batch;
+3. run **AuditHero - Preview Uploaded Files**;
+4. review the interpretation/warnings;
+5. run **AuditHero - Audit Reviewed Uploaded Files** if correct, or use Advanced Mapping if required; and
+6. review dashboard, Genie and detailed evidence findings.
+
+Rebuild/review mapping when the source-system report structure or payroll-category coding changes.
 
 ## Data stored in Databricks
 
-The landing Volume retains source and canonical files used by the workflow.
-
-Silver tables store normalized source evidence such as:
-
-- employees;
-- employment history;
-- pay details;
-- timesheets;
-- rostered shifts;
-- payroll earnings; and
-- public-holiday data.
-
-Gold tables store calculated audit evidence and reconciliation results. `ops.audit_runs` records audit execution history.
-
-The `semantic` schema contains governed metric views used by AI/BI and Genie.
+The landing Volume stores source/prepared/canonical files. Silver tables store normalized source evidence. Gold tables store calculated audit evidence and reconciliation. `ops.audit_runs` records execution history. The `semantic` schema exposes governed metrics to AI/BI and Genie.
 
 ## Employment Hero API
 
@@ -204,35 +140,21 @@ To enable direct extraction:
 3. run **AuditHero - API Audit Readiness (Optional API)**; and
 4. use **AuditHero - Monthly Payroll Audit (Optional API)** or **AuditHero - Historical SCHADS Audit (Optional API)**.
 
-The API and uploaded-file workflows use the same calculation and governed result layers.
+The monthly schedule is paused by default.
 
 ## Upgrade
 
-Open:
-
-`/Shared/AuditHero/admin/AuditHero - Install or Upgrade`
-
-Set `release_ref` to the approved release when required and choose **Run all**.
-
-The upgrade refreshes managed code, rule packs, Jobs, reporting assets, and Genie configuration while preserving the AuditHero catalog and historical evidence.
+Open `/Shared/AuditHero/admin/AuditHero - Install or Upgrade`, set `release_ref` to the approved release, and choose **Run all**.
 
 Validate a known payroll period after an upgrade before resuming recurring production audits.
 
 ## Uninstall
 
-Open:
+Open `/Shared/AuditHero/admin/AuditHero - Uninstall` and choose **Run all**.
 
-`/Shared/AuditHero/admin/AuditHero - Uninstall`
-
-A standard uninstall removes managed AuditHero workspace resources while preserving the AuditHero catalog and stored evidence.
-
-Permanent catalog deletion requires:
+A standard uninstall preserves the AuditHero catalog and payroll/audit storage. Permanent data removal requires:
 
 ```python
 delete_audit_data = True
 confirmation = "DELETE AUDITHERO DATA"
 ```
-
-## Bundle and CLI deployment
-
-The repository includes `databricks.yml` for Databricks Declarative Automation Bundle deployment. Use Bundle/CLI deployment for scripted administration or CI/CD where appropriate.
