@@ -1,49 +1,67 @@
-from pathlib import Path
-
 import pandas as pd
 
-from schads_audit.file_readiness import assess_file_readiness
 from schads_audit.manual_audit import _usable_actual_pay
+from schads_audit.normalize import normalize_payroll_earnings
 
 
-def _write_minimum_core(root: Path) -> None:
-    pd.DataFrame([{"employee_id": "E1", "employee_name": "Ada Example"}]).to_csv(root / "employees.csv", index=False)
-    pd.DataFrame([{"employee_id": "E1", "effective_from": "2026-07-01", "classification_code": "SACS-L2-P3"}]).to_csv(root / "pay_details.csv", index=False)
-    pd.DataFrame([{"employee_id": "E1", "start_date": "2024-01-01", "employment_type": "CASUAL"}]).to_csv(root / "employment_history.csv", index=False)
-    pd.DataFrame([{
-        "timesheet_id": "T1",
-        "employee_id": "E1",
-        "start_datetime": "2026-08-01 08:00:00",
-        "end_datetime": "2026-08-01 12:00:00",
-    }]).to_csv(root / "timesheets.csv", index=False)
+def _payroll():
+    return pd.DataFrame([
+        {
+            "employee_id": "E1",
+            "pay_period_start": "2026-07-01",
+            "pay_period_end": "2026-07-14",
+            "pay_category": "Ordinary Hours",
+            "amount": 1000.0,
+        }
+    ])
 
 
-def test_incomplete_actual_pay_is_review_not_blocking(tmp_path: Path):
-    _write_minimum_core(tmp_path)
-    pd.DataFrame([{
-        "employee_id": "E1",
-        "pay_period_start": "2026-08-01",
-        "pay_period_end": "2026-08-14",
-        "amount": 1200.0,
-    }]).to_csv(tmp_path / "payroll_earnings.csv", index=False)
-
-    findings = assess_file_readiness(tmp_path, tmp_path)
-    actual = findings[(findings["finding_type"] == "ACTUAL_PAY") & (findings["source_key"] == "payroll_earnings")]
-
-    assert len(actual) == 1
-    assert actual.iloc[0]["status"] == "REVIEW"
-    assert "pay_category" in actual.iloc[0]["detail"]
+def _mapping():
+    return {"Ordinary Hours": {"audit_treatment": "AUDITABLE_WORK"}}
 
 
-def test_actual_pay_requires_category_and_treatment_mapping():
-    incomplete = pd.DataFrame([{
-        "employee_id": "E1",
-        "pay_period_start": "2026-08-01",
-        "pay_period_end": "2026-08-14",
-        "amount": 1200.0,
-    }])
-    complete = incomplete.assign(pay_category="Ordinary Hours")
+def test_actual_pay_requires_complete_payroll_and_mapping():
+    assert _usable_actual_pay(_payroll(), _mapping()) is True
+    assert _usable_actual_pay(pd.DataFrame(), _mapping()) is False
+    assert _usable_actual_pay(_payroll(), {}) is False
 
-    assert _usable_actual_pay(incomplete, {"Ordinary Hours": {"audit_treatment": "AUDITABLE_WORK"}}) is False
-    assert _usable_actual_pay(complete, {}) is False
-    assert _usable_actual_pay(complete, {"Ordinary Hours": {"audit_treatment": "AUDITABLE_WORK"}}) is True
+
+def test_actual_pay_requires_joinable_employee_ids():
+    assert _usable_actual_pay(_payroll(), _mapping(), {"E1"}) is True
+    assert _usable_actual_pay(_payroll(), _mapping(), {"E2"}) is False
+
+
+def test_actual_pay_requires_every_pay_category_to_be_controlled():
+    payroll = pd.concat([
+        _payroll(),
+        pd.DataFrame([{
+            "employee_id": "E1",
+            "pay_period_start": "2026-07-01",
+            "pay_period_end": "2026-07-14",
+            "pay_category": "Mystery Item",
+            "amount": 25.0,
+        }]),
+    ], ignore_index=True)
+    assert _usable_actual_pay(payroll, _mapping(), {"E1"}) is False
+
+
+def test_actual_pay_missing_amount_is_not_interpreted_as_zero():
+    payroll = _payroll()
+    payroll.loc[0, "amount"] = None
+    assert _usable_actual_pay(payroll, _mapping(), {"E1"}) is False
+
+    normalized = normalize_payroll_earnings([
+        {
+            "EmployeeId": "E1",
+            "PayPeriodStarting": "2026-07-01",
+            "PayPeriodEnding": "2026-07-14",
+            "PayCategoryName": "Ordinary Hours",
+        }
+    ])
+    assert pd.isna(normalized.loc[0, "amount"])
+
+
+def test_actual_pay_blank_required_values_are_rejected():
+    payroll = _payroll()
+    payroll.loc[0, "pay_category"] = " "
+    assert _usable_actual_pay(payroll, _mapping(), {"E1"}) is False
