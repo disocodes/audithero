@@ -102,7 +102,7 @@ def _flag(existing, flag):
 
 
 def _mark_review(out, idx, flag):
-    out.at[idx,'review_flags']=_flag(out.at[idx].get('review_flags'),flag);out.at[idx,'entitlement_status']='REQUIRES_REVIEW'
+    out.at[idx,'review_flags']=_flag(out.loc[idx].get('review_flags'),flag);out.at[idx,'entitlement_status']='REQUIRES_REVIEW'
 
 
 def _conditions_complete(c):
