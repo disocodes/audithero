@@ -41,18 +41,40 @@ def _pay_category_mapping(frames, root):
     mapping={}
     for _,r in df.iterrows():
         treatment=str(r.get("audit_treatment") or r.get("treatment") or "").strip().upper()
-        if not treatment: continue
+        if treatment not in {"AUDITABLE_WORK","ALLOWANCE","EXCLUDE"}: continue
         value={"audit_treatment":treatment}
         for key in (r.get("pay_category_id"),r.get("pay_category"),r.get("source_key"),r.get("source_label")):
             if pd.notna(key) and str(key).strip(): mapping[str(key).strip()]=value
     return mapping
 
 
-def _usable_actual_pay(payroll: pd.DataFrame, mapping: dict) -> bool:
+def _blank(series: pd.Series) -> pd.Series:
+    return series.isna() | series.astype(str).str.strip().str.lower().isin({"","nan","nat","none"})
+
+
+def _mapped_treatment(row, mapping: dict):
+    for key in (row.get("pay_category_id"), row.get("pay_category")):
+        if pd.notna(key) and str(key).strip() in mapping:
+            value=mapping[str(key).strip()]
+            treatment=value.get("audit_treatment") if isinstance(value,dict) else value
+            if str(treatment or "").strip().upper() in {"AUDITABLE_WORK","ALLOWANCE","EXCLUDE"}:
+                return str(treatment).strip().upper()
+    return None
+
+
+def _usable_actual_pay(payroll: pd.DataFrame, mapping: dict, employee_ids=None) -> bool:
+    """Return True only for complete, joinable and fully controlled payroll evidence."""
     if payroll is None or payroll.empty or not mapping: return False
     required={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}
     if not required.issubset(payroll.columns): return False
-    return not any(payroll[field].isna().any() for field in required)
+    if any(bool(_blank(payroll[field]).any()) for field in required): return False
+    if pd.to_numeric(payroll["amount"],errors="coerce").isna().any(): return False
+    if employee_ids is not None:
+        allowed={str(x).strip() for x in employee_ids if str(x).strip()}
+        actual=set(payroll["employee_id"].astype(str).str.strip())
+        if not actual.issubset(allowed): return False
+    if payroll.apply(lambda row:_mapped_treatment(row,mapping),axis=1).isna().any(): return False
+    return True
 
 
 def _assign_manual_pay_periods(timesheets: pd.DataFrame,pay_runs: pd.DataFrame):
@@ -100,23 +122,13 @@ def run_manual_audit(input_root,config_root,start_date,end_date,rule_library,var
     recon_input=merge_event_adjustments_into_entitlements(detail,adjustments)
     toil=audit_toil_register(_control(frames,"toil_register",root),employees,pay_details,holidays,rule_library,audit_end_date=end_date); recon_input=merge_toil_adjustments(recon_input,toil)
 
-    pay_mapping=_pay_category_mapping(frames,root); actual_pay_usable=_usable_actual_pay(payroll,pay_mapping)
+    pay_mapping=_pay_category_mapping(frames,root)
+    employee_ids=set(employees.get("employee_id",pd.Series(dtype=object)).dropna().astype(str).str.strip())
+    actual_pay_usable=_usable_actual_pay(payroll,pay_mapping,employee_ids)
     reconciliation=reconcile_pay_periods(recon_input,payroll if actual_pay_usable else pd.DataFrame(),pay_mapping if actual_pay_usable else {},variance_tolerance)
 
     scenarios={"detail":pd.DataFrame(),"criteria":pd.DataFrame(),"rest_findings":pd.DataFrame()}
     if generate_award_scenarios:
-        scenarios=calculate_award_scenarios(
-            employees,timesheets,holidays,rule_library,
-            pay_details=pay_details,
-            employment_history=employment_history,
-            rosters=rosters,
-            rest_break_controls=rest_break_controls,
-            overtime_rest_controls=overtime_rest_controls,
-        )
+        scenarios=calculate_award_scenarios(employees,timesheets,holidays,rule_library,pay_details=pay_details,employment_history=employment_history,rosters=rosters,part_time_patterns=part_time_patterns,part_time_variations=part_time_variations,meal_break_events=meal_break_events,rest_break_controls=rest_break_controls,overtime_rest_controls=overtime_rest_controls)
 
-    return {
-        "employees":employees,"pay_details":pay_details,"employment_history":employment_history,"timesheets":timesheets,
-        "rostered_shifts":rosters,"payroll_earnings":payroll,"actual_pay_usable":actual_pay_usable,"public_holidays":holidays,
-        "detail":detail,"rest_break_findings":rest_findings,"event_adjustments":adjustments,"toil_findings":toil,"reconciliation":reconciliation,
-        "award_scenario_detail":scenarios["detail"],"award_criteria_detail":scenarios["criteria"],"award_scenario_rest_findings":scenarios["rest_findings"],
-    }
+    return {"employees":employees,"pay_details":pay_details,"employment_history":employment_history,"timesheets":timesheets,"rostered_shifts":rosters,"payroll_earnings":payroll,"actual_pay_usable":actual_pay_usable,"public_holidays":holidays,"detail":detail,"rest_break_findings":rest_findings,"event_adjustments":adjustments,"toil_findings":toil,"reconciliation":reconciliation,"award_scenario_detail":scenarios["detail"],"award_criteria_detail":scenarios["criteria"],"award_scenario_rest_findings":scenarios["rest_findings"]}
