@@ -1,7 +1,6 @@
 from __future__ import annotations
 import time,requests
-from datetime import datetime
-from .dates import month_chunks
+from .dates import as_date, iso_date, month_chunks
 
 
 class EmploymentHeroHRClient:
@@ -46,14 +45,14 @@ class EmploymentHeroHRClient:
             for r in self.employment_histories(org,eid):x=dict(r);x.setdefault('employee_id',eid);employment.append(x)
         return pay,employment
     def timesheets(self,org,start,end,employee_id='-'):
-        au=lambda d:datetime.fromisoformat(str(d)[:10]).strftime('%d/%m/%Y')
+        au=lambda d:as_date(d).strftime('%d/%m/%Y')
         return self.paged(f'organisations/{org}/employees/{employee_id}/timesheet_entries',{'start_date':au(start),'end_date':au(end)})
     def timesheets_chunked(self,org,start,end):
         out=[]
         for s,e in month_chunks(start,end):out.extend(self.timesheets(org,s,e,'-'))
         return out
     def rostered_shifts(self,org,start,end):
-        return self.paged(f'organisations/{org}/rostered_shifts',{'from_date':str(start)[:10],'to_date':str(end)[:10],'exclude_shifts_overlapping_from_date':'false'})
+        return self.paged(f'organisations/{org}/rostered_shifts',{'from_date':iso_date(start),'to_date':iso_date(end),'exclude_shifts_overlapping_from_date':'false'})
     def rostered_shifts_chunked(self,org,start,end):
         out=[]
         for s,e in month_chunks(start,end):out.extend(self.rostered_shifts(org,s,e))
