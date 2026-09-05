@@ -124,6 +124,34 @@ for frame in (
 # COMMAND ----------
 persist_started = perf_counter()
 print("Persisting filtered source evidence and calculated results...")
+
+# Manual reviewed-file reruns are idempotent by audit window. If the same window
+# has already completed successfully, replace the persisted silver/gold tables
+# from this fresh calculation instead of appending into legacy inferred schemas.
+# This intentionally clears stale schema/data from the previous copy of the same
+# manual window and prevents duplicate results for repeated operator runs.
+replace_existing_window = False
+audit_runs_table = f"{catalog}.ops.audit_runs"
+if spark.catalog.tableExists(audit_runs_table):
+    escaped_start = start_iso.replace("'", "''")
+    escaped_end = end_iso.replace("'", "''")
+    escaped_type = run_type.replace("'", "''")
+    existing_count = spark.sql(
+        f"SELECT COUNT(*) AS n FROM {audit_runs_table} "
+        f"WHERE CAST(audit_window_start AS STRING) = '{escaped_start}' "
+        f"AND CAST(audit_window_end AS STRING) = '{escaped_end}' "
+        f"AND COALESCE(CAST(run_type AS STRING), 'MANUAL_FILE') = '{escaped_type}' "
+        f"AND status = 'SUCCESS'"
+    ).collect()[0]["n"]
+    replace_existing_window = int(existing_count or 0) > 0
+
+persistence_mode = "overwrite" if replace_existing_window else "append"
+if replace_existing_window:
+    print(
+        f"Existing successful audit window {start_iso} to {end_iso} detected. "
+        "Replacing silver/gold persisted tables with the fresh reviewed-file run."
+    )
+
 for name, frame in (
     ("employees", result["employees"]), ("pay_details", result["pay_details"]),
     ("employment_history", result["employment_history"]), ("timesheets", result["timesheets"]),
@@ -131,17 +159,22 @@ for name, frame in (
     ("public_holidays", result["public_holidays"]),
 ):
     if frame is not None and not frame.empty:
-        persisted = frame.copy(); persisted["audit_run_id"] = run_id; persisted["ingested_at"] = finished
-        write_df(spark, persisted, f"{catalog}.silver.{name}", "append")
+        persisted = frame.copy()
+        persisted["audit_run_id"] = run_id
+        persisted["audit_window_start"] = start_iso
+        persisted["audit_window_end"] = end_iso
+        persisted["run_type"] = run_type
+        persisted["ingested_at"] = finished
+        write_df(spark, persisted, f"{catalog}.silver.{name}", persistence_mode)
 
-write_df(spark, result["detail"], f"{catalog}.gold.audit_detail", "append")
-write_df(spark, result["rest_break_findings"], f"{catalog}.gold.rest_break_findings", "append")
-write_df(spark, result["event_adjustments"], f"{catalog}.gold.audit_event_adjustments", "append")
-write_df(spark, result["toil_findings"], f"{catalog}.gold.toil_findings", "append")
-write_df(spark, result["reconciliation"], f"{catalog}.gold.pay_period_reconciliation", "append")
-write_df(spark, result["award_scenario_detail"], f"{catalog}.gold.award_scenario_detail", "append")
-write_df(spark, result["award_criteria_detail"], f"{catalog}.gold.award_criteria_detail", "append")
-write_df(spark, result["award_scenario_rest_findings"], f"{catalog}.gold.award_scenario_rest_findings", "append")
+write_df(spark, result["detail"], f"{catalog}.gold.audit_detail", persistence_mode)
+write_df(spark, result["rest_break_findings"], f"{catalog}.gold.rest_break_findings", persistence_mode)
+write_df(spark, result["event_adjustments"], f"{catalog}.gold.audit_event_adjustments", persistence_mode)
+write_df(spark, result["toil_findings"], f"{catalog}.gold.toil_findings", persistence_mode)
+write_df(spark, result["reconciliation"], f"{catalog}.gold.pay_period_reconciliation", persistence_mode)
+write_df(spark, result["award_scenario_detail"], f"{catalog}.gold.award_scenario_detail", persistence_mode)
+write_df(spark, result["award_criteria_detail"], f"{catalog}.gold.award_criteria_detail", persistence_mode)
+write_df(spark, result["award_scenario_rest_findings"], f"{catalog}.gold.award_scenario_rest_findings", persistence_mode)
 persist_seconds = perf_counter() - persist_started
 print(f"Data persistence phase completed in {persist_seconds:.1f}s")
 # COMMAND ----------
@@ -160,7 +193,8 @@ run = pd.DataFrame([{
     "message": (
         f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; "
         f"award_scenarios={len(scenario_detail)}; scenario_passes={scenario_passes}; "
-        f"engine_seconds={engine_seconds:.1f}; persist_seconds={persist_seconds:.1f}"
+        f"engine_seconds={engine_seconds:.1f}; persist_seconds={persist_seconds:.1f}; "
+        f"persistence_mode={persistence_mode}"
     ),
 }])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
