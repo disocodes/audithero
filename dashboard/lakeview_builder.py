@@ -13,7 +13,13 @@ def _position(values: list[int]) -> dict[str, int]:
     return {"x": values[0], "y": values[1], "width": values[2], "height": values[3]}
 
 
-def _query(dataset: str, fields: list[tuple[str, str]], *, disaggregated: bool = False, name: str = "main_query") -> dict[str, Any]:
+def _query(
+    dataset: str,
+    fields: list[tuple[str, str]],
+    *,
+    disaggregated: bool = False,
+    name: str = "main_query",
+) -> dict[str, Any]:
     return {
         "name": name,
         "query": {
@@ -49,39 +55,94 @@ def _text(widget: dict[str, Any], index: int) -> dict[str, Any]:
     }
 
 
+def _filter_targets(widget: dict[str, Any]) -> list[dict[str, str]]:
+    """Return one field binding per dataset.
+
+    Databricks field filters can target one field in each of multiple datasets.
+    Legacy AuditHero specs may still use the single ``dataset``/``field`` form.
+    """
+    if widget.get("fields"):
+        targets = []
+        seen = set()
+        for item in widget["fields"]:
+            dataset = str(item["dataset"])
+            field = str(item["field"])
+            key = (dataset, field)
+            if key in seen:
+                continue
+            seen.add(key)
+            targets.append(
+                {
+                    "dataset": dataset,
+                    "field": field,
+                    "display_name": str(item.get("display_name") or widget.get("title") or field),
+                }
+            )
+        if not targets:
+            raise ValueError("Filter fields list must contain at least one dataset/field binding")
+        return targets
+
+    return [{
+        "dataset": str(widget["dataset"]),
+        "field": str(widget["field"]),
+        "display_name": str(widget.get("title") or widget["field"]),
+    }]
+
+
 def _filter(widget: dict[str, Any], index: int) -> dict[str, Any]:
-    field = widget["field"]
-    query_name = f"filter_{_slug(field)}_{index}_q"
-    query = {
-        "name": query_name,
-        "query": {
-            "datasetName": widget["dataset"],
-            "fields": [{"name": field, "expression": f"`{field}`"}],
-            "disaggregated": False,
-        },
-    }
+    targets = _filter_targets(widget)
+    queries = []
+    encodings = []
+    for target_index, target in enumerate(targets):
+        dataset = target["dataset"]
+        field = target["field"]
+        query_name = f"filter_{_slug(widget.get('name', field))}_{index}_{target_index}_q"
+        queries.append(
+            {
+                "name": query_name,
+                "query": {
+                    "datasetName": dataset,
+                    "fields": [{"name": field, "expression": f"`{field}`"}],
+                    "disaggregated": False,
+                },
+            }
+        )
+        encodings.append(
+            {
+                "fieldName": field,
+                "displayName": target["display_name"],
+                "queryName": query_name,
+            }
+        )
+
     filter_type = widget.get("filter_type", "categorical")
     if filter_type == "date-range":
         widget_type = "filter-date-range-picker"
     else:
         multiple = widget.get("selection", "multi") == "multi"
         widget_type = "filter-multi-select" if multiple else "filter-single-select"
+
+    title = widget.get("title", targets[0]["field"])
     spec = {
         "version": 2,
         "widgetType": widget_type,
-        "encodings": {
-            "fields": [
-                {
-                    "fieldName": field,
-                    "displayName": widget.get("title", field),
-                    "queryName": query_name,
-                }
-            ]
+        "encodings": {"fields": encodings},
+        "frame": {
+            "showTitle": True,
+            "title": title,
+            **(
+                {"showDescription": True, "description": widget["description"]}
+                if widget.get("description")
+                else {}
+            ),
         },
-        "frame": {"showTitle": True, "title": widget.get("title", field)},
     }
     return {
-        "widget": {"name": widget.get("name", f"filter_{index}"), "queries": [query], "spec": spec},
+        "widget": {
+            "name": widget.get("name", f"filter_{index}"),
+            "queries": queries,
+            "spec": spec,
+        },
         "position": _position(widget["position"]),
     }
 
@@ -97,7 +158,15 @@ def _counter(widget: dict[str, Any], index: int) -> dict[str, Any]:
         "version": 2,
         "widgetType": "counter",
         "encodings": {"value": value},
-        "frame": {"showTitle": True, "title": widget["title"]},
+        "frame": {
+            "showTitle": True,
+            "title": widget["title"],
+            **(
+                {"showDescription": True, "description": widget["description"]}
+                if widget.get("description")
+                else {}
+            ),
+        },
     }
     return {
         "widget": {
@@ -136,7 +205,11 @@ def _chart(widget: dict[str, Any], index: int) -> dict[str, Any]:
                     "fieldName": y_name,
                     "scale": {"type": "quantitative"},
                     "displayName": widget.get("y_title", y_name),
-                    **({"format": _number_format(widget, default_decimals=2)} if widget.get("format") else {}),
+                    **(
+                        {"format": _number_format(widget, default_decimals=2)}
+                        if widget.get("format")
+                        else {}
+                    ),
                 },
                 {
                     "fieldName": x_name,
@@ -153,11 +226,20 @@ def _chart(widget: dict[str, Any], index: int) -> dict[str, Any]:
             "scale": {"type": "categorical"},
             "displayName": widget.get("color_title", color),
         }
+
     spec = {
         "version": 3,
         "widgetType": widget["type"],
         "encodings": encodings,
-        "frame": {"showTitle": True, "title": widget["title"]},
+        "frame": {
+            "showTitle": True,
+            "title": widget["title"],
+            **(
+                {"showDescription": True, "description": widget["description"]}
+                if widget.get("description")
+                else {}
+            ),
+        },
     }
     return {
         "widget": {
@@ -206,7 +288,11 @@ def _table(widget: dict[str, Any], index: int) -> dict[str, Any]:
         "frame": {
             "showTitle": True,
             "title": widget["title"],
-            **({"showDescription": True, "description": widget["description"]} if widget.get("description") else {}),
+            **(
+                {"showDescription": True, "description": widget["description"]}
+                if widget.get("description")
+                else {}
+            ),
         },
     }
     return {
@@ -239,11 +325,13 @@ def build_dashboard(spec: dict[str, Any]) -> dict[str, Any]:
     datasets = []
     for dataset in spec["datasets"]:
         query = re.sub(r"\s+", " ", dataset["query"]).strip()
-        datasets.append({
-            "name": dataset["name"],
-            "displayName": dataset.get("display_name", dataset["name"]),
-            "queryLines": [query],
-        })
+        datasets.append(
+            {
+                "name": dataset["name"],
+                "displayName": dataset.get("display_name", dataset["name"]),
+                "queryLines": [query],
+            }
+        )
 
     pages = []
     for page in spec["pages"]:
@@ -253,14 +341,19 @@ def build_dashboard(spec: dict[str, Any]) -> dict[str, Any]:
             if builder is None:
                 raise ValueError(f"Unsupported dashboard widget type: {widget['type']}")
             layout.append(builder(widget, index))
-        pages.append({
-            "name": page["name"],
-            "displayName": page["display_name"],
-            "pageType": page.get("page_type", "PAGE_TYPE_CANVAS"),
-            "layoutVersion": "GRID_V1",
-            "layout": layout,
-        })
-    return {"datasets": datasets, "pages": pages}
+        pages.append(
+            {
+                "name": page["name"],
+                "displayName": page["display_name"],
+                "pageType": page.get("page_type", "PAGE_TYPE_CANVAS"),
+                "layoutVersion": "GRID_V1",
+                "layout": layout,
+            }
+        )
+    result = {"datasets": datasets, "pages": pages}
+    if spec.get("uiSettings"):
+        result["uiSettings"] = spec["uiSettings"]
+    return result
 
 
 def build_dashboard_text(spec: dict[str, Any]) -> str:
