@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # AuditHero — Verify AI/BI Dashboard
 # MAGIC
-# MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled Award-oriented specification, then ensure the stored and published Databricks dashboard matches that definition.
+# MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled Award-oriented specification, apply the AuditHero dashboard enhancement layer, then ensure the stored and published Databricks dashboard matches that definition.
 # MAGIC
 # MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created.
 # COMMAND ----------
@@ -28,18 +28,27 @@ if not warehouse_id:
 DASHBOARD_NAME = "AuditHero - SCHADS Payroll Compliance"
 SPEC_FILE = ROOT / "dashboard" / "payroll_compliance.spec.json"
 BUILDER_FILE = ROOT / "dashboard" / "lakeview_builder.py"
-if not SPEC_FILE.exists():
-    raise FileNotFoundError(f"AuditHero dashboard specification not found: {SPEC_FILE}")
-if not BUILDER_FILE.exists():
-    raise FileNotFoundError(f"AuditHero dashboard builder not found: {BUILDER_FILE}")
+ENHANCEMENTS_FILE = ROOT / "dashboard" / "dashboard_enhancements.py"
 
-module_spec = importlib.util.spec_from_file_location("audithero_lakeview_builder", BUILDER_FILE)
-if module_spec is None or module_spec.loader is None:
-    raise RuntimeError("AuditHero dashboard builder could not be loaded")
-builder = importlib.util.module_from_spec(module_spec)
-module_spec.loader.exec_module(builder)
+for required in (SPEC_FILE, BUILDER_FILE, ENHANCEMENTS_FILE):
+    if not required.exists():
+        raise FileNotFoundError(f"AuditHero dashboard component not found: {required}")
 
-dashboard_spec = json.loads(SPEC_FILE.read_text(encoding="utf-8"))
+
+def _load_module(name: str, path: Path):
+    module_spec = importlib.util.spec_from_file_location(name, path)
+    if module_spec is None or module_spec.loader is None:
+        raise RuntimeError(f"AuditHero dashboard module could not be loaded: {path}")
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+builder = _load_module("audithero_lakeview_builder", BUILDER_FILE)
+enhancements = _load_module("audithero_dashboard_enhancements", ENHANCEMENTS_FILE)
+
+base_dashboard_spec = json.loads(SPEC_FILE.read_text(encoding="utf-8"))
+dashboard_spec = enhancements.enhance_spec(base_dashboard_spec)
 desired_json = builder.build_dashboard(dashboard_spec)
 desired_text = json.dumps(desired_json, separators=(",", ":"))
 
@@ -48,6 +57,8 @@ if not desired_json.get("datasets"):
     raise ValueError("AuditHero dashboard definition contains no datasets")
 if not desired_json.get("pages"):
     raise ValueError("AuditHero dashboard definition contains no pages")
+if len(desired_json["pages"]) > 15:
+    raise ValueError(f"AuditHero dashboard exceeds Databricks page limit: {len(desired_json['pages'])}")
 if not all(isinstance(ds.get("queryLines"), list) and ds.get("queryLines") for ds in desired_json["datasets"]):
     raise ValueError("AuditHero dashboard datasets must use non-empty queryLines arrays")
 
@@ -58,21 +69,44 @@ widgets = [
 ]
 if not any(widget.get("queries") for widget in widgets):
     raise ValueError("AuditHero dashboard definition contains no data-backed widgets")
+
 filter_widgets = [
-    widget for widget in widgets
+    widget
+    for widget in widgets
     if str(widget.get("spec", {}).get("widgetType", "")).startswith("filter-")
 ]
 if not filter_widgets:
     raise ValueError("AuditHero dashboard definition contains no interactive filters")
+
 for widget in filter_widgets:
-    if widget.get("spec", {}).get("version") != 2:
+    spec = widget.get("spec", {})
+    if spec.get("version") != 2:
         raise ValueError("AuditHero dashboard filters must use Lakeview filter specification version 2")
-    for query in widget.get("queries", []):
+
+    queries = widget.get("queries", [])
+    query_names = set()
+    for query in queries:
+        query_name = query.get("name")
+        if not query_name or query_name in query_names:
+            raise ValueError(f"AuditHero dashboard filter has an invalid/duplicate query name: {query_name!r}")
+        query_names.add(query_name)
         fields = query.get("query", {}).get("fields", [])
         if len(fields) != 1 or not fields[0].get("expression"):
-            raise ValueError("AuditHero dashboard field filters must bind directly to one dataset field")
+            raise ValueError("AuditHero dashboard field filters must bind directly to one field per dataset query")
         if "associative_filter_predicate_group" in json.dumps(query):
             raise ValueError("AuditHero dashboard contains an obsolete filter associativity expression")
+
+    encodings = spec.get("encodings", {}).get("fields", [])
+    if not encodings:
+        raise ValueError("AuditHero dashboard filter has no encoded fields")
+    for encoding in encodings:
+        if encoding.get("queryName") not in query_names:
+            raise ValueError(
+                f"AuditHero dashboard filter encoding references unknown query: {encoding.get('queryName')!r}"
+            )
+
+if not desired_json.get("uiSettings", {}).get("theme"):
+    raise ValueError("AuditHero dashboard must define a coherent light/dark theme")
 
 # All governed datasets required by the Award-oriented dashboard must be queryable
 # even before the first audit. Setup creates empty source tables so these views are stable.
@@ -181,4 +215,7 @@ for item in matches:
     print(f"Verified and published dashboard {dashboard_id}; revision={published.get('revision_create_time')}")
 
 print(f"AuditHero dashboard verification complete. Managed dashboard(s): {', '.join(verified_ids)}")
-print("Award Explorer and criteria pages are available with employee, SCHADS stream, level, pay point, employment-type and evidence/status filters.")
+print(
+    "Dashboard includes cross-dataset global filters plus Audit Overview, Employee Deep Dive, "
+    "Audit Components, specialist SCHADS pages, definitive reconciliation, evidence, data quality and rule coverage."
+)
