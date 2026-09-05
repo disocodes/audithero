@@ -49,28 +49,59 @@ def parse_datetime_value(value: Any):
     if text.lower() in _BLANK_DATE_TEXT:
         return pd.NaT
 
-    # ISO is explicit and should never be reinterpreted as day-first.
     if _YEAR_FIRST_RE.match(text):
         return pd.to_datetime(text, errors="coerce", yearfirst=True)
-
-    # Common compact machine date: YYYYMMDD.
     if _COMPACT_ISO_RE.match(text):
         return pd.to_datetime(text[:8], format="%Y%m%d", errors="coerce")
-
-    # Numeric dates used by Australian operators and CSV/XLSX exports are DMY.
     if _DAY_FIRST_RE.match(text):
         return pd.to_datetime(text, errors="coerce", dayfirst=True)
-
-    # For non-ISO textual dates and other supported strings, prefer day-first.
-    # Month names remain unambiguous, while values such as 02-03 continue to DMY.
     return pd.to_datetime(text, errors="coerce", dayfirst=True)
 
 
 def parse_datetime_series(series: pd.Series) -> pd.Series:
-    """Parse a Series with the same rules as :func:`parse_datetime_value`."""
+    """Vectorised Australian date parsing for dataframe columns.
+
+    This function is intentionally column-oriented. The previous implementation
+    called :func:`parse_datetime_value` once per cell, which became a major
+    performance regression after date normalisation was applied throughout the
+    audit engine. Pandas 2.x ``format='mixed'`` keeps ISO/machine timestamps and
+    Australian day-first operator/file dates in one fast vectorised conversion.
+
+    Examples such as ``01-05-2025`` are therefore interpreted as 1 May 2025,
+    while ``2025-05-01`` remains 1 May 2025.
+    """
     if series is None:
         return pd.Series(dtype="datetime64[ns]")
-    return series.map(parse_datetime_value)
+    if not isinstance(series, pd.Series):
+        series = pd.Series(series)
+    if pd.api.types.is_datetime64_any_dtype(series.dtype):
+        return pd.to_datetime(series, errors="coerce")
+
+    # Pandas >=2.0 supports mixed-format vectorised parsing. dayfirst=True only
+    # resolves ambiguous numeric dates; explicit year-first ISO remains year-first.
+    try:
+        return pd.to_datetime(series, errors="coerce", format="mixed", dayfirst=True)
+    except (TypeError, ValueError):
+        # Compatibility fallback for older pandas environments. Still operate in
+        # vectorised groups rather than calling pd.to_datetime once per value.
+        text = series.astype("string").str.strip()
+        out = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+        blank = text.str.lower().isin(_BLANK_DATE_TEXT) | text.isna()
+        year_first = text.str.match(_YEAR_FIRST_RE, na=False)
+        compact = text.str.match(_COMPACT_ISO_RE, na=False)
+        day_first = text.str.match(_DAY_FIRST_RE, na=False)
+
+        if year_first.any():
+            out.loc[year_first] = pd.to_datetime(text.loc[year_first], errors="coerce", yearfirst=True)
+        if compact.any():
+            out.loc[compact] = pd.to_datetime(text.loc[compact].str.slice(0, 8), format="%Y%m%d", errors="coerce")
+        dmy = day_first & ~year_first & ~compact
+        if dmy.any():
+            out.loc[dmy] = pd.to_datetime(text.loc[dmy], errors="coerce", dayfirst=True)
+        other = ~(blank | year_first | compact | day_first)
+        if other.any():
+            out.loc[other] = pd.to_datetime(text.loc[other], errors="coerce", dayfirst=True)
+        return out
 
 
 def as_date(value: Any) -> date:
