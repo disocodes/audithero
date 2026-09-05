@@ -151,6 +151,59 @@ A basic timesheet can be recognised from an employee name or identifier together
 
 A standalone payroll earnings export is automatically recognised only when it contains a usable employee identifier, pay-period start, pay-period end, pay category and amount. Recognition of payroll data does **not** automatically approve its treatment for reconciliation.
 
+## Public holidays and special holiday overrides
+
+For manual/file-based audits, **normal Australian public holidays are generated automatically** for WA, NSW, VIC, QLD, SA, TAS, ACT and NT for the selected audit period. Operators do not need to upload a normal annual public-holiday calendar.
+
+AuditHero uses the state on the employee/timesheet evidence to decide whether a shift falls on a public holiday. Missing state evidence can therefore prevent a complete public-holiday assessment and may produce a review finding.
+
+### One-off, irregular or local public holidays
+
+Use the optional canonical control file:
+
+`public_holiday_overrides.csv`
+
+This is for holidays that are not reliably represented by the normal statewide calendar, including one-off declared holidays, irregular regional holidays, local holidays and other approved special dates.
+
+For the standard Databricks uploaded-file workflow, upload the source override with the other raw files before running **AuditHero - Preview Uploaded Files**. After preparation, the reviewed-file audit reads the canonical override from the prepared input area, normally:
+
+```text
+/Volumes/<catalog>/bronze/landing/auto_input/public_holiday_overrides.csv
+```
+
+Do **not** manually edit generated prepared files unless you are deliberately using the canonical-file workflow. The preferred standard workflow is: upload the override as source evidence → Preview → review → Audit Reviewed Uploaded Files.
+
+Minimum columns:
+
+| Column | Required | Meaning |
+|---|---|---|
+| `state` | Yes | Australian state/territory code, e.g. `WA`, `NSW`, `VIC` |
+| `holiday_date` | Yes | Exact holiday date; operator-facing dates may use Australian day-first format such as `15-08-2025` |
+| `holiday_name` | Yes | Descriptive holiday name |
+| `holiday_location_key` | No | Blank for statewide; populate for a specific locality/site |
+| `holiday_scope` | No | `STATEWIDE` or `LOCAL`; inferred when omitted |
+| `source` | No | Evidence/source note; defaults to manual override where normalised |
+
+Example — one-off statewide holiday:
+
+```csv
+state,holiday_date,holiday_name,holiday_location_key,holiday_scope,source
+WA,15-08-2025,Special Public Holiday,,STATEWIDE,manual_override
+```
+
+Example — local/regional holiday:
+
+```csv
+state,holiday_date,holiday_name,holiday_location_key,holiday_scope,source
+WA,15-08-2025,Kununurra Special Holiday,KUNUNURRA,LOCAL,manual_override
+```
+
+For a local override, the relevant timesheet must carry the **same `holiday_location_key`**. If the override contains `KUNUNURRA` but the timesheet has no matching location key, AuditHero will not apply that local holiday to the shift.
+
+AuditHero filters holiday overrides to the selected audit window. A five-day audit therefore considers only overrides relevant to those five days; a multi-year audit considers the applicable overrides across that requested period.
+
+The same dataset can also be supplied as `public_holiday_overrides.xlsx` / `.xlsm`, or as the `public_holiday_overrides` sheet in an AuditHero canonical workbook.
+
 ## Advanced Mapping / Context Workbook
 
 Advanced Mapping is an optional correction layer, not replacement evidence and not a prerequisite for ordinary imports that are interpreted correctly.
