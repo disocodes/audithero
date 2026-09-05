@@ -21,7 +21,7 @@ import pandas as pd
 from schads_audit.dates import iso_date
 from schads_audit.rules import RuleLibrary
 from schads_audit.manual_audit import run_manual_audit
-from schads_audit.databricks_io import write_df, create_views
+from schads_audit.databricks_io import write_df, create_views, _prepare_pandas_for_spark
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 1. Set the input folder and audit dates
@@ -123,58 +123,131 @@ for frame in (
         frame["run_finished_at"] = finished
 # COMMAND ----------
 persist_started = perf_counter()
-print("Persisting filtered source evidence and calculated results...")
+print("Persisting filtered source evidence and calculated results with row-level upserts...")
 
-# Manual reviewed-file reruns are idempotent by audit window. Force a clean
-# overwrite when legacy persisted tables do not yet carry audit-window metadata,
-# or when any persisted table already contains the same audit window. This avoids
-# duplicate rows and removes legacy inferred schemas such as BIGINT/DOUBLE columns
-# that now legitimately contain AuditHero text identifiers or labels.
-replace_existing_window = False
-legacy_persistence_detected = False
-escaped_start = start_iso.replace("'", "''")
-escaped_end = end_iso.replace("'", "''")
+# Stable business-key candidates. The first candidate whose columns exist is used.
+# Keys deliberately exclude audit_run_id/timestamps so rerunning the same evidence
+# updates the same logical row instead of creating duplicates.
+MERGE_KEY_CANDIDATES = {
+    "employees": [("employee_id",)],
+    "pay_details": [("employee_id", "effective_from"), ("employee_id", "classification_code", "effective_from")],
+    "employment_history": [("employee_id", "start_date"), ("employee_id", "start_date", "end_date")],
+    "timesheets": [("timesheet_id",)],
+    "rostered_shifts": [("rostered_shift_id",), ("roster_shift_id",), ("shift_id",), ("employee_id", "rostered_start_datetime", "rostered_end_datetime")],
+    "payroll_earnings": [("payroll_earning_id",), ("earning_id",), ("employee_id", "pay_period_start", "pay_period_end", "pay_category", "earning_date")],
+    "public_holidays": [("state", "holiday_date", "holiday_name", "holiday_location_key")],
+    "audit_detail": [("timesheet_id",)],
+    "rest_break_findings": [("employee_id", "previous_shift_end", "next_shift_start", "finding_type")],
+    "audit_event_adjustments": [("event_id",), ("employee_id", "event_type", "start_datetime", "end_datetime")],
+    "toil_findings": [("toil_id",), ("employee_id", "overtime_datetime", "agreement_date")],
+    "pay_period_reconciliation": [("employee_id", "pay_period_start", "pay_period_end")],
+    "award_scenario_detail": [("scenario_id", "timesheet_id")],
+    "award_criteria_detail": [("scenario_id", "timesheet_id", "criterion_group", "criterion", "clause")],
+    "award_scenario_rest_findings": [("scenario_id", "employee_id", "previous_shift_end", "next_shift_start", "finding_type")],
+}
 
-probe_tables = (
-    f"{catalog}.silver.pay_details",
-    f"{catalog}.silver.timesheets",
-    f"{catalog}.gold.audit_detail",
-    f"{catalog}.gold.award_scenario_detail",
-)
-for probe_table in probe_tables:
-    if not spark.catalog.tableExists(probe_table):
-        continue
-    probe_columns = set(spark.table(probe_table).columns)
-    if not {"audit_window_start", "audit_window_end"}.issubset(probe_columns):
-        legacy_persistence_detected = True
-        replace_existing_window = True
-        print(f"Legacy persisted table without audit-window metadata detected: {probe_table}")
-        break
-    matched = spark.sql(
-        f"SELECT 1 FROM {probe_table} "
-        f"WHERE CAST(audit_window_start AS STRING) = '{escaped_start}' "
-        f"AND CAST(audit_window_end AS STRING) = '{escaped_end}' LIMIT 1"
-    ).collect()
-    if matched:
-        replace_existing_window = True
-        break
+VOLATILE_COLUMNS = {"audit_run_id", "ingested_at", "run_finished_at"}
 
-persistence_mode = "overwrite" if replace_existing_window else "append"
-if replace_existing_window:
-    reason = "legacy persisted schema" if legacy_persistence_detected else "same audit window already exists"
-    print(
-        f"Persistence mode: OVERWRITE ({reason}). Fresh results for {start_iso} to {end_iso} "
-        "will replace the current silver/gold persisted result set instead of appending."
-    )
-else:
-    print("Persistence mode: APPEND (new audit window and compatible persisted schema).")
 
-for name, frame in (
-    ("employees", result["employees"]), ("pay_details", result["pay_details"]),
-    ("employment_history", result["employment_history"]), ("timesheets", result["timesheets"]),
-    ("rostered_shifts", result["rostered_shifts"]), ("payroll_earnings", result["payroll_earnings"]),
+def _table_leaf(table):
+    return table.split(".")[-1].replace("`", "")
+
+
+def _merge_keys(table, columns):
+    available = set(columns)
+    for candidate in MERGE_KEY_CANDIDATES.get(_table_leaf(table), []):
+        if set(candidate).issubset(available):
+            return list(candidate)
+    # Conservative fallback: use the strongest common identifiers available.
+    fallback = [
+        c for c in ("scenario_id", "timesheet_id", "employee_id", "pay_period_start", "pay_period_end", "shift_start")
+        if c in available
+    ]
+    return fallback
+
+
+def _q(name):
+    return f"`{str(name).replace('`', '``')}`"
+
+
+def _upsert_frame(frame, table):
+    if frame is None or frame.empty:
+        return
+
+    prepared = _prepare_pandas_for_spark(frame)
+    incoming = spark.createDataFrame(prepared)
+
+    if not spark.catalog.tableExists(table):
+        incoming.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table)
+        print(f"  {table}: created {incoming.count():,} row(s)")
+        return
+
+    existing = spark.table(table)
+    existing_types = {f.name: f.dataType.simpleString() for f in existing.schema.fields}
+    incoming_types = {f.name: f.dataType.simpleString() for f in incoming.schema.fields}
+    missing_columns = [c for c in incoming.columns if c not in existing_types]
+    incompatible = [
+        c for c, dtype in incoming_types.items()
+        if c in existing_types and dtype == "string" and existing_types[c] != "string"
+    ]
+
+    # One-time repair only for old tables created before stable AuditHero schemas.
+    # Do not repeatedly overwrite compatible tables. Once repaired, all subsequent
+    # runs use MERGE and preserve rows from other audit periods.
+    if missing_columns or incompatible:
+        reasons = []
+        if missing_columns:
+            reasons.append("missing columns=" + ",".join(missing_columns))
+        if incompatible:
+            reasons.append("legacy text types=" + ",".join(incompatible))
+        print(f"  {table}: one-time legacy schema repair ({'; '.join(reasons)})")
+        incoming.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table)
+        return
+
+    keys = _merge_keys(table, incoming.columns)
+    if not keys:
+        # No trustworthy business key: exact-row dedupe is safer than inventing one.
+        # This path should be rare for AuditHero's canonical/result tables.
+        print(f"  {table}: no stable business key found; appending with exact schema")
+        incoming.write.format("delta").mode("append").saveAsTable(table)
+        return
+
+    temp_view = f"_audithero_upsert_{uuid.uuid4().hex}"
+    incoming.createOrReplaceTempView(temp_view)
+
+    key_match = " AND ".join([f"t.{_q(c)} <=> s.{_q(c)}" for c in keys])
+    content_columns = [c for c in incoming.columns if c not in VOLATILE_COLUMNS]
+    content_equal = " AND ".join([f"t.{_q(c)} <=> s.{_q(c)}" for c in content_columns]) or "TRUE"
+    metadata_columns = [c for c in incoming.columns if c in VOLATILE_COLUMNS]
+    metadata_set = ", ".join([f"t.{_q(c)} = s.{_q(c)}" for c in metadata_columns])
+
+    merge_sql = [
+        f"MERGE INTO {table} t",
+        f"USING {temp_view} s",
+        f"ON {key_match}",
+        f"WHEN MATCHED AND NOT ({content_equal}) THEN UPDATE SET *",
+    ]
+    if metadata_set:
+        # Identical audit content is not rewritten; only run metadata advances so
+        # latest-run views continue to include the row.
+        merge_sql.append(f"WHEN MATCHED THEN UPDATE SET {metadata_set}")
+    merge_sql.append("WHEN NOT MATCHED THEN INSERT *")
+
+    spark.sql("\n".join(merge_sql))
+    spark.catalog.dropTempView(temp_view)
+    print(f"  {table}: upserted by key [{', '.join(keys)}]")
+
+
+silver_frames = (
+    ("employees", result["employees"]),
+    ("pay_details", result["pay_details"]),
+    ("employment_history", result["employment_history"]),
+    ("timesheets", result["timesheets"]),
+    ("rostered_shifts", result["rostered_shifts"]),
+    ("payroll_earnings", result["payroll_earnings"]),
     ("public_holidays", result["public_holidays"]),
-):
+)
+for name, frame in silver_frames:
     if frame is not None and not frame.empty:
         persisted = frame.copy()
         persisted["audit_run_id"] = run_id
@@ -182,16 +255,20 @@ for name, frame in (
         persisted["audit_window_end"] = end_iso
         persisted["run_type"] = run_type
         persisted["ingested_at"] = finished
-        write_df(spark, persisted, f"{catalog}.silver.{name}", persistence_mode)
+        _upsert_frame(persisted, f"{catalog}.silver.{name}")
 
-write_df(spark, result["detail"], f"{catalog}.gold.audit_detail", persistence_mode)
-write_df(spark, result["rest_break_findings"], f"{catalog}.gold.rest_break_findings", persistence_mode)
-write_df(spark, result["event_adjustments"], f"{catalog}.gold.audit_event_adjustments", persistence_mode)
-write_df(spark, result["toil_findings"], f"{catalog}.gold.toil_findings", persistence_mode)
-write_df(spark, result["reconciliation"], f"{catalog}.gold.pay_period_reconciliation", persistence_mode)
-write_df(spark, result["award_scenario_detail"], f"{catalog}.gold.award_scenario_detail", persistence_mode)
-write_df(spark, result["award_criteria_detail"], f"{catalog}.gold.award_criteria_detail", persistence_mode)
-write_df(spark, result["award_scenario_rest_findings"], f"{catalog}.gold.award_scenario_rest_findings", persistence_mode)
+for table_name, frame in (
+    ("audit_detail", result["detail"]),
+    ("rest_break_findings", result["rest_break_findings"]),
+    ("audit_event_adjustments", result["event_adjustments"]),
+    ("toil_findings", result["toil_findings"]),
+    ("pay_period_reconciliation", result["reconciliation"]),
+    ("award_scenario_detail", result["award_scenario_detail"]),
+    ("award_criteria_detail", result["award_criteria_detail"]),
+    ("award_scenario_rest_findings", result["award_scenario_rest_findings"]),
+):
+    _upsert_frame(frame, f"{catalog}.gold.{table_name}")
+
 persist_seconds = perf_counter() - persist_started
 print(f"Data persistence phase completed in {persist_seconds:.1f}s")
 # COMMAND ----------
@@ -210,8 +287,7 @@ run = pd.DataFrame([{
     "message": (
         f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; "
         f"award_scenarios={len(scenario_detail)}; scenario_passes={scenario_passes}; "
-        f"engine_seconds={engine_seconds:.1f}; persist_seconds={persist_seconds:.1f}; "
-        f"persistence_mode={persistence_mode}"
+        f"engine_seconds={engine_seconds:.1f}; persist_seconds={persist_seconds:.1f}; persistence_mode=ROW_LEVEL_UPSERT"
     ),
 }])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
