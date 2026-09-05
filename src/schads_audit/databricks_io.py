@@ -9,10 +9,53 @@ def create_catalog_objects(spark, catalog):
     spark.sql(f'CREATE VOLUME IF NOT EXISTS `{catalog}`.`bronze`.`landing`')
 
 
+def _migrate_string_columns_for_append(spark, incoming, table):
+    """Upgrade legacy Delta columns to STRING when incoming AuditHero IDs are strings.
+
+    Older tables may have inferred numeric identifier columns from early source data.
+    Auto-intake now emits stable string identifiers such as ``AUTO-TS-...``. Delta
+    mergeSchema does not change BIGINT to STRING, so append would otherwise fail.
+    This migration preserves existing rows, casts only incompatible legacy columns,
+    and rewrites the table once with the widened schema.
+    """
+    if not spark.catalog.tableExists(table):
+        return incoming, False
+
+    existing = spark.table(table)
+    existing_types = {field.name: field.dataType.simpleString() for field in existing.schema.fields}
+    incoming_types = {field.name: field.dataType.simpleString() for field in incoming.schema.fields}
+    to_string = [
+        name for name, dtype in incoming_types.items()
+        if dtype == 'string' and name in existing_types and existing_types[name] != 'string'
+    ]
+    if not to_string:
+        return incoming, False
+
+    from pyspark.sql import functions as F
+    migrated = existing
+    for name in to_string:
+        migrated = migrated.withColumn(name, F.col(name).cast('string'))
+
+    combined = migrated.unionByName(incoming, allowMissingColumns=True)
+    combined.write.format('delta').mode('overwrite').option('overwriteSchema', 'true').saveAsTable(table)
+    print(f"Migrated legacy Delta column(s) to STRING for {table}: {', '.join(to_string)}")
+    return incoming, True
+
+
 def write_df(spark, df, table, mode='append'):
     if df is None or df.empty:
         return
-    spark.createDataFrame(df.where(pd.notna(df), None)).write.format('delta').mode(mode).option('mergeSchema','true').saveAsTable(table)
+    incoming = spark.createDataFrame(df.where(pd.notna(df), None))
+
+    if mode == 'append':
+        incoming, migrated = _migrate_string_columns_for_append(spark, incoming, table)
+        if migrated:
+            return
+
+    writer = incoming.write.format('delta').mode(mode).option('mergeSchema','true')
+    if mode == 'overwrite':
+        writer = writer.option('overwriteSchema','true')
+    writer.saveAsTable(table)
 
 
 def overwrite_rule_tables(spark, lib, catalog):
