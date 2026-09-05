@@ -14,11 +14,11 @@ from time import perf_counter
 
 exec(open(str(Path.cwd() / "_common.py")).read())
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import uuid
 import pandas as pd
 
-from schads_audit.dates import iso_date
+from schads_audit.dates import iso_date, parse_datetime_series
 from schads_audit.rules import RuleLibrary
 from schads_audit.manual_audit import run_manual_audit
 from schads_audit.databricks_io import write_df, create_views, _prepare_pandas_for_spark
@@ -123,11 +123,13 @@ for frame in (
         frame["run_finished_at"] = finished
 # COMMAND ----------
 persist_started = perf_counter()
-print("Persisting filtered source evidence and calculated results with row-level upserts...")
+print("Persisting filtered source evidence and calculated results with schema-safe row-level upserts...")
 
-# Stable business-key candidates. The first candidate whose columns exist is used.
-# Keys deliberately exclude audit_run_id/timestamps so rerunning the same evidence
-# updates the same logical row instead of creating duplicates.
+from pyspark.sql import functions as F
+
+# Stable business-key candidates. The first candidate whose columns exist in both
+# source and target is used. Keys deliberately exclude run metadata so rerunning
+# the same evidence updates the same logical row instead of creating duplicates.
 MERGE_KEY_CANDIDATES = {
     "employees": [("employee_id",)],
     "pay_details": [("employee_id", "effective_from"), ("employee_id", "classification_code", "effective_from")],
@@ -147,6 +149,15 @@ MERGE_KEY_CANDIDATES = {
 }
 
 VOLATILE_COLUMNS = {"audit_run_id", "ingested_at", "run_finished_at"}
+TEMPORAL_COLUMNS = {
+    "pay_period_start", "pay_period_end", "shift_start", "shift_end",
+    "start_datetime", "end_datetime", "rostered_start_datetime", "rostered_end_datetime",
+    "previous_shift_end", "next_shift_start", "overtime_datetime", "agreement_date",
+    "earning_date", "holiday_date", "effective_from", "start_date", "end_date",
+    "audit_window_start", "audit_window_end", "award_reference_date",
+    "ingested_at", "run_finished_at", "started_at", "finished_at",
+}
+NUMERIC_PREFIXES = ("tinyint", "smallint", "int", "bigint", "float", "double", "decimal(")
 
 
 def _table_leaf(table):
@@ -158,7 +169,6 @@ def _merge_keys(table, columns):
     for candidate in MERGE_KEY_CANDIDATES.get(_table_leaf(table), []):
         if set(candidate).issubset(available):
             return list(candidate)
-    # Conservative fallback: use the strongest common identifiers available.
     fallback = [
         c for c in ("scenario_id", "timesheet_id", "employee_id", "pay_period_start", "pay_period_end", "shift_start")
         if c in available
@@ -170,11 +180,208 @@ def _q(name):
     return f"`{str(name).replace('`', '``')}`"
 
 
+def _is_numeric_type(type_name):
+    return str(type_name).lower().startswith(NUMERIC_PREFIXES)
+
+
+def _is_timestamp_type(type_name):
+    return str(type_name).lower().startswith("timestamp")
+
+
+def _prepare_upsert_pandas(frame):
+    """Preserve real temporal values before Spark Connect schema inference.
+
+    Pandas object columns can contain Timestamp/datetime values plus nulls. Spark
+    Connect can infer those mixed object columns as DOUBLE. That is how a logical
+    pay_period_start reached MERGE as DOUBLE while the Delta target was TIMESTAMP.
+    Convert temporal object/datetime columns to Python datetime objects first.
+    Numeric temporal columns are accepted only when they clearly look like Unix
+    seconds/milliseconds/microseconds/nanoseconds; small ambiguous numerics fail
+    closed rather than being guessed as dates.
+    """
+    out = frame.copy()
+    for name in out.columns:
+        series = out[name]
+        parsed = None
+
+        if pd.api.types.is_datetime64_any_dtype(series.dtype):
+            parsed = pd.to_datetime(series, errors="coerce")
+        elif pd.api.types.is_object_dtype(series.dtype):
+            populated = series[series.notna()]
+            if not populated.empty and populated.map(lambda v: isinstance(v, (pd.Timestamp, datetime, date))).any():
+                parsed = parse_datetime_series(series)
+        elif name in TEMPORAL_COLUMNS and pd.api.types.is_numeric_dtype(series.dtype):
+            numeric = pd.to_numeric(series, errors="coerce")
+            magnitude_values = numeric.dropna().abs()
+            if not magnitude_values.empty:
+                magnitude = float(magnitude_values.median())
+                if magnitude >= 1e17:
+                    parsed = pd.to_datetime(numeric, unit="ns", errors="coerce")
+                elif magnitude >= 1e14:
+                    parsed = pd.to_datetime(numeric, unit="us", errors="coerce")
+                elif magnitude >= 1e11:
+                    parsed = pd.to_datetime(numeric, unit="ms", errors="coerce")
+                elif magnitude >= 1e8:
+                    parsed = pd.to_datetime(numeric, unit="s", errors="coerce")
+                else:
+                    raise ValueError(
+                        f"Refusing to guess numeric temporal values in {name!r}; "
+                        f"observed magnitude {magnitude:g}. Supply an actual date/datetime value."
+                    )
+
+        if parsed is not None:
+            meaningful = series.notna()
+            invalid = meaningful & parsed.isna()
+            if bool(invalid.any()):
+                sample = series.loc[invalid].astype(str).head(3).tolist()
+                raise ValueError(f"Invalid temporal value(s) in {name}: {sample}")
+            out[name] = parsed.map(lambda v: None if pd.isna(v) else v.to_pydatetime())
+
+    return _prepare_pandas_for_spark(out)
+
+
+def _numeric_epoch_to_timestamp(column_name):
+    """Convert obvious epoch numeric representations to a Spark timestamp."""
+    value = F.col(column_name).cast("double")
+    magnitude = F.abs(value)
+    seconds = (
+        F.when(magnitude >= F.lit(1e17), value / F.lit(1e9))
+        .when(magnitude >= F.lit(1e14), value / F.lit(1e6))
+        .when(magnitude >= F.lit(1e11), value / F.lit(1e3))
+        .when(magnitude >= F.lit(1e8), value)
+        .otherwise(F.lit(None).cast("double"))
+    )
+    return F.to_timestamp(F.from_unixtime(seconds.cast("long")))
+
+
+def _validated_replace(incoming, table, name, converted, source_type, target_type):
+    bad = incoming.where(F.col(name).isNotNull() & converted.isNull()).limit(1).count()
+    if bad:
+        return incoming, False, f"{name}({source_type}->{target_type})"
+    return incoming.withColumn(name, converted), True, f"{name}({source_type}->{target_type})"
+
+
+def _align_incoming_to_target(incoming, existing, table):
+    """Align source columns to existing Delta types before building MERGE SQL.
+
+    Temporal and safe numeric mismatches are fixed on the source side. Genuine
+    semantic conflicts (for example a legacy DOUBLE column now carrying real text)
+    are returned for one-time target schema repair instead of being silently cast.
+    """
+    existing_types = {f.name: f.dataType.simpleString() for f in existing.schema.fields}
+    incoming_types = {f.name: f.dataType.simpleString() for f in incoming.schema.fields}
+    aligned = incoming
+    changes = []
+    unresolved = []
+
+    for name, source_type in incoming_types.items():
+        if name not in existing_types:
+            continue
+        target_type = existing_types[name]
+        if source_type == target_type:
+            continue
+
+        converted = None
+        if target_type == "string":
+            converted = F.col(name).cast("string")
+        elif _is_timestamp_type(target_type):
+            if _is_numeric_type(source_type):
+                converted = _numeric_epoch_to_timestamp(name).cast(target_type)
+            elif source_type == "date":
+                converted = F.col(name).cast(target_type)
+            else:
+                converted = F.coalesce(
+                    F.expr(f"try_cast({_q(name)} AS TIMESTAMP)"),
+                    F.expr(f"try_to_timestamp({_q(name)}, 'dd-MM-yyyy')"),
+                    F.expr(f"try_to_timestamp({_q(name)}, 'dd/MM/yyyy')"),
+                ).cast(target_type)
+        elif target_type == "date":
+            if _is_numeric_type(source_type):
+                converted = F.to_date(_numeric_epoch_to_timestamp(name))
+            elif _is_timestamp_type(source_type):
+                converted = F.col(name).cast("date")
+            else:
+                converted = F.coalesce(
+                    F.expr(f"try_cast({_q(name)} AS DATE)"),
+                    F.to_date(F.col(name), "dd-MM-yyyy"),
+                    F.to_date(F.col(name), "dd/MM/yyyy"),
+                )
+        elif _is_numeric_type(target_type) and _is_numeric_type(source_type):
+            converted = F.col(name).cast(target_type)
+        elif _is_numeric_type(target_type) and source_type == "string":
+            # Numeric-looking strings are safe to align. Real text is not; it means
+            # the old table inferred the wrong type and must be widened to STRING.
+            candidate = F.expr(f"try_cast({_q(name)} AS {target_type})")
+            aligned_candidate, ok, detail = _validated_replace(aligned, table, name, candidate, source_type, target_type)
+            if ok:
+                aligned = aligned_candidate
+                changes.append(detail)
+            else:
+                unresolved.append(name)
+            continue
+        elif target_type == "boolean":
+            converted = F.expr(f"try_cast({_q(name)} AS BOOLEAN)")
+        else:
+            candidate = F.expr(f"try_cast({_q(name)} AS {target_type})")
+            aligned_candidate, ok, detail = _validated_replace(aligned, table, name, candidate, source_type, target_type)
+            if ok:
+                aligned = aligned_candidate
+                changes.append(detail)
+            else:
+                unresolved.append(name)
+            continue
+
+        aligned_candidate, ok, detail = _validated_replace(aligned, table, name, converted, source_type, target_type)
+        if ok:
+            aligned = aligned_candidate
+            changes.append(detail)
+        else:
+            unresolved.append(name)
+
+    return aligned, changes, unresolved
+
+
+def _repair_legacy_target_types(table, existing, incoming, columns):
+    """Rewrite only when an old target schema is semantically wrong.
+
+    Existing rows are preserved. A temporary Delta table is materialised with the
+    corrected types, then copied back over the original table with overwriteSchema.
+    This avoids the earlier failure-prone union of incompatible source/target types.
+    """
+    incoming_types = {f.name: f.dataType.simpleString() for f in incoming.schema.fields}
+    migrated = existing
+    repairs = []
+
+    for name in columns:
+        target_type = incoming_types[name]
+        if target_type != "string":
+            raise ValueError(
+                f"Unsupported legacy schema conflict for {table}.{name}: target={existing.schema[name].dataType.simpleString()} "
+                f"incoming={target_type}. AuditHero will not guess a destructive type conversion."
+            )
+        migrated = migrated.withColumn(name, F.col(name).cast("string"))
+        repairs.append(f"{name}->{target_type}")
+
+    parts = table.replace("`", "").split(".")
+    if len(parts) != 3:
+        raise ValueError(f"Expected catalog.schema.table name, got {table!r}")
+    temp_table = f"{parts[0]}.{parts[1]}._audithero_schema_repair_{parts[2]}_{uuid.uuid4().hex[:8]}"
+
+    try:
+        migrated.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(temp_table)
+        spark.table(temp_table).write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table)
+    finally:
+        if spark.catalog.tableExists(temp_table):
+            spark.sql(f"DROP TABLE {temp_table}")
+
+    print(f"  {table}: preserved existing rows while repairing legacy type(s): {', '.join(repairs)}")
+
+
 def _upsert_frame(frame, table):
     if frame is None or frame.empty:
         return
 
-    prepared = _prepare_pandas_for_spark(frame)
+    prepared = _prepare_upsert_pandas(frame)
     incoming = spark.createDataFrame(prepared)
 
     if not spark.catalog.tableExists(table):
@@ -183,59 +390,68 @@ def _upsert_frame(frame, table):
         return
 
     existing = spark.table(table)
-    existing_types = {f.name: f.dataType.simpleString() for f in existing.schema.fields}
-    incoming_types = {f.name: f.dataType.simpleString() for f in incoming.schema.fields}
-    missing_columns = [c for c in incoming.columns if c not in existing_types]
-    incompatible = [
-        c for c, dtype in incoming_types.items()
-        if c in existing_types and dtype == "string" and existing_types[c] != "string"
-    ]
+    incoming, aligned_changes, unresolved = _align_incoming_to_target(incoming, existing, table)
+    if aligned_changes:
+        print(f"  {table}: aligned incoming schema: {', '.join(aligned_changes)}")
 
-    # One-time repair only for old tables created before stable AuditHero schemas.
-    # Do not repeatedly overwrite compatible tables. Once repaired, all subsequent
-    # runs use MERGE and preserve rows from other audit periods.
-    if missing_columns or incompatible:
-        reasons = []
-        if missing_columns:
-            reasons.append("missing columns=" + ",".join(missing_columns))
-        if incompatible:
-            reasons.append("legacy text types=" + ",".join(incompatible))
-        print(f"  {table}: one-time legacy schema repair ({'; '.join(reasons)})")
-        incoming.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table)
-        return
+    if unresolved:
+        _repair_legacy_target_types(table, existing, incoming, unresolved)
+        existing = spark.table(table)
+        incoming, aligned_changes_after_repair, unresolved_after_repair = _align_incoming_to_target(incoming, existing, table)
+        if unresolved_after_repair:
+            details = ", ".join(unresolved_after_repair)
+            raise ValueError(f"Schema remains incompatible after repair for {table}: {details}")
+        if aligned_changes_after_repair:
+            print(f"  {table}: post-repair alignment: {', '.join(aligned_changes_after_repair)}")
 
-    keys = _merge_keys(table, incoming.columns)
+    existing_columns = set(existing.columns)
+    common_columns = [c for c in incoming.columns if c in existing_columns]
+    missing_columns = [c for c in incoming.columns if c not in existing_columns]
+    keys = _merge_keys(table, common_columns)
+
     if not keys:
-        # No trustworthy business key: exact-row dedupe is safer than inventing one.
-        # This path should be rare for AuditHero's canonical/result tables.
-        print(f"  {table}: no stable business key found; appending with exact schema")
-        incoming.write.format("delta").mode("append").saveAsTable(table)
+        print(f"  {table}: no stable business key found; appending exact-schema rows")
+        incoming.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table)
         return
+
+    # Exact duplicate rows in the incoming batch are harmless. Distinct rows with
+    # the same business key are ambiguous and must not be merged arbitrarily.
+    incoming = incoming.dropDuplicates()
+    duplicate_key = incoming.groupBy(*keys).count().where(F.col("count") > 1).limit(1).count()
+    if duplicate_key:
+        raise ValueError(f"Ambiguous duplicate business key in current data for {table}: {keys}")
 
     temp_view = f"_audithero_upsert_{uuid.uuid4().hex}"
     incoming.createOrReplaceTempView(temp_view)
 
     key_match = " AND ".join([f"t.{_q(c)} <=> s.{_q(c)}" for c in keys])
-    content_columns = [c for c in incoming.columns if c not in VOLATILE_COLUMNS]
-    content_equal = " AND ".join([f"t.{_q(c)} <=> s.{_q(c)}" for c in content_columns]) or "TRUE"
-    metadata_columns = [c for c in incoming.columns if c in VOLATILE_COLUMNS]
+    common_content_columns = [c for c in common_columns if c not in VOLATILE_COLUMNS]
+    if missing_columns:
+        # Force matched rows through UPDATE SET * so schema evolution adds and
+        # populates new source columns instead of leaving them absent.
+        content_equal = "FALSE"
+    else:
+        content_equal = " AND ".join([f"t.{_q(c)} <=> s.{_q(c)}" for c in common_content_columns]) or "TRUE"
+    metadata_columns = [c for c in common_columns if c in VOLATILE_COLUMNS]
     metadata_set = ", ".join([f"t.{_q(c)} = s.{_q(c)}" for c in metadata_columns])
 
     merge_sql = [
-        f"MERGE INTO {table} t",
+        f"MERGE WITH SCHEMA EVOLUTION INTO {table} t",
         f"USING {temp_view} s",
         f"ON {key_match}",
         f"WHEN MATCHED AND NOT ({content_equal}) THEN UPDATE SET *",
     ]
     if metadata_set:
-        # Identical audit content is not rewritten; only run metadata advances so
-        # latest-run views continue to include the row.
         merge_sql.append(f"WHEN MATCHED THEN UPDATE SET {metadata_set}")
     merge_sql.append("WHEN NOT MATCHED THEN INSERT *")
 
-    spark.sql("\n".join(merge_sql))
-    spark.catalog.dropTempView(temp_view)
-    print(f"  {table}: upserted by key [{', '.join(keys)}]")
+    try:
+        spark.sql("\n".join(merge_sql))
+    finally:
+        spark.catalog.dropTempView(temp_view)
+
+    extra = f"; schema-evolved columns [{', '.join(missing_columns)}]" if missing_columns else ""
+    print(f"  {table}: upserted by key [{', '.join(keys)}]{extra}")
 
 
 silver_frames = (
@@ -287,7 +503,7 @@ run = pd.DataFrame([{
     "message": (
         f"input={input_root}; window_source={window_source}; rest_findings={len(rest_findings)}; "
         f"award_scenarios={len(scenario_detail)}; scenario_passes={scenario_passes}; "
-        f"engine_seconds={engine_seconds:.1f}; persist_seconds={persist_seconds:.1f}; persistence_mode=ROW_LEVEL_UPSERT"
+        f"engine_seconds={engine_seconds:.1f}; persist_seconds={persist_seconds:.1f}; persistence_mode=SCHEMA_SAFE_ROW_LEVEL_UPSERT"
     ),
 }])
 write_df(spark, run, f"{catalog}.ops.audit_runs", "append")
