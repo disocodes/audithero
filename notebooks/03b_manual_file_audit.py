@@ -125,32 +125,49 @@ for frame in (
 persist_started = perf_counter()
 print("Persisting filtered source evidence and calculated results...")
 
-# Manual reviewed-file reruns are idempotent by audit window. If the same window
-# has already completed successfully, replace the persisted silver/gold tables
-# from this fresh calculation instead of appending into legacy inferred schemas.
-# This intentionally clears stale schema/data from the previous copy of the same
-# manual window and prevents duplicate results for repeated operator runs.
+# Manual reviewed-file reruns are idempotent by audit window. Force a clean
+# overwrite when legacy persisted tables do not yet carry audit-window metadata,
+# or when any persisted table already contains the same audit window. This avoids
+# duplicate rows and removes legacy inferred schemas such as BIGINT/DOUBLE columns
+# that now legitimately contain AuditHero text identifiers or labels.
 replace_existing_window = False
-audit_runs_table = f"{catalog}.ops.audit_runs"
-if spark.catalog.tableExists(audit_runs_table):
-    escaped_start = start_iso.replace("'", "''")
-    escaped_end = end_iso.replace("'", "''")
-    escaped_type = run_type.replace("'", "''")
-    existing_count = spark.sql(
-        f"SELECT COUNT(*) AS n FROM {audit_runs_table} "
+legacy_persistence_detected = False
+escaped_start = start_iso.replace("'", "''")
+escaped_end = end_iso.replace("'", "''")
+
+probe_tables = (
+    f"{catalog}.silver.pay_details",
+    f"{catalog}.silver.timesheets",
+    f"{catalog}.gold.audit_detail",
+    f"{catalog}.gold.award_scenario_detail",
+)
+for probe_table in probe_tables:
+    if not spark.catalog.tableExists(probe_table):
+        continue
+    probe_columns = set(spark.table(probe_table).columns)
+    if not {"audit_window_start", "audit_window_end"}.issubset(probe_columns):
+        legacy_persistence_detected = True
+        replace_existing_window = True
+        print(f"Legacy persisted table without audit-window metadata detected: {probe_table}")
+        break
+    matched = spark.sql(
+        f"SELECT 1 FROM {probe_table} "
         f"WHERE CAST(audit_window_start AS STRING) = '{escaped_start}' "
-        f"AND CAST(audit_window_end AS STRING) = '{escaped_end}' "
-        f"AND COALESCE(CAST(run_type AS STRING), 'MANUAL_FILE') = '{escaped_type}' "
-        f"AND status = 'SUCCESS'"
-    ).collect()[0]["n"]
-    replace_existing_window = int(existing_count or 0) > 0
+        f"AND CAST(audit_window_end AS STRING) = '{escaped_end}' LIMIT 1"
+    ).collect()
+    if matched:
+        replace_existing_window = True
+        break
 
 persistence_mode = "overwrite" if replace_existing_window else "append"
 if replace_existing_window:
+    reason = "legacy persisted schema" if legacy_persistence_detected else "same audit window already exists"
     print(
-        f"Existing successful audit window {start_iso} to {end_iso} detected. "
-        "Replacing silver/gold persisted tables with the fresh reviewed-file run."
+        f"Persistence mode: OVERWRITE ({reason}). Fresh results for {start_iso} to {end_iso} "
+        "will replace the current silver/gold persisted result set instead of appending."
     )
+else:
+    print("Persistence mode: APPEND (new audit window and compatible persisted schema).")
 
 for name, frame in (
     ("employees", result["employees"]), ("pay_details", result["pay_details"]),
