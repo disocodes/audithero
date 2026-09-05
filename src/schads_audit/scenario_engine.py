@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from .canonical_normalization import numeric_value, parse_datetime_value
+from .canonical_normalization import numeric_value, parse_datetime_series, parse_datetime_value
 from .engine import _bool, _dt, _first_full_pay_period_transition, _minimum, _mult, _shift_type, _split
 from .money import effective_hourly_rate, line_amount, money
 
@@ -18,7 +18,7 @@ def build_holiday_lookup(holidays: pd.DataFrame | None) -> tuple[set[tuple[Any, 
     if holidays is None or holidays.empty or "holiday_date" not in holidays.columns or "state" not in holidays.columns:
         return global_days, keyed_days
 
-    dates = holidays["holiday_date"].map(parse_datetime_value)
+    dates = parse_datetime_series(holidays["holiday_date"])
     states = holidays["state"].fillna("").astype(str).str.upper()
     keys = holidays["holiday_location_key"] if "holiday_location_key" in holidays.columns else pd.Series(None, index=holidays.index)
     for idx in holidays.index:
