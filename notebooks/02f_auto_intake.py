@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # AuditHero — Preview and Prepare Uploaded Files
 # MAGIC
-# MAGIC **Purpose:** inspect ordinary payroll, timesheet and employee/rate CSV/XLSX files, show AuditHero's interpretation, and prepare canonical inputs without starting an audit.
+# MAGIC **Purpose:** inspect ordinary payroll, timesheet, employee/rate and optional holiday-override CSV/XLSX files, show AuditHero's interpretation, and prepare canonical inputs without starting an audit.
 # MAGIC
 # MAGIC Review the interpretation and warnings before running the prepared-file audit. If a file role or field is wrong, use **AuditHero - Build Source Mapping Workbook (Advanced)** to create a correction/context workbook.
 # COMMAND ----------
@@ -18,6 +18,7 @@ exec(open(str(Path.cwd() / "_common.py")).read())
 from schads_audit.auto_intake import build_auto_canonical
 from schads_audit.dates import iso_date
 from schads_audit.file_source import prune_frames_to_window
+from schads_audit.holiday_intake import detect_public_holiday_overrides, write_public_holiday_template
 
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
@@ -31,19 +32,36 @@ source_root = dbutils.widgets.get("source_root").strip() or f"/Volumes/{catalog}
 output_root = dbutils.widgets.get("output_root").strip() or f"/Volumes/{catalog}/bronze/landing/auto_input"
 start_override = dbutils.widgets.get("start_date").strip()
 end_override = dbutils.widgets.get("end_date").strip()
+template_path = f"/Volumes/{catalog}/bronze/landing/templates/public_holiday_overrides_template.xlsx"
 
 if bool(start_override) != bool(end_override):
     raise ValueError("Supply both start_date and end_date to preview a specific audit window, or leave both blank for automatic detection.")
 
+write_public_holiday_template(template_path)
 print(f"Source folder: {source_root}")
 print(f"Prepared canonical folder: {output_root}")
+print(f"Public holiday override Excel template: {template_path}")
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 1. Detect and preview the supplied files
+# MAGIC
+# MAGIC Optional one-off/local holiday files are detected when they contain state, holiday date and holiday name fields and identify themselves as a holiday source by filename/sheet name or holiday-named columns.
 # COMMAND ----------
 result = build_auto_canonical(source_root)
 frames = result["frames"]
 metadata = result["metadata"]
+
+holiday_result = detect_public_holiday_overrides(source_root)
+if holiday_result["frame"] is not None and not holiday_result["frame"].empty:
+    frames["public_holiday_overrides"] = holiday_result["frame"]
+    metadata["holiday_override_rows"] = len(holiday_result["frame"])
+    metadata["holiday_override_items"] = [
+        x["source_file"] if x.get("source_sheet") is None else f"{x['source_file']}#{x['source_sheet']}"
+        for x in holiday_result.get("interpretation", [])
+    ]
+metadata["warnings"] = list(metadata.get("warnings") or []) + list(holiday_result.get("warnings") or [])
+metadata["interpretation"] = list(metadata.get("interpretation") or []) + list(holiday_result.get("interpretation") or [])
+
 start_date = start_override or metadata.get("start_date")
 end_date = end_override or metadata.get("end_date")
 if not start_date or not end_date:
@@ -101,6 +119,7 @@ try:
         "audit_end_date": end_iso,
         "prepared_window_start": start_iso,
         "prepared_window_end": end_iso,
+        "public_holiday_override_template": template_path,
         "mode": "AUTO_INTAKE_PREVIEW",
     }
     manifest_path = stage / "auto_intake_manifest.json"
@@ -116,6 +135,8 @@ dbutils.jobs.taskValues.set(key="output_root", value=output_root)
 print(f"Employees identified: {metadata['employees']}")
 print(f"Timesheet rows prepared for audit window: {len(frames['timesheets']):,}")
 print(f"Payroll earning rows prepared for audit window: {len(frames.get('payroll_earnings', pd.DataFrame())):,}")
+print(f"Public holiday override rows prepared for audit window: {len(frames.get('public_holiday_overrides', pd.DataFrame())):,}")
 print(f"Audit window: {start_iso} to {end_iso}")
+print(f"Holiday template available at: {template_path}")
 print("Preview preparation complete. Review the interpretation before starting the prepared-file audit.")
 print("If a role or field is wrong, use the Advanced Mapping workbook to correct it and run the mapped-file workflow instead.")
