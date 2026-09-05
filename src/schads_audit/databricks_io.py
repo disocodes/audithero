@@ -41,9 +41,10 @@ def _migrate_string_columns_for_append(spark, incoming, table):
     as ``AUTO-TS-...`` or ``SUPPORT - Coordination of supports``. Delta
     ``mergeSchema`` does not widen BIGINT/DOUBLE to STRING automatically.
 
-    This migration preserves historical rows, casts each conflicting existing
-    column to STRING, combines the current rows, and rewrites the table once with
-    the widened schema.
+    This migration preserves historical rows and explicitly casts *both* sides
+    of each conflicting column to STRING before unioning. Casting only the
+    existing side is not sufficient on every Spark/Delta execution path because
+    union type coercion can still choose the legacy numeric type.
     """
     if not spark.catalog.tableExists(table):
         return incoming, False
@@ -60,13 +61,15 @@ def _migrate_string_columns_for_append(spark, incoming, table):
 
     from pyspark.sql import functions as F
     migrated = existing
+    incoming_casted = incoming
     for name in to_string:
         migrated = migrated.withColumn(name, F.col(name).cast('string'))
+        incoming_casted = incoming_casted.withColumn(name, F.col(name).cast('string'))
 
-    combined = migrated.unionByName(incoming, allowMissingColumns=True)
+    combined = migrated.unionByName(incoming_casted, allowMissingColumns=True)
     combined.write.format('delta').mode('overwrite').option('overwriteSchema', 'true').saveAsTable(table)
     print(f"Migrated legacy Delta column(s) to STRING for {table}: {', '.join(to_string)}")
-    return incoming, True
+    return incoming_casted, True
 
 
 def write_df(spark, df, table, mode='append'):
