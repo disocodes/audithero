@@ -9,14 +9,41 @@ def create_catalog_objects(spark, catalog):
     spark.sql(f'CREATE VOLUME IF NOT EXISTS `{catalog}`.`bronze`.`landing`')
 
 
-def _migrate_string_columns_for_append(spark, incoming, table):
-    """Upgrade legacy Delta columns to STRING when incoming AuditHero IDs are strings.
+def _prepare_pandas_for_spark(df):
+    """Make pandas object/string columns deterministic before Spark schema inference.
 
-    Older tables may have inferred numeric identifier columns from early source data.
-    Auto-intake now emits stable string identifiers such as ``AUTO-TS-...``. Delta
-    mergeSchema does not change BIGINT to STRING, so append would otherwise fail.
-    This migration preserves existing rows, casts only incompatible legacy columns,
-    and rewrites the table once with the widened schema.
+    Spark's pandas conversion can infer an ``object`` column as numeric from some
+    rows and only encounter a later text value during execution. That produces
+    CAST_INVALID_INPUT failures such as a work-type label being cast to DOUBLE.
+
+    If any populated value in an object/string column is textual, AuditHero
+    treats that entire evidence column as STRING. Pure numeric object columns are
+    left alone so Spark can still infer a numeric type.
+    """
+    out = df.copy()
+    for name in out.columns:
+        series = out[name]
+        if not (pd.api.types.is_object_dtype(series.dtype) or pd.api.types.is_string_dtype(series.dtype)):
+            continue
+        populated = series[series.notna()]
+        if populated.empty:
+            continue
+        if populated.map(lambda value: isinstance(value, str)).any():
+            out[name] = series.map(lambda value: None if pd.isna(value) else str(value))
+    return out.where(pd.notna(out), None)
+
+
+def _migrate_string_columns_for_append(spark, incoming, table):
+    """Upgrade legacy Delta columns to STRING when incoming AuditHero data is text.
+
+    Older Delta tables may have inferred numeric types for identifiers, labels or
+    source fields. Current AuditHero evidence can legitimately contain text such
+    as ``AUTO-TS-...`` or ``SUPPORT - Coordination of supports``. Delta
+    ``mergeSchema`` does not widen BIGINT/DOUBLE to STRING automatically.
+
+    This migration preserves historical rows, casts each conflicting existing
+    column to STRING, combines the current rows, and rewrites the table once with
+    the widened schema.
     """
     if not spark.catalog.tableExists(table):
         return incoming, False
@@ -45,7 +72,9 @@ def _migrate_string_columns_for_append(spark, incoming, table):
 def write_df(spark, df, table, mode='append'):
     if df is None or df.empty:
         return
-    incoming = spark.createDataFrame(df.where(pd.notna(df), None))
+
+    prepared = _prepare_pandas_for_spark(df)
+    incoming = spark.createDataFrame(prepared)
 
     if mode == 'append':
         incoming, migrated = _migrate_string_columns_for_append(spark, incoming, table)
