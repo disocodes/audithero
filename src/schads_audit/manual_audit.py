@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from pathlib import Path
 import json
+
 import pandas as pd
 
 from .dates import parse_datetime_series, parse_datetime_value
@@ -20,10 +22,22 @@ from .toil import audit_toil_register, merge_toil_adjustments
 from .award_scenarios_parallel import calculate_award_scenarios
 
 
+_CRITERION_BUSINESS_KEY = [
+    "scenario_id",
+    "timesheet_id",
+    "criterion_group",
+    "criterion",
+    "clause",
+]
+
+
 def _csv(path: Path):
-    if not path.exists(): return pd.DataFrame()
-    try: return pd.read_csv(path)
-    except pd.errors.EmptyDataError: return pd.DataFrame()
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _json(path: Path):
@@ -31,91 +45,309 @@ def _json(path: Path):
 
 
 def _control(frames, name, root):
-    df=frames.get(name)
-    return df.copy() if df is not None and not df.empty else _csv(Path(root)/f"{name}.csv")
+    df = frames.get(name)
+    return df.copy() if df is not None and not df.empty else _csv(Path(root) / f"{name}.csv")
 
 
 def _pay_category_mapping(frames, root):
-    df=frames.get("pay_category_mapping")
-    if df is None or df.empty:return _json(Path(root)/"pay_category_mapping.json")
-    mapping={}
-    for _,r in df.iterrows():
-        treatment=str(r.get("audit_treatment") or r.get("treatment") or "").strip().upper()
-        if treatment not in {"AUDITABLE_WORK","ALLOWANCE","EXCLUDE"}: continue
-        value={"audit_treatment":treatment}
-        for key in (r.get("pay_category_id"),r.get("pay_category"),r.get("source_key"),r.get("source_label")):
-            if pd.notna(key) and str(key).strip(): mapping[str(key).strip()]=value
+    df = frames.get("pay_category_mapping")
+    if df is None or df.empty:
+        return _json(Path(root) / "pay_category_mapping.json")
+    mapping = {}
+    for _, r in df.iterrows():
+        treatment = str(r.get("audit_treatment") or r.get("treatment") or "").strip().upper()
+        if treatment not in {"AUDITABLE_WORK", "ALLOWANCE", "EXCLUDE"}:
+            continue
+        value = {"audit_treatment": treatment}
+        for key in (r.get("pay_category_id"), r.get("pay_category"), r.get("source_key"), r.get("source_label")):
+            if pd.notna(key) and str(key).strip():
+                mapping[str(key).strip()] = value
     return mapping
 
 
 def _blank(series: pd.Series) -> pd.Series:
-    return series.isna() | series.astype(str).str.strip().str.lower().isin({"","nan","nat","none"})
+    return series.isna() | series.astype(str).str.strip().str.lower().isin({"", "nan", "nat", "none"})
 
 
 def _mapped_treatment(row, mapping: dict):
     for key in (row.get("pay_category_id"), row.get("pay_category")):
         if pd.notna(key) and str(key).strip() in mapping:
-            value=mapping[str(key).strip()];treatment=value.get("audit_treatment") if isinstance(value,dict) else value
-            if str(treatment or "").strip().upper() in {"AUDITABLE_WORK","ALLOWANCE","EXCLUDE"}:return str(treatment).strip().upper()
+            value = mapping[str(key).strip()]
+            treatment = value.get("audit_treatment") if isinstance(value, dict) else value
+            if str(treatment or "").strip().upper() in {"AUDITABLE_WORK", "ALLOWANCE", "EXCLUDE"}:
+                return str(treatment).strip().upper()
     return None
 
 
 def _usable_actual_pay(payroll: pd.DataFrame, mapping: dict, employee_ids=None) -> bool:
-    if payroll is None or payroll.empty or not mapping: return False
-    required={"employee_id","pay_period_start","pay_period_end","pay_category","amount"}
-    if not required.issubset(payroll.columns): return False
-    if any(bool(_blank(payroll[field]).any()) for field in required): return False
-    if pd.to_numeric(payroll["amount"],errors="coerce").isna().any(): return False
+    if payroll is None or payroll.empty or not mapping:
+        return False
+    required = {"employee_id", "pay_period_start", "pay_period_end", "pay_category", "amount"}
+    if not required.issubset(payroll.columns):
+        return False
+    if any(bool(_blank(payroll[field]).any()) for field in required):
+        return False
+    if pd.to_numeric(payroll["amount"], errors="coerce").isna().any():
+        return False
     if employee_ids is not None:
-        allowed={str(x).strip() for x in employee_ids if str(x).strip()};actual=set(payroll["employee_id"].astype(str).str.strip())
-        if not actual.issubset(allowed): return False
-    if payroll.apply(lambda row:_mapped_treatment(row,mapping),axis=1).isna().any(): return False
+        allowed = {str(x).strip() for x in employee_ids if str(x).strip()}
+        actual = set(payroll["employee_id"].astype(str).str.strip())
+        if not actual.issubset(allowed):
+            return False
+    if payroll.apply(lambda row: _mapped_treatment(row, mapping), axis=1).isna().any():
+        return False
     return True
 
 
-def _assign_manual_pay_periods(timesheets: pd.DataFrame,pay_runs: pd.DataFrame):
-    if timesheets.empty or pay_runs is None or pay_runs.empty: return timesheets
-    if not {"pay_period_start","pay_period_end"}.issubset(pay_runs.columns): return timesheets
-    out=timesheets.copy()
-    if "pay_period_start" not in out.columns: out["pay_period_start"]=None
-    if "pay_period_end" not in out.columns: out["pay_period_end"]=None
-    if "pay_run_id" not in out.columns: out["pay_run_id"]=None
-    runs=pay_runs.copy();runs["_s"]=parse_datetime_series(runs["pay_period_start"]);runs["_e"]=parse_datetime_series(runs["pay_period_end"])
-    for idx,row in out.iterrows():
-        if pd.notna(row.get("pay_period_start")) and str(row.get("pay_period_start")).strip(): continue
-        shift=parse_datetime_value(row.get("start_datetime"))
-        if pd.isna(shift): continue
-        hits=runs[(runs["_s"].dt.date<=shift.date())&(runs["_e"].dt.date>=shift.date())]
-        if len(hits)==1:
-            r=runs.loc[hits.index[0]];out.at[idx,"pay_period_start"]=r["pay_period_start"];out.at[idx,"pay_period_end"]=r["pay_period_end"]
-            if "pay_run_id" in r:out.at[idx,"pay_run_id"]=r.get("pay_run_id")
+def _assign_manual_pay_periods(timesheets: pd.DataFrame, pay_runs: pd.DataFrame):
+    if timesheets.empty or pay_runs is None or pay_runs.empty:
+        return timesheets
+    if not {"pay_period_start", "pay_period_end"}.issubset(pay_runs.columns):
+        return timesheets
+    out = timesheets.copy()
+    if "pay_period_start" not in out.columns:
+        out["pay_period_start"] = None
+    if "pay_period_end" not in out.columns:
+        out["pay_period_end"] = None
+    if "pay_run_id" not in out.columns:
+        out["pay_run_id"] = None
+    runs = pay_runs.copy()
+    runs["_s"] = parse_datetime_series(runs["pay_period_start"])
+    runs["_e"] = parse_datetime_series(runs["pay_period_end"])
+    for idx, row in out.iterrows():
+        if pd.notna(row.get("pay_period_start")) and str(row.get("pay_period_start")).strip():
+            continue
+        shift = parse_datetime_value(row.get("start_datetime"))
+        if pd.isna(shift):
+            continue
+        hits = runs[(runs["_s"].dt.date <= shift.date()) & (runs["_e"].dt.date >= shift.date())]
+        if len(hits) == 1:
+            r = runs.loc[hits.index[0]]
+            out.at[idx, "pay_period_start"] = r["pay_period_start"]
+            out.at[idx, "pay_period_end"] = r["pay_period_end"]
+            if "pay_run_id" in r:
+                out.at[idx, "pay_run_id"] = r.get("pay_run_id")
     return out
 
 
-def run_manual_audit(input_root,config_root,start_date,end_date,rule_library,variance_tolerance=0.05,generate_award_scenarios=True):
+def _nonblank_text_values(series: pd.Series) -> list[str]:
+    values = []
+    seen = set()
+    for value in series.tolist():
+        if value is None:
+            continue
+        try:
+            if pd.isna(value):
+                continue
+        except Exception:
+            pass
+        text = str(value).strip()
+        if not text or text.lower() in {"nan", "nat", "none"} or text in seen:
+            continue
+        seen.add(text)
+        values.append(text)
+    return values
+
+
+def _sum_numeric(series: pd.Series):
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    return None if numeric.empty else float(numeric.sum())
+
+
+def _single_numeric(series: pd.Series):
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return None
+    unique = numeric.round(10).drop_duplicates()
+    return float(unique.iloc[0]) if len(unique) == 1 else None
+
+
+def _detail_items(series: pd.Series) -> list:
+    items = []
+    seen = set()
+    for text in _nonblank_text_values(series):
+        if text in seen:
+            continue
+        seen.add(text)
+        try:
+            items.append(json.loads(text))
+        except Exception:
+            items.append(text)
+    return items
+
+
+def _consolidate_award_criteria(criteria: pd.DataFrame | None) -> pd.DataFrame:
+    """Return one criterion row per persisted business key without losing evidence.
+
+    Scenario calculation intentionally emits line-item criteria. A single shift can
+    therefore contain several ordinary/penalty, overtime, rest, or review lines
+    with the same scenario/timesheet/group/criterion/clause. Delta MERGE requires
+    one source row per business key, so those line items are consolidated here.
+
+    Hours and criterion amounts are additive. Multipliers/rates are retained only
+    when all populated line items agree. Mixed day/shift types are labelled
+    ``MULTIPLE``. Every original ``detail`` value is retained in a JSON items list.
+    Exact duplicate rows are removed before aggregation.
+    """
+    if criteria is None or criteria.empty:
+        return pd.DataFrame() if criteria is None else criteria
+    if not set(_CRITERION_BUSINESS_KEY).issubset(criteria.columns):
+        return criteria
+
+    data = criteria.drop_duplicates().copy()
+    if not bool(data.duplicated(_CRITERION_BUSINESS_KEY, keep=False).any()):
+        return data
+
+    consolidated = []
+    for _, group in data.groupby(_CRITERION_BUSINESS_KEY, dropna=False, sort=False):
+        row = group.iloc[0].to_dict()
+        if len(group) > 1:
+            if "hours" in group.columns:
+                row["hours"] = _sum_numeric(group["hours"])
+            if "criterion_amount" in group.columns:
+                row["criterion_amount"] = _sum_numeric(group["criterion_amount"])
+            if "multiplier" in group.columns:
+                row["multiplier"] = _single_numeric(group["multiplier"])
+            if "effective_hourly_rate" in group.columns:
+                row["effective_hourly_rate"] = _single_numeric(group["effective_hourly_rate"])
+            for name in ("day_type", "shift_type"):
+                if name in group.columns:
+                    values = _nonblank_text_values(group[name])
+                    row[name] = values[0] if len(values) == 1 else ("MULTIPLE" if values else None)
+            if "review_flags" in group.columns:
+                flags = []
+                seen_flags = set()
+                for text in _nonblank_text_values(group["review_flags"]):
+                    for flag in [x.strip() for x in text.split(";") if x.strip()]:
+                        if flag not in seen_flags:
+                            seen_flags.add(flag)
+                            flags.append(flag)
+                row["review_flags"] = "; ".join(flags) if flags else None
+            if "detail" in group.columns:
+                items = _detail_items(group["detail"])
+                if len(items) == 1:
+                    row["detail"] = json.dumps(items[0], default=str, separators=(",", ":")) if not isinstance(items[0], str) else items[0]
+                elif items:
+                    row["detail"] = json.dumps({"items": items}, default=str, separators=(",", ":"))
+                else:
+                    row["detail"] = None
+        consolidated.append(row)
+
+    out = pd.DataFrame(consolidated, columns=data.columns)
+    duplicate = out.duplicated(_CRITERION_BUSINESS_KEY, keep=False)
+    if bool(duplicate.any()):
+        sample = out.loc[duplicate, _CRITERION_BUSINESS_KEY].head(3).to_dict("records")
+        raise ValueError(f"Award criteria remain ambiguous after consolidation: {sample}")
+    return out
+
+
+def run_manual_audit(input_root, config_root, start_date, end_date, rule_library, variance_tolerance=0.05, generate_award_scenarios=True):
     """Run the complete file audit plus selectable SCHADS Award scenarios."""
-    frames=normalize_canonical_frames(load_file_source(input_root,start_date,end_date)); root=Path(config_root)
-    employees=frames["employees"].copy(); pay_details=frames["pay_details"].copy(); employment_history=frames["employment_history"].copy()
-    timesheets=_assign_manual_pay_periods(frames["timesheets"].copy(),frames["pay_runs"].copy()); rosters=frames["rostered_shifts"].copy(); payroll=frames["payroll_earnings"].copy()
-    if not rosters.empty: timesheets=attach_rosters(timesheets,rosters)
-    timesheets=group_sleepovers(timesheets); timesheets=group_broken_shifts(timesheets)
-    holidays=pd.DataFrame(australian_public_holidays(start_date,end_date)); override=_control(frames,"public_holiday_overrides",root)
-    if not override.empty: holidays=pd.concat([holidays,override],ignore_index=True,sort=False)
-    part_time_patterns=_control(frames,"part_time_patterns",root);part_time_variations=_control(frames,"part_time_variations",root)
-    meal_break_events=_control(frames,"meal_break_events",root);rest_break_controls=_control(frames,"rest_break_controls",root);overtime_rest_controls=_control(frames,"overtime_rest_controls",root)
-    detail=calculate_entitlements(employees,employment_history,pay_details,timesheets,holidays,rule_library)
-    detail=apply_broken_shift_rules(detail,timesheets,rule_library);detail=apply_sleepover_group_rules(detail,timesheets,rule_library)
-    detail=apply_rostered_and_daily_overtime(detail,timesheets,holidays,rule_library);detail=allocate_period_overtime(detail,holidays,rule_library);detail=flag_period_overtime(detail)
-    detail=apply_part_time_pattern_checks(detail,part_time_patterns,part_time_variations)
-    detail=apply_meal_break_events(detail,timesheets,meal_break_events,holidays,rule_library)
-    detail,rest_findings=apply_rest_between_work(detail,timesheets,rosters,rest_break_controls,overtime_rest_controls,rule_library)
-    detail=apply_instrument_history(detail,_control(frames,"industrial_instrument_history",root))
-    events=aggregate_remote_work_events(_control(frames,"supplemental_events",root));adjustments=calculate_supplemental_events(events,employees,pay_details,holidays,rule_library)
-    recon_input=merge_event_adjustments_into_entitlements(detail,adjustments)
-    toil=audit_toil_register(_control(frames,"toil_register",root),employees,pay_details,holidays,rule_library,audit_end_date=end_date);recon_input=merge_toil_adjustments(recon_input,toil)
-    pay_mapping=_pay_category_mapping(frames,root);employee_ids=set(employees.get("employee_id",pd.Series(dtype=object)).dropna().astype(str).str.strip());actual_pay_usable=_usable_actual_pay(payroll,pay_mapping,employee_ids)
-    reconciliation=reconcile_pay_periods(recon_input,payroll if actual_pay_usable else pd.DataFrame(),pay_mapping if actual_pay_usable else {},variance_tolerance)
-    scenarios={"detail":pd.DataFrame(),"criteria":pd.DataFrame(),"rest_findings":pd.DataFrame()}
+    frames = normalize_canonical_frames(load_file_source(input_root, start_date, end_date))
+    root = Path(config_root)
+    employees = frames["employees"].copy()
+    pay_details = frames["pay_details"].copy()
+    employment_history = frames["employment_history"].copy()
+    timesheets = _assign_manual_pay_periods(frames["timesheets"].copy(), frames["pay_runs"].copy())
+    rosters = frames["rostered_shifts"].copy()
+    payroll = frames["payroll_earnings"].copy()
+
+    if not rosters.empty:
+        timesheets = attach_rosters(timesheets, rosters)
+    timesheets = group_sleepovers(timesheets)
+    timesheets = group_broken_shifts(timesheets)
+
+    holidays = pd.DataFrame(australian_public_holidays(start_date, end_date))
+    override = _control(frames, "public_holiday_overrides", root)
+    if not override.empty:
+        holidays = pd.concat([holidays, override], ignore_index=True, sort=False)
+
+    part_time_patterns = _control(frames, "part_time_patterns", root)
+    part_time_variations = _control(frames, "part_time_variations", root)
+    meal_break_events = _control(frames, "meal_break_events", root)
+    rest_break_controls = _control(frames, "rest_break_controls", root)
+    overtime_rest_controls = _control(frames, "overtime_rest_controls", root)
+
+    detail = calculate_entitlements(employees, employment_history, pay_details, timesheets, holidays, rule_library)
+    detail = apply_broken_shift_rules(detail, timesheets, rule_library)
+    detail = apply_sleepover_group_rules(detail, timesheets, rule_library)
+    detail = apply_rostered_and_daily_overtime(detail, timesheets, holidays, rule_library)
+    detail = allocate_period_overtime(detail, holidays, rule_library)
+    detail = flag_period_overtime(detail)
+    detail = apply_part_time_pattern_checks(detail, part_time_patterns, part_time_variations)
+    detail = apply_meal_break_events(detail, timesheets, meal_break_events, holidays, rule_library)
+    detail, rest_findings = apply_rest_between_work(
+        detail,
+        timesheets,
+        rosters,
+        rest_break_controls,
+        overtime_rest_controls,
+        rule_library,
+    )
+    detail = apply_instrument_history(detail, _control(frames, "industrial_instrument_history", root))
+
+    events = aggregate_remote_work_events(_control(frames, "supplemental_events", root))
+    adjustments = calculate_supplemental_events(events, employees, pay_details, holidays, rule_library)
+    recon_input = merge_event_adjustments_into_entitlements(detail, adjustments)
+    toil = audit_toil_register(
+        _control(frames, "toil_register", root),
+        employees,
+        pay_details,
+        holidays,
+        rule_library,
+        audit_end_date=end_date,
+    )
+    recon_input = merge_toil_adjustments(recon_input, toil)
+
+    pay_mapping = _pay_category_mapping(frames, root)
+    employee_ids = set(employees.get("employee_id", pd.Series(dtype=object)).dropna().astype(str).str.strip())
+    actual_pay_usable = _usable_actual_pay(payroll, pay_mapping, employee_ids)
+    reconciliation = reconcile_pay_periods(
+        recon_input,
+        payroll if actual_pay_usable else pd.DataFrame(),
+        pay_mapping if actual_pay_usable else {},
+        variance_tolerance,
+    )
+
+    scenarios = {"detail": pd.DataFrame(), "criteria": pd.DataFrame(), "rest_findings": pd.DataFrame()}
     if generate_award_scenarios:
-        scenarios=calculate_award_scenarios(employees,timesheets,holidays,rule_library,pay_details=pay_details,employment_history=employment_history,rosters=rosters,part_time_patterns=part_time_patterns,part_time_variations=part_time_variations,meal_break_events=meal_break_events,rest_break_controls=rest_break_controls,overtime_rest_controls=overtime_rest_controls)
-    return {"employees":employees,"pay_details":pay_details,"employment_history":employment_history,"timesheets":timesheets,"rostered_shifts":rosters,"payroll_earnings":payroll,"actual_pay_usable":actual_pay_usable,"public_holidays":holidays,"detail":detail,"rest_break_findings":rest_findings,"event_adjustments":adjustments,"toil_findings":toil,"reconciliation":reconciliation,"award_scenario_detail":scenarios["detail"],"award_criteria_detail":scenarios["criteria"],"award_scenario_rest_findings":scenarios["rest_findings"]}
+        scenarios = calculate_award_scenarios(
+            employees,
+            timesheets,
+            holidays,
+            rule_library,
+            pay_details=pay_details,
+            employment_history=employment_history,
+            rosters=rosters,
+            part_time_patterns=part_time_patterns,
+            part_time_variations=part_time_variations,
+            meal_break_events=meal_break_events,
+            rest_break_controls=rest_break_controls,
+            overtime_rest_controls=overtime_rest_controls,
+        )
+        original_criteria_rows = len(scenarios["criteria"])
+        scenarios["criteria"] = _consolidate_award_criteria(scenarios["criteria"])
+        if len(scenarios["criteria"]) != original_criteria_rows:
+            print(
+                "Award criteria consolidated for persistence: "
+                f"{original_criteria_rows:,} line item(s) -> {len(scenarios['criteria']):,} unique criterion row(s)."
+            )
+
+    return {
+        "employees": employees,
+        "pay_details": pay_details,
+        "employment_history": employment_history,
+        "timesheets": timesheets,
+        "rostered_shifts": rosters,
+        "payroll_earnings": payroll,
+        "actual_pay_usable": actual_pay_usable,
+        "public_holidays": holidays,
+        "detail": detail,
+        "rest_break_findings": rest_findings,
+        "event_adjustments": adjustments,
+        "toil_findings": toil,
+        "reconciliation": reconciliation,
+        "award_scenario_detail": scenarios["detail"],
+        "award_criteria_detail": scenarios["criteria"],
+        "award_scenario_rest_findings": scenarios["rest_findings"],
+    }
