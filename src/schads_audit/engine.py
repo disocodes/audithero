@@ -6,7 +6,7 @@ import json
 import pandas as pd
 
 from .money import money, effective_hourly_rate, line_amount
-from .canonical_normalization import parse_datetime_value, numeric_value
+from .canonical_normalization import parse_datetime_series, parse_datetime_value, numeric_value
 
 
 def _dt(v):
@@ -31,19 +31,35 @@ def _emp_type(v):
     return "UNKNOWN"
 
 
+def _prepare_effective_frame(df, start_col, end_col=None):
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    out["_employee_key"] = out["employee_id"].astype(str)
+    out["_s"] = parse_datetime_series(out[start_col])
+    if end_col and end_col in out.columns:
+        out["_e"] = parse_datetime_series(out[end_col])
+    return out
+
+
 def _effective_row(df, eid, at_date, start_col, end_col=None):
     if df is None or df.empty:
         return None
-    q = df[df.employee_id.astype(str) == str(eid)].copy()
-    q["_s"] = q[start_col].map(parse_datetime_value)
+    employee_key = df["_employee_key"] if "_employee_key" in df.columns else df.employee_id.astype(str)
+    q = df[employee_key == str(eid)]
+    if q.empty:
+        return None
+    starts = q["_s"] if "_s" in q.columns else parse_datetime_series(q[start_col])
     at = _dt(at_date)
     if at is None:
         return None
-    q = q[q["_s"] <= at]
+    q = q.loc[starts <= at].copy()
+    if q.empty:
+        return None
     if end_col and end_col in q.columns:
-        q["_e"] = q[end_col].map(parse_datetime_value)
-        q = q[q["_e"].isna() | (q["_e"] >= at)]
-    return None if q.empty else q.sort_values("_s", ascending=False).iloc[0].to_dict()
+        ends = q["_e"] if "_e" in q.columns else parse_datetime_series(q[end_col])
+        q = q.loc[ends.isna() | (ends >= at)]
+    return None if q.empty else q.sort_values("_s" if "_s" in q.columns else start_col, ascending=False).iloc[0].to_dict()
 
 
 def _split(start, end, break_minutes=0):
@@ -63,11 +79,20 @@ def _split(start, end, break_minutes=0):
     return out
 
 
+def _prepare_holidays(holidays):
+    if holidays is None or holidays.empty:
+        return holidays
+    out = holidays.copy()
+    out["_d"] = parse_datetime_series(out["holiday_date"]).dt.date
+    out["_state"] = out["state"].astype(str).str.upper()
+    return out
+
+
 def _day_type(d, state, holidays, location_key=None):
     if holidays is not None and not holidays.empty:
-        h = holidays.copy()
-        h["_d"] = h.holiday_date.map(parse_datetime_value).dt.date
-        q = h[(h["_d"] == d) & (h.state.astype(str).str.upper() == str(state).upper())]
+        dates = holidays["_d"] if "_d" in holidays.columns else parse_datetime_series(holidays.holiday_date).dt.date
+        states = holidays["_state"] if "_state" in holidays.columns else holidays.state.astype(str).str.upper()
+        q = holidays[(dates == d) & (states == str(state).upper())]
         if not q.empty:
             if "holiday_location_key" not in q.columns:
                 return "PUBLIC_HOLIDAY"
@@ -172,6 +197,9 @@ def calculate_entitlements(employees, employment_history, classifications, times
     if timesheets is None or timesheets.empty:
         return pd.DataFrame()
     emp_index = {str(r.employee_id): r.to_dict() for _, r in employees.iterrows()}
+    employment_history = _prepare_effective_frame(employment_history, "start_date", "end_date")
+    classifications = _prepare_effective_frame(classifications, "effective_from")
+    holidays = _prepare_holidays(holidays)
     rows = []
 
     for _, ts0 in timesheets.iterrows():
@@ -343,8 +371,8 @@ def reconcile_pay_periods(entitlements, payroll_lines, mapping, tolerance=0.05):
         return grouped
 
     payroll = payroll_lines.copy()
-    payroll["pay_period_start"] = payroll.pay_period_start.map(parse_datetime_value)
-    payroll["pay_period_end"] = payroll.pay_period_end.map(parse_datetime_value)
+    payroll["pay_period_start"] = parse_datetime_series(payroll.pay_period_start)
+    payroll["pay_period_end"] = parse_datetime_series(payroll.pay_period_end)
     payroll["amount"] = pd.to_numeric(payroll.amount, errors="coerce").fillna(0)
 
     def treatment(row):
