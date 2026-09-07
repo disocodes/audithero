@@ -10,6 +10,8 @@ from pathlib import Path
 from datetime import date
 import uuid
 
+from pyspark.sql import functions as F
+
 exec(open(str(Path.cwd() / "_common.py")).read())
 
 # COMMAND ----------
@@ -143,7 +145,7 @@ payload = spark.createDataFrame(
     status STRING,
     supersedes_confirmation_id STRING
     """,
-).withColumn("confirmed_at", __import__("pyspark").sql.functions.current_timestamp())
+).withColumn("confirmed_at", F.current_timestamp())
 
 payload.select(
     "confirmation_id", "employee_id", "calendar_year", "effective_from", "effective_to",
