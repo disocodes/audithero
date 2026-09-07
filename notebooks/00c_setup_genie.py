@@ -33,11 +33,33 @@ def call(method: str, path: str, body=None, query=None):
     return api.do(method, path, body=body, query=query)
 
 
+def _sorted_sources(identifiers):
+    """Return Genie data sources in the identifier order required by the Genie API."""
+    return [{"identifier": identifier} for identifier in sorted(identifiers)]
+
+
 workspace_parent = parent_path
 if workspace_parent.startswith("/Workspace/"):
     workspace_parent = workspace_parent[len("/Workspace"):]
 call("POST", "/api/2.0/workspace/mkdirs", {"path": workspace_parent})
 
+
+table_identifiers = [
+    f"{catalog}.gold.v_audit_runs",
+    f"{catalog}.gold.v_award_criteria_detail_latest",
+    f"{catalog}.gold.v_award_scenario_detail_latest",
+    f"{catalog}.gold.v_award_scenario_rest_findings_latest",
+    f"{catalog}.gold.v_readiness_findings",
+    f"{catalog}.gold.v_rest_break_findings_latest",
+    f"{catalog}.gold.v_rule_coverage",
+]
+
+metric_view_identifiers = [
+    f"{catalog}.semantic.audit_detail",
+    f"{catalog}.semantic.award_scenarios",
+    f"{catalog}.semantic.payroll_compliance",
+    f"{catalog}.semantic.rest_break_compliance",
+]
 
 serialized = {
     "version": 2,
@@ -54,21 +76,8 @@ serialized = {
         ]
     },
     "data_sources": {
-        "tables": [
-            {"identifier": f"{catalog}.gold.v_audit_runs"},
-            {"identifier": f"{catalog}.gold.v_readiness_findings"},
-            {"identifier": f"{catalog}.gold.v_rule_coverage"},
-            {"identifier": f"{catalog}.gold.v_rest_break_findings_latest"},
-            {"identifier": f"{catalog}.gold.v_award_scenario_detail_latest"},
-            {"identifier": f"{catalog}.gold.v_award_criteria_detail_latest"},
-            {"identifier": f"{catalog}.gold.v_award_scenario_rest_findings_latest"},
-        ],
-        "metric_views": [
-            {"identifier": f"{catalog}.semantic.audit_detail"},
-            {"identifier": f"{catalog}.semantic.payroll_compliance"},
-            {"identifier": f"{catalog}.semantic.rest_break_compliance"},
-            {"identifier": f"{catalog}.semantic.award_scenarios"},
-        ],
+        "tables": _sorted_sources(table_identifiers),
+        "metric_views": _sorted_sources(metric_view_identifiers),
     },
     "instructions": {
         "example_question_sqls": [
