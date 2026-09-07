@@ -9,14 +9,8 @@ resources:
             base_parameters:
               catalog: "${var.catalog}"
               sql_warehouse_id: "${var.sql_warehouse_id}"
-        - task_key: validate_rules
-          depends_on: [{task_key: setup}]
-          notebook_task: {notebook_path: ../notebooks/01_validate_rules.py}
-        - task_key: self_test
-          depends_on: [{task_key: validate_rules}]
-          notebook_task: {notebook_path: ../notebooks/01b_self_test.py}
         - task_key: setup_investigation_view
-          depends_on: [{task_key: self_test}]
+          depends_on: [{task_key: setup}]
           notebook_task:
             notebook_path: ../notebooks/00e_setup_investigation_view.py
             base_parameters: {catalog: "${var.catalog}"}
