@@ -17,7 +17,7 @@ def _ensure_parameter(ds: dict, keyword: str, display_name: str, data_type: str,
     parameters = ds.setdefault("parameters", [])
     parameter = next((p for p in parameters if p.get("keyword") == keyword), None)
     if parameter is None:
-        parameter = {"keyword": keyword, "dataType": data_type}
+        parameter = {"keyword": keyword}
         parameters.append(parameter)
     parameter["displayName"] = display_name
     parameter["dataType"] = data_type
@@ -25,7 +25,6 @@ def _ensure_parameter(ds: dict, keyword: str, display_name: str, data_type: str,
 
 
 def _apply_current_layout(spec: dict) -> dict:
-    """Apply the shared 12-column layout finalizer from this dashboard directory."""
     layout_file = Path(__file__).with_name("dashboard_layout_finalize.py")
     if not layout_file.exists():
         raise FileNotFoundError(f"AuditHero dashboard layout finalizer not found: {layout_file}")
@@ -38,6 +37,9 @@ def _apply_current_layout(spec: dict) -> dict:
 
 
 def _assert_live_simulator(spec: dict) -> None:
+    # These names must match the actual widget identifiers created in
+    # live_pay_simulator.py. Keep this assertion strict so Setup cannot report
+    # success while publishing the base dashboard without the simulator.
     required = {
         "live_sim_title",
         "sim_year",
@@ -45,7 +47,7 @@ def _assert_live_simulator(spec: dict) -> None:
         "sim_exact_rate",
         "sim_pay_model",
         "sim_selected_rate_kpi",
-        "sim_simulated_pay",
+        "sim_total",
         "sim_variance",
         "sim_shift_table",
         "sim_component_table",
@@ -69,13 +71,13 @@ def _assert_live_simulator(spec: dict) -> None:
     if employee_page is None:
         raise ValueError("AuditHero live simulator requires the Employee Deep Dive page")
 
-    simulator_positions = [
+    positioned = [
         widget.get("position")
         for widget in employee_page.get("widgets", []) or []
         if widget.get("name") in required
     ]
-    if not simulator_positions:
-        raise ValueError("AuditHero live simulator has no positioned widgets")
+    if not positioned or any(not isinstance(position, list) or len(position) != 4 for position in positioned):
+        raise ValueError("AuditHero live simulator contains an unpositioned required widget")
 
 
 def _is_simulator_widget(widget: dict) -> bool:
@@ -88,12 +90,11 @@ def _shift_simulator_from(page: dict, start_y: int, delta: int) -> None:
         if not _is_simulator_widget(widget):
             continue
         position = widget.get("position")
-        if not isinstance(position, list) or len(position) != 4:
+        if not isinstance(position, list) or len(position) != 4 or position[1] < start_y:
             continue
-        if position[1] >= start_y:
-            position = list(position)
-            position[1] += delta
-            widget["position"] = position
+        moved = list(position)
+        moved[1] += delta
+        widget["position"] = moved
 
 
 def _insert_simulator_heading(page: dict, name: str, title: str, detail: str, y: int) -> None:
@@ -111,7 +112,6 @@ def _insert_simulator_heading(page: dict, name: str, title: str, detail: str, y:
 
 
 def _apply_simulator_language_and_sections(page: dict) -> None:
-    """Make the simulator read as a calculation workspace, not a KPI tracker."""
     title = next((w for w in page.get("widgets", []) if w.get("name") == "live_sim_title"), None)
     if title:
         title["text"] = (
@@ -122,8 +122,8 @@ def _apply_simulator_language_and_sections(page: dict) -> None:
             "These values are what-if calculations from roster evidence and are not actual-pay evidence until separately confirmed."
         )
 
-    # Insert headings from the bottom upward so each insertion can shift the later
-    # simulator block without disturbing the relative arrangement of earlier rows.
+    # Insert from the bottom upward so later sections move down without changing
+    # the arrangement of earlier calculation controls.
     _insert_simulator_heading(
         page,
         "sim_award_components_heading",
@@ -153,14 +153,11 @@ def _apply_simulator_language_and_sections(page: dict) -> None:
         49,
     )
 
-    # These are calculation-summary tiles. Their internal widget identifiers are
-    # intentionally left stable because they are deployment assertions, not labels
-    # shown to dashboard users.
     selected_rate = next((w for w in page.get("widgets", []) if w.get("name") == "sim_selected_rate_kpi"), None)
     if selected_rate:
         selected_rate["title"] = "Selected Hourly Rate"
 
-    simulated_pay = next((w for w in page.get("widgets", []) if w.get("name") == "sim_simulated_pay"), None)
+    simulated_pay = next((w for w in page.get("widgets", []) if w.get("name") == "sim_total"), None)
     if simulated_pay:
         simulated_pay["title"] = "Calculated Pay at Selected Rate"
 
@@ -184,11 +181,6 @@ def enhance_spec(spec: dict) -> dict:
         if ds:
             _ensure_parameter(ds, "assumed_rate", "Assumed hourly rate", "DECIMAL", "50.00")
 
-    # Components use the pay-model parameter differently from the employee/shift
-    # summary. Under a flat/loaded model the selected hourly amount is treated as
-    # aggregate coverage and must not be used to re-base individual Award penalty
-    # or overtime requirements. Under the base+SCHADS model rate-sensitive Award
-    # components are scaled from the calculated SCHADS base.
     components = datasets.get("pay_sim_components_live")
     if components:
         _ensure_parameter(
@@ -237,24 +229,15 @@ def enhance_spec(spec: dict) -> dict:
             component_binding = {"dataset": "pay_sim_components_live", "keyword": "pay_model"}
             if component_binding not in parameters:
                 parameters.append(component_binding)
-
-        # Keep the visible selector and the parameter defaults identical so the
-        # dashboard never opens with an apparently empty control while calculating
-        # a hidden default value.
-        exact_rate_filter = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_exact_rate"), None)
-        if exact_rate_filter:
-            exact_rate_filter["default_selection"] = _default_values("DECIMAL", "50.00")
-
-        if pay_model_filter:
             pay_model_filter["default_selection"] = _default_values(
                 "STRING",
                 "BASE_PLUS_SCHADS_MULTIPLIERS",
             )
 
-        # Avoid an ambiguous dashboard text reference when the same parameter name
-        # is deliberately bound across several datasets. The calculation summary
-        # immediately below displays the exact selected rate and remains the visual
-        # source of truth.
+        exact_rate_filter = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_exact_rate"), None)
+        if exact_rate_filter:
+            exact_rate_filter["default_selection"] = _default_values("DECIMAL", "50.00")
+
         selected_text = next((w for w in employee_page.get("widgets", []) if w.get("name") == "live_sim_selected_rate"), None)
         if selected_text:
             selected_text["text"] = (
@@ -286,9 +269,6 @@ def enhance_spec(spec: dict) -> dict:
     _assert_live_simulator(spec)
     spec = _apply_current_layout(spec)
 
-    # After the layout finalizer the simulator should be immediately visible at the
-    # top of Employee Deep Dive and every legacy six-column page should occupy the
-    # modern 12-column Databricks canvas.
     employee_page = next(
         (page for page in spec.get("pages", []) if page.get("name") == "employee_deep_dive"),
         None,
@@ -299,5 +279,15 @@ def enhance_spec(spec: dict) -> dict:
     ) if employee_page else None
     if live_title is None or live_title.get("position", [0, 99])[1] != 0:
         raise ValueError("AuditHero live simulator was not promoted to the top of Employee Deep Dive")
+
+    # Full-width verification: after six-to-twelve-column expansion at least one
+    # simulator widget must reach the right edge of the current 12-column canvas.
+    simulator_positions = [
+        widget.get("position")
+        for widget in employee_page.get("widgets", []) or []
+        if _is_simulator_widget(widget) and isinstance(widget.get("position"), list)
+    ] if employee_page else []
+    if not any(position[0] + position[2] == 12 for position in simulator_positions):
+        raise ValueError("AuditHero simulator did not expand to the full 12-column dashboard canvas")
 
     return spec
