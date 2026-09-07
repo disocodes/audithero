@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # AuditHero — Setup Roster Pay Simulation
 # MAGIC
-# MAGIC Creates the governed simulation/read-back layer used when roster evidence exists before payroll evidence is available.
+# MAGIC Creates the governed simulation and confirmation layer used when roster evidence exists before payroll evidence is available.
 # MAGIC Simulated values are never treated as confirmed actual payroll.
 # COMMAND ----------
 from pathlib import Path
@@ -11,9 +11,7 @@ exec(open(str(Path.cwd() / "_common.py")).read())
 
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
-dbutils.widgets.text("app_service_principal", "")
 catalog = dbutils.widgets.get("catalog").strip() or "schads_payroll"
-app_service_principal = dbutils.widgets.get("app_service_principal").strip()
 
 required_views = [
     "v_award_scenario_detail_latest",
@@ -268,28 +266,7 @@ spark.sql(
     """
 )
 
-# COMMAND ----------
-# MAGIC %md
-# MAGIC ## App Permissions
-# COMMAND ----------
-if app_service_principal:
-    principal = app_service_principal.replace('`', '``')
-    grants = [
-        f"GRANT USE CATALOG ON CATALOG `{catalog}` TO `{principal}`",
-        f"GRANT USE SCHEMA ON SCHEMA `{catalog}`.`gold` TO `{principal}`",
-        f"GRANT USE SCHEMA ON SCHEMA `{catalog}`.`silver` TO `{principal}`",
-        f"GRANT SELECT ON VIEW `{catalog}`.`gold`.`v_pay_simulation_terms_latest` TO `{principal}`",
-        f"GRANT SELECT ON VIEW `{catalog}`.`gold`.`v_pay_simulation_employee_year` TO `{principal}`",
-        f"GRANT SELECT ON VIEW `{catalog}`.`gold`.`v_pay_rate_confirmations_latest` TO `{principal}`",
-        f"GRANT SELECT ON VIEW `{catalog}`.`gold`.`v_pay_simulation_master` TO `{principal}`",
-        f"GRANT SELECT, MODIFY ON TABLE `{catalog}`.`silver`.`pay_rate_confirmations` TO `{principal}`",
-    ]
-    for statement in grants:
-        spark.sql(statement)
-    print(f"Granted AuditHero Pay Review app access to {app_service_principal}")
-else:
-    print("No app_service_principal supplied; created simulation assets without app grants.")
-
 print(f"Created roster simulation views in {catalog}.gold")
 print(f"Created confirmation evidence table: {catalog}.silver.pay_rate_confirmations")
 print("Simulation values are hypothetical until a rate is confirmed or actual payroll evidence is loaded.")
+print("Use 'AuditHero - Confirm Employee Pay Rate' to save reviewed rate evidence; no Databricks App is required.")
