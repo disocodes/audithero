@@ -78,6 +78,97 @@ def _assert_live_simulator(spec: dict) -> None:
         raise ValueError("AuditHero live simulator has no positioned widgets")
 
 
+def _is_simulator_widget(widget: dict) -> bool:
+    name = str(widget.get("name", ""))
+    return name.startswith("sim_") or name.startswith("live_sim")
+
+
+def _shift_simulator_from(page: dict, start_y: int, delta: int) -> None:
+    for widget in page.get("widgets", []) or []:
+        if not _is_simulator_widget(widget):
+            continue
+        position = widget.get("position")
+        if not isinstance(position, list) or len(position) != 4:
+            continue
+        if position[1] >= start_y:
+            position = list(position)
+            position[1] += delta
+            widget["position"] = position
+
+
+def _insert_simulator_heading(page: dict, name: str, title: str, detail: str, y: int) -> None:
+    if any(widget.get("name") == name for widget in page.get("widgets", []) or []):
+        return
+    _shift_simulator_from(page, y, 2)
+    page.setdefault("widgets", []).append(
+        {
+            "type": "text",
+            "name": name,
+            "text": f"### {title}\n{detail}",
+            "position": [0, y, 6, 2],
+        }
+    )
+
+
+def _apply_simulator_language_and_sections(page: dict) -> None:
+    """Make the simulator read as a calculation workspace, not a KPI tracker."""
+    title = next((w for w in page.get("widgets", []) if w.get("name") == "live_sim_title"), None)
+    if title:
+        title["text"] = (
+            "## Roster Pay Simulator\n"
+            "### Simulation Controls\n"
+            "Choose an employee, year and SCHADS scenario, then type/search an exact hourly rate and choose how that rate should be interpreted. "
+            "**Every calculation and detail below uses the same connected simulation state.** "
+            "These values are what-if calculations from roster evidence and are not actual-pay evidence until separately confirmed."
+        )
+
+    # Insert headings from the bottom upward so each insertion can shift the later
+    # simulator block without disturbing the relative arrangement of earlier rows.
+    _insert_simulator_heading(
+        page,
+        "sim_award_components_heading",
+        "Award Components",
+        "Inspect overtime, penalties, breaks, allowances and other SCHADS calculation components behind the selected scenario.",
+        81,
+    )
+    _insert_simulator_heading(
+        page,
+        "sim_shift_calculations_heading",
+        "Shift Calculations",
+        "Review how the selected rate changes the calculated outcome for each rostered shift.",
+        72,
+    )
+    _insert_simulator_heading(
+        page,
+        "sim_pay_outcomes_heading",
+        "Break-even & Pay Outcomes",
+        "Compare the selected rate with SCHADS minimums, break-even rates, calculated pay and variance.",
+        51,
+    )
+    _insert_simulator_heading(
+        page,
+        "sim_summary_heading",
+        "Simulation Summary",
+        "Calculated values for the currently selected employee, year, scenario, hourly rate and pay interpretation.",
+        49,
+    )
+
+    # These are calculation-summary tiles. Their internal widget identifiers are
+    # intentionally left stable because they are deployment assertions, not labels
+    # shown to dashboard users.
+    selected_rate = next((w for w in page.get("widgets", []) if w.get("name") == "sim_selected_rate_kpi"), None)
+    if selected_rate:
+        selected_rate["title"] = "Selected Hourly Rate"
+
+    simulated_pay = next((w for w in page.get("widgets", []) if w.get("name") == "sim_simulated_pay"), None)
+    if simulated_pay:
+        simulated_pay["title"] = "Calculated Pay at Selected Rate"
+
+    variance = next((w for w in page.get("widgets", []) if w.get("name") == "sim_variance"), None)
+    if variance:
+        variance["title"] = "Calculated Variance"
+
+
 def enhance_spec(spec: dict) -> dict:
     datasets = {ds.get("name"): ds for ds in spec.get("datasets", [])}
 
@@ -161,14 +252,14 @@ def enhance_spec(spec: dict) -> dict:
             )
 
         # Avoid an ambiguous dashboard text reference when the same parameter name
-        # is deliberately bound across several datasets. The KPI immediately below
-        # displays the exact selected rate and therefore remains the visual source
-        # of truth.
+        # is deliberately bound across several datasets. The calculation summary
+        # immediately below displays the exact selected rate and remains the visual
+        # source of truth.
         selected_text = next((w for w in employee_page.get("widgets", []) if w.get("name") == "live_sim_selected_rate"), None)
         if selected_text:
             selected_text["text"] = (
                 "**Connected simulation state:** the selected hourly rate and pay interpretation below drive "
-                "the summary, rate-position, shift and Award-component views together."
+                "the summary, rate-position, shift and Award-component calculations together."
             )
 
         component_chart = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_components"), None)
@@ -189,6 +280,8 @@ def enhance_spec(spec: dict) -> dict:
                 "Base + SCHADS multipliers scales rate-sensitive Award components using the selected base rate. "
                 "Flat/loaded mode keeps the SCHADS component requirement unchanged and tests aggregate pay coverage instead."
             )
+
+        _apply_simulator_language_and_sections(employee_page)
 
     _assert_live_simulator(spec)
     spec = _apply_current_layout(spec)
