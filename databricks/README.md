@@ -111,6 +111,41 @@ Use the global **Employee** filter and optionally select one employee/pay-period
 - shift-level calculation detail; and
 - pay-period reconciliation.
 
+### Roster Pay Simulation & Confirmation
+
+Roster-only audits can still be analysed when actual payroll evidence or the historical employee hourly rate is not yet available.
+
+AuditHero factorises each already-calculated SCHADS scenario into rate-sensitive and fixed Award components. This allows dashboard what-if analysis to evaluate arbitrary hourly rates without rerunning the full Award engine or storing thousands of duplicate rate rows.
+
+The governed simulation layer exposes:
+
+- roster shifts and hours by employee/year/scenario;
+- effective SCHADS minimum base rate;
+- calculated SCHADS minimum entitlement;
+- rate-sensitive Award factor;
+- fixed Award-linked components;
+- break-even rate under the SCHADS-multiplier model;
+- break-even flat/loaded hourly rate;
+- saved rate confirmation status; and
+- potential underpayment / Award-review recommendations.
+
+A missing historical rate remains clearly identified as `MISSING_PAY_RATE_CONFIRMATION`. Simulation values are hypothetical until supporting evidence is confirmed or actual payroll is loaded.
+
+Use **AuditHero - Confirm Employee Pay Rate** only when a reviewed rate needs to be persisted. The job records:
+
+- employee and year;
+- confirmed hourly rate;
+- pay interpretation (`BASE_PLUS_SCHADS_MULTIPLIERS` or `FLAT_LOADED_HOURLY`);
+- optional selected SCHADS scenario;
+- evidence source/reference;
+- notes;
+- confirming user/time; and
+- the previous confirmation it supersedes.
+
+No separate Databricks App is required. The confirmation table retains history, and the dashboard refreshes after a successful confirmation job.
+
+A manually confirmed hourly rate is supporting audit evidence; it is **not** treated as proof of full actual payroll payment. Loading payroll data later upgrades the audit to definitive actual-versus-expected reconciliation.
+
 ### Audit Components
 
 Provides a consolidated view of every Award criterion generated for the selected scenario, including:
@@ -197,6 +232,7 @@ Normalized source evidence is stored in Silver tables such as:
 - `schads_payroll.silver.timesheets`
 - `schads_payroll.silver.payroll_earnings`
 - `schads_payroll.silver.rostered_shifts`
+- `schads_payroll.silver.pay_rate_confirmations`
 
 Gold outputs include:
 
@@ -208,6 +244,14 @@ Gold outputs include:
 - `schads_payroll.gold.award_scenario_rest_findings`
 - `schads_payroll.gold.audit_event_adjustments`
 - `schads_payroll.gold.toil_findings`
+
+Roster simulation/reporting views include:
+
+- `schads_payroll.gold.v_pay_simulation_terms_latest`
+- `schads_payroll.gold.v_pay_simulation_employee_year`
+- `schads_payroll.gold.v_pay_rate_confirmations_latest`
+- `schads_payroll.gold.v_pay_simulation_master`
+- `schads_payroll.gold.v_pay_review_employee_master`
 
 Governed semantic views include:
 
@@ -255,7 +299,7 @@ API and uploaded-file workflows use the same deterministic calculation and gover
 
 Open `/Shared/AuditHero/admin/AuditHero - Install or Upgrade` and choose **Run all**.
 
-Upgrade migrates managed Gold schemas, refreshes the effective-dated rule library, updates Jobs, rebuilds and republishes the Award-oriented dashboard with cross-dataset global filters and enhanced audit pages, and refreshes Genie.
+Upgrade migrates managed Gold schemas, refreshes the effective-dated rule library, updates Jobs, creates/refreshes the roster-pay simulation and confirmation views, rebuilds and republishes the Award-oriented dashboard, and refreshes Genie.
 
 ## Uninstall
 
