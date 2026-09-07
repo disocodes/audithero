@@ -4,7 +4,8 @@
 # MAGIC
 # MAGIC **Purpose:** create the denormalized Gold view used by the interactive AI/BI investigation dashboard.
 # MAGIC
-# MAGIC The view keeps shift-level audit detail while carrying pay-period reconciliation fields once per employee/pay period. This allows dashboard filters, KPIs, charts and detail tables to share one dataset without double-counting pay-period totals.
+# MAGIC The view keeps shift-level audit detail while carrying pay-period reconciliation fields once per employee/pay period.
+# MAGIC This notebook is idempotent and skips the rebuild when the current view build already exists.
 # COMMAND ----------
 from pathlib import Path
 
@@ -13,6 +14,43 @@ exec(open(str(Path.cwd() / "_common.py")).read())
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
 catalog = dbutils.widgets.get("catalog").strip() or "schads_payroll"
+
+INVESTIGATION_BUILD = "2026-09-08-investigation-v2"
+
+spark.sql(
+    f"""
+    CREATE TABLE IF NOT EXISTS `{catalog}`.`ops`.`setup_state` (
+      resource_key STRING,
+      resource_version STRING,
+      details STRING,
+      updated_at TIMESTAMP
+    ) USING DELTA
+    """
+)
+
+
+def _exists(schema: str, name: str) -> bool:
+    try:
+        spark.sql(f"DESCRIBE TABLE `{catalog}`.`{schema}`.`{name}`").limit(1).collect()
+        return True
+    except Exception:
+        return False
+
+
+state_rows = spark.sql(
+    f"""
+    SELECT resource_version
+    FROM `{catalog}`.`ops`.`setup_state`
+    WHERE resource_key = 'audit_investigation_view'
+    ORDER BY updated_at DESC
+    LIMIT 1
+    """
+).collect()
+current_version = state_rows[0]["resource_version"] if state_rows else None
+
+if current_version == INVESTIGATION_BUILD and _exists("gold", "v_audit_investigation_latest"):
+    print(f"SKIP   investigation view already current ({INVESTIGATION_BUILD})")
+    dbutils.notebook.exit(f"SKIPPED:{INVESTIGATION_BUILD}")
 
 # COMMAND ----------
 spark.sql(
@@ -117,6 +155,21 @@ spark.sql(
     """
 )
 
+spark.sql(
+    f"""
+    MERGE INTO `{catalog}`.`ops`.`setup_state` t
+    USING (
+      SELECT 'audit_investigation_view' AS resource_key,
+             '{INVESTIGATION_BUILD}' AS resource_version,
+             '{{}}' AS details,
+             current_timestamp() AS updated_at
+    ) s
+    ON t.resource_key = s.resource_key
+    WHEN MATCHED THEN UPDATE SET *
+    WHEN NOT MATCHED THEN INSERT *
+    """
+)
+
 count = spark.sql(f"SELECT COUNT(*) AS n FROM `{catalog}`.`gold`.`v_audit_investigation_latest`").first()["n"]
-print(f"Created {catalog}.gold.v_audit_investigation_latest ({count} row(s))")
-print("The AI/BI dashboard uses this view for linked filters and shift-level investigation.")
+print(f"REFRESH {catalog}.gold.v_audit_investigation_latest ({count} row(s))")
+print(f"Investigation view setup complete: {INVESTIGATION_BUILD}")
