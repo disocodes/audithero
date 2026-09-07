@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 
 def _default_values(data_type: str, value: str) -> dict:
     return {
@@ -19,6 +22,60 @@ def _ensure_parameter(ds: dict, keyword: str, display_name: str, data_type: str,
     parameter["displayName"] = display_name
     parameter["dataType"] = data_type
     parameter["defaultSelection"] = _default_values(data_type, default_value)
+
+
+def _apply_current_layout(spec: dict) -> dict:
+    """Apply the shared 12-column layout finalizer from this dashboard directory."""
+    layout_file = Path(__file__).with_name("dashboard_layout_finalize.py")
+    if not layout_file.exists():
+        raise FileNotFoundError(f"AuditHero dashboard layout finalizer not found: {layout_file}")
+    module_spec = importlib.util.spec_from_file_location("audithero_dashboard_layout_finalize", layout_file)
+    if module_spec is None or module_spec.loader is None:
+        raise RuntimeError(f"AuditHero dashboard layout finalizer could not be loaded: {layout_file}")
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module.enhance_spec(spec)
+
+
+def _assert_live_simulator(spec: dict) -> None:
+    required = {
+        "live_sim_title",
+        "sim_year",
+        "sim_scenario",
+        "sim_exact_rate",
+        "sim_pay_model",
+        "sim_selected_rate_kpi",
+        "sim_simulated_pay",
+        "sim_variance",
+        "sim_shift_table",
+        "sim_component_table",
+    }
+    present = {
+        widget.get("name")
+        for page in spec.get("pages", []) or []
+        for widget in page.get("widgets", []) or []
+    }
+    missing = sorted(required - present)
+    if missing:
+        raise ValueError(
+            "AuditHero live simulator enhancement is incomplete; missing dashboard widgets: "
+            + ", ".join(missing)
+        )
+
+    employee_page = next(
+        (page for page in spec.get("pages", []) if page.get("name") == "employee_deep_dive"),
+        None,
+    )
+    if employee_page is None:
+        raise ValueError("AuditHero live simulator requires the Employee Deep Dive page")
+
+    simulator_positions = [
+        widget.get("position")
+        for widget in employee_page.get("widgets", []) or []
+        if widget.get("name") in required
+    ]
+    if not simulator_positions:
+        raise ValueError("AuditHero live simulator has no positioned widgets")
 
 
 def enhance_spec(spec: dict) -> dict:
@@ -83,17 +140,25 @@ def enhance_spec(spec: dict) -> dict:
                 if candidate not in fields:
                     fields.append(candidate)
 
-        rate_filter = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_exact_rate"), None)
-        if rate_filter:
-            rate_filter["default_selection"] = _default_values("DECIMAL", "50.00")
-
         pay_model_filter = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_pay_model"), None)
         if pay_model_filter:
-            pay_model_filter["default_selection"] = _default_values("STRING", "BASE_PLUS_SCHADS_MULTIPLIERS")
             parameters = pay_model_filter.setdefault("parameters", [])
             component_binding = {"dataset": "pay_sim_components_live", "keyword": "pay_model"}
             if component_binding not in parameters:
                 parameters.append(component_binding)
+
+        # Keep the visible selector and the parameter defaults identical so the
+        # dashboard never opens with an apparently empty control while calculating
+        # a hidden default value.
+        exact_rate_filter = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_exact_rate"), None)
+        if exact_rate_filter:
+            exact_rate_filter["default_selection"] = _default_values("DECIMAL", "50.00")
+
+        if pay_model_filter:
+            pay_model_filter["default_selection"] = _default_values(
+                "STRING",
+                "BASE_PLUS_SCHADS_MULTIPLIERS",
+            )
 
         # Avoid an ambiguous dashboard text reference when the same parameter name
         # is deliberately bound across several datasets. The KPI immediately below
@@ -124,5 +189,22 @@ def enhance_spec(spec: dict) -> dict:
                 "Base + SCHADS multipliers scales rate-sensitive Award components using the selected base rate. "
                 "Flat/loaded mode keeps the SCHADS component requirement unchanged and tests aggregate pay coverage instead."
             )
+
+    _assert_live_simulator(spec)
+    spec = _apply_current_layout(spec)
+
+    # After the layout finalizer the simulator should be immediately visible at the
+    # top of Employee Deep Dive and every legacy six-column page should occupy the
+    # modern 12-column Databricks canvas.
+    employee_page = next(
+        (page for page in spec.get("pages", []) if page.get("name") == "employee_deep_dive"),
+        None,
+    )
+    live_title = next(
+        (widget for widget in employee_page.get("widgets", []) if widget.get("name") == "live_sim_title"),
+        None,
+    ) if employee_page else None
+    if live_title is None or live_title.get("position", [0, 99])[1] != 0:
+        raise ValueError("AuditHero live simulator was not promoted to the top of Employee Deep Dive")
 
     return spec
