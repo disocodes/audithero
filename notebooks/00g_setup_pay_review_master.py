@@ -4,6 +4,8 @@
 # MAGIC
 # MAGIC Creates one dashboard-safe row per audit run / employee / calendar year.
 # MAGIC The view prevents the 135 SCHADS scenario rows from inflating confirmation counts.
+# MAGIC
+# MAGIC This notebook is idempotent and skips the rebuild when the current view build already exists.
 # COMMAND ----------
 from pathlib import Path
 
@@ -12,6 +14,43 @@ exec(open(str(Path.cwd() / "_common.py")).read())
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
 catalog = dbutils.widgets.get("catalog").strip() or "schads_payroll"
+
+PAY_REVIEW_BUILD = "2026-09-08-pay-review-master-v2"
+
+spark.sql(
+    f"""
+    CREATE TABLE IF NOT EXISTS `{catalog}`.`ops`.`setup_state` (
+      resource_key STRING,
+      resource_version STRING,
+      details STRING,
+      updated_at TIMESTAMP
+    ) USING DELTA
+    """
+)
+
+
+def _exists(schema: str, name: str) -> bool:
+    try:
+        spark.sql(f"DESCRIBE TABLE `{catalog}`.`{schema}`.`{name}`").limit(1).collect()
+        return True
+    except Exception:
+        return False
+
+
+state_rows = spark.sql(
+    f"""
+    SELECT resource_version
+    FROM `{catalog}`.`ops`.`setup_state`
+    WHERE resource_key = 'pay_review_employee_master'
+    ORDER BY updated_at DESC
+    LIMIT 1
+    """
+).collect()
+current_version = state_rows[0]["resource_version"] if state_rows else None
+
+if current_version == PAY_REVIEW_BUILD and _exists("gold", "v_pay_review_employee_master"):
+    print(f"SKIP   employee pay-review master already current ({PAY_REVIEW_BUILD})")
+    dbutils.notebook.exit(f"SKIPPED:{PAY_REVIEW_BUILD}")
 
 spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`v_pay_simulation_master` LIMIT 1")
 
@@ -141,6 +180,21 @@ spark.sql(
     """
 )
 
+spark.sql(
+    f"""
+    MERGE INTO `{catalog}`.`ops`.`setup_state` t
+    USING (
+      SELECT 'pay_review_employee_master' AS resource_key,
+             '{PAY_REVIEW_BUILD}' AS resource_version,
+             '{{}}' AS details,
+             current_timestamp() AS updated_at
+    ) s
+    ON t.resource_key = s.resource_key
+    WHEN MATCHED THEN UPDATE SET *
+    WHEN NOT MATCHED THEN INSERT *
+    """
+)
+
 count = spark.sql(f"SELECT COUNT(*) AS n FROM `{catalog}`.`gold`.`v_pay_review_employee_master`").first()["n"]
-print(f"Created {catalog}.gold.v_pay_review_employee_master ({count} employee/year/run row(s))")
-print("Each employee/year appears once per audit run so dashboard confirmation counts are not multiplied by SCHADS scenarios.")
+print(f"REFRESH {catalog}.gold.v_pay_review_employee_master ({count} employee/year/run row(s))")
+print(f"Pay-review master setup complete: {PAY_REVIEW_BUILD}")
