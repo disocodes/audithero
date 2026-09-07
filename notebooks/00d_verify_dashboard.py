@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled Award-oriented specification, apply the AuditHero dashboard enhancement layers, then ensure the stored and published Databricks dashboard matches that definition.
 # MAGIC
-# MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created. If the optional roster-pay simulation layer has been set up, its employee/year confirmation status is also incorporated without adding another dashboard page.
+# MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created. If the roster-pay simulation layer has been set up, its employee/year confirmation status is also incorporated without adding another dashboard page.
 # COMMAND ----------
 # MAGIC %pip install -q "databricks-sdk>=0.20"
 # COMMAND ----------
@@ -235,4 +235,4 @@ print(
     "Audit Components, specialist SCHADS pages, definitive reconciliation, evidence, data quality and rule coverage."
 )
 if pay_review_enabled:
-    print("Roster pay-rate confirmation status is visible in Audit Overview and Employee Deep Dive; use audithero-pay-review for live rate simulation and write-back.")
+    print("Roster pay-rate confirmation status is visible in Audit Overview and Employee Deep Dive; use 'AuditHero - Confirm Employee Pay Rate' only to persist reviewed evidence.")
