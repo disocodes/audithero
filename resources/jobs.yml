@@ -20,8 +20,18 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/00e_setup_investigation_view.py
             base_parameters: {catalog: "${var.catalog}"}
-        - task_key: verify_dashboard
+        - task_key: setup_pay_simulation
           depends_on: [{task_key: setup_investigation_view}]
+          notebook_task:
+            notebook_path: ../notebooks/00f_setup_pay_simulation.py
+            base_parameters: {catalog: "${var.catalog}"}
+        - task_key: setup_pay_review_master
+          depends_on: [{task_key: setup_pay_simulation}]
+          notebook_task:
+            notebook_path: ../notebooks/00g_setup_pay_review_master.py
+            base_parameters: {catalog: "${var.catalog}"}
+        - task_key: verify_dashboard
+          depends_on: [{task_key: setup_pay_review_master}]
           notebook_task:
             notebook_path: ../notebooks/00d_verify_dashboard.py
             base_parameters:
@@ -33,6 +43,37 @@ resources:
       tasks:
         - task_key: self_test
           notebook_task: {notebook_path: ../notebooks/01b_self_test.py}
+
+    confirm_employee_pay_rate:
+      name: "AuditHero - Confirm Employee Pay Rate"
+      parameters:
+        - {name: employee_id, default: ""}
+        - {name: calendar_year, default: ""}
+        - {name: confirmed_hourly_rate, default: ""}
+        - {name: pay_model, default: "BASE_PLUS_SCHADS_MULTIPLIERS"}
+        - {name: selected_scenario_id, default: ""}
+        - {name: source_type, default: "MANUAL_CONFIRMATION"}
+        - {name: source_reference, default: ""}
+        - {name: notes, default: ""}
+      tasks:
+        - task_key: confirm_rate
+          notebook_task:
+            notebook_path: ../notebooks/00h_confirm_employee_pay_rate.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              employee_id: "{{job.parameters.employee_id}}"
+              calendar_year: "{{job.parameters.calendar_year}}"
+              confirmed_hourly_rate: "{{job.parameters.confirmed_hourly_rate}}"
+              pay_model: "{{job.parameters.pay_model}}"
+              selected_scenario_id: "{{job.parameters.selected_scenario_id}}"
+              source_type: "{{job.parameters.source_type}}"
+              source_reference: "{{job.parameters.source_reference}}"
+              notes: "{{job.parameters.notes}}"
+        - task_key: refresh_dashboard
+          depends_on: [{task_key: confirm_rate}]
+          dashboard_task:
+            dashboard_id: ${resources.dashboards.payroll_compliance.id}
+            warehouse_id: ${var.sql_warehouse_id}
 
     auto_file_preview:
       name: "AuditHero - Preview Uploaded Files"
