@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC Production installer for AuditHero on Databricks. **Run all** updates the application release, ensures Jobs and workspace resources are configured, runs environment Setup, deploys/verifies the AI/BI dashboard, runs a synthetic SCHADS calculation Self Test, and writes an installation report.
 # MAGIC
-# MAGIC The phases are deliberately separate. Setup, Dashboard deployment, and Self Test each have their own status so one failure does not hide the diagnostics from the other phases. The final cell is the only cell that declares the overall installation successful or failed.
+# MAGIC Setup, Dashboard deployment and Self Test are deliberately separate phases. **A failed phase raises an exception in its own cell**, so Databricks shows the cell as failed instead of displaying a misleading green success tick. Because the phases are separate, an operator can inspect/fix the failed phase and then manually run later diagnostic cells when appropriate.
 
 # COMMAND ----------
 # MAGIC %md
@@ -27,7 +27,7 @@ secret_scope = "audithero"
 monthly_cron = "0 0 9 25 * ?"
 timezone = "Australia/Perth"
 existing_cluster_id = ""
-INSTALLER_BUILD = "2026-09-08-production-phases-v5"
+INSTALLER_BUILD = "2026-09-08-production-phases-v6"
 DASHBOARD_BUILD = "2026-09-08-simulator-v4"
 DASHBOARD_NAME = "AuditHero - SCHADS Payroll Compliance"
 
@@ -189,7 +189,7 @@ for key,raw in job_defs.items():
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 10. Job execution and error diagnostics
-# MAGIC Setup and Self Test run in separate cells. Failed multi-task Jobs are expanded to show the failed task key and notebook error where the Jobs API exposes it. The helper returns status instead of immediately terminating the installer.
+# MAGIC Setup and Self Test run in separate cells. For a multi-task Job, the diagnostics distinguish the **actual failed task** from tasks that were merely blocked/skipped because an upstream dependency failed.
 # COMMAND ----------
 def get_run(run_id): return call("GET","/api/2.2/jobs/runs/get",query={"run_id":run_id}) or {}
 def run_output(run_id):
@@ -198,43 +198,69 @@ def run_output(run_id):
         except Exception:pass
     return {}
 def diagnostics(parent_id):
-    failed=[]
-    for t in get_run(parent_id).get("tasks",[]) or []:
-        s=t.get("state",{}) or {}
-        if s.get("result_state")=="SUCCESS":continue
-        key=t.get("task_key","unknown"); rid=t.get("run_id"); failed.append(key)
-        print(f"\nFAILED TASK: {key} | run={rid} | lifecycle={s.get('life_cycle_state')} | result={s.get('result_state')}")
-        if s.get("state_message"):print("  "+s["state_message"])
-        if rid:
-            o=run_output(rid); text=o.get("error") or o.get("error_trace") or (o.get("notebook_output") or {}).get("result")
-            if text:print(str(text)[:12000])
-    return failed
+    tasks=get_run(parent_id).get("tasks",[]) or []
+    actual=[]; blocked=[]
+    for t in tasks:
+        s=t.get("state",{}) or {}; result=s.get("result_state"); lifecycle=s.get("life_cycle_state")
+        if result=="SUCCESS": continue
+        row=(t,s)
+        if lifecycle=="SKIPPED" or result=="UPSTREAM_FAILED": blocked.append(row)
+        else: actual.append(row)
+    for heading,rows in (("FAILED TASK",actual),("BLOCKED TASK",blocked)):
+        for t,s in rows:
+            key=t.get("task_key","unknown"); rid=t.get("run_id")
+            print(f"\n{heading}: {key} | run={rid} | lifecycle={s.get('life_cycle_state')} | result={s.get('result_state')}")
+            if s.get("state_message"): print("  "+s["state_message"])
+            if rid and heading=="FAILED TASK":
+                o=run_output(rid); text=o.get("error") or o.get("error_trace") or (o.get("notebook_output") or {}).get("result")
+                if text: print(str(text)[:12000])
+    return {
+        "failed_tasks":[t.get("task_key","unknown") for t,_ in actual],
+        "blocked_tasks":[t.get("task_key","unknown") for t,_ in blocked],
+    }
 def run_job(job_id,label,timeout=3600):
     rid=call("POST","/api/2.2/jobs/run-now",{"job_id":job_id})["run_id"]; print(f"Started {label}: run {rid}"); deadline=time.time()+timeout
     while time.time()<deadline:
         s=get_run(rid).get("state",{}) or {}; lifecycle=s.get("life_cycle_state"); result=s.get("result_state")
         if lifecycle in {"TERMINATED","SKIPPED","INTERNAL_ERROR"}:
-            ok=result=="SUCCESS"; obj={"ok":ok,"run_id":rid,"lifecycle":lifecycle,"result":result,"message":s.get("state_message") or "","failed_tasks":[]}
+            ok=result=="SUCCESS"
+            diag={"failed_tasks":[],"blocked_tasks":[]} if ok else diagnostics(rid)
+            obj={"ok":ok,"run_id":rid,"lifecycle":lifecycle,"result":result,"message":s.get("state_message") or "",**diag}
             print(f"{label}: {'SUCCESS' if ok else 'FAILED'}")
-            if not ok:obj["failed_tasks"]=diagnostics(rid)
             return obj
         time.sleep(10)
-    return {"ok":False,"run_id":rid,"lifecycle":"TIMEOUT","result":None,"message":f"Timed out after {timeout}s","failed_tasks":[]}
+    return {"ok":False,"run_id":rid,"lifecycle":"TIMEOUT","result":None,"message":f"Timed out after {timeout}s","failed_tasks":[],"blocked_tasks":[]}
+def require_success(result,label):
+    if result["ok"]: return
+    root=", ".join(result.get("failed_tasks") or []) or "unknown task"
+    blocked=", ".join(result.get("blocked_tasks") or [])
+    detail=f"; blocked downstream tasks: {blocked}" if blocked else ""
+    raise RuntimeError(
+        f"{label} failed. Root failed task(s): {root}{detail}. "
+        f"Open Databricks Job run {result['run_id']} for the full notebook output."
+    )
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 11. Run AuditHero environment Setup
-# MAGIC **Setup is the environment/resource phase, not the calculation Self Test.** It validates the effective-dated SCHADS rule library; ensures Unity Catalog schemas, volumes, operational/Gold tables and required schema migrations; maintains Award reference data; creates reporting and metric views; configures/updates Genie; and prepares investigation, roster-simulation and employee-review views.
+# MAGIC **This is the production environment/resource phase, not the calculation Self Test.** The Setup Job has independent task boundaries so failures are attributable:
 # MAGIC
-# MAGIC Setup does not run an employee payroll audit. If it fails, the failure is recorded and this notebook continues to Dashboard preflight and Self Test so the underlying problem is easier to isolate.
+# MAGIC - `setup` — core Unity Catalog objects, persistent Delta tables, schema migrations, SCHADS reference rules and core reporting/metric views;
+# MAGIC - `setup_genie` — create/update the managed Genie space;
+# MAGIC - `setup_investigation_view` — employee/shift investigation reporting view;
+# MAGIC - `setup_pay_simulation` — roster-pay simulation tables/views;
+# MAGIC - `setup_pay_review_master` — employee/year review master;
+# MAGIC - `verify_dashboard` — validates the dashboard definition and required views, but does not publish it.
+# MAGIC
+# MAGIC A failure in this cell **raises an exception after diagnostics are printed**, so the cell must appear red in Databricks. Downstream cells remain separate and can be run manually for diagnostics after the failed Setup issue is understood.
 # COMMAND ----------
 setup_result=run_job(installed_jobs["setup"],"AuditHero Setup"); setup_run_id=setup_result["run_id"]
-if not setup_result["ok"]: print("Setup failed; continuing with dashboard preflight and Self Test for diagnostics. Final deployment status will remain failed unless all required phases pass.")
+require_success(setup_result,"AuditHero Setup")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 12. Dashboard data preflight
-# MAGIC Checks only the governed views required by the managed AI/BI dashboard. This is intentionally separate from general environment Setup so an unrelated Setup error does not automatically hide the dashboard deployment status.
+# MAGIC Checks the governed views required by the managed AI/BI dashboard. Missing views are a real deployment error and this cell raises instead of printing a false success state.
 # COMMAND ----------
 view_names=["v_audit_investigation_latest","v_award_scenario_detail_latest","v_award_criteria_detail_latest","v_award_scenario_rest_findings_latest","v_reconciliation_latest","v_audit_runs","v_readiness_findings","v_rule_coverage","v_pay_review_employee_master","v_pay_simulation_terms_latest","v_pay_simulation_employee_year"]
 dashboard_missing_views=[]
@@ -243,51 +269,51 @@ for v in view_names:
     except Exception as exc:dashboard_missing_views.append((f"{catalog}.gold.{v}",str(exc)))
 if dashboard_missing_views:
     print("Dashboard preflight FAILED:")
-    for n,e in dashboard_missing_views:print(f"  - {n}: {e[:500]}")
-else:print("Dashboard preflight PASSED: all required views are queryable.")
+    for n,e in dashboard_missing_views: print(f"  - {n}: {e[:1000]}")
+    raise RuntimeError("AuditHero dashboard preflight failed; required governed views are missing or not queryable: "+", ".join(n for n,_ in dashboard_missing_views))
+print("Dashboard preflight PASSED: all required views are queryable.")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 13. Build, publish and verify the enhanced AI/BI dashboard
-# MAGIC This cell is dashboard-specific. It applies the version-controlled dashboard enhancements, roster-pay simulator and current 12-column layout; verifies the simulator controls and page width; then updates/publishes every managed dashboard with the AuditHero dashboard name. If preflight failed, deployment is recorded as skipped rather than creating another opaque exception.
+# MAGIC Applies the version-controlled dashboard enhancements, roster-pay simulator and current 12-column layout; verifies the simulator controls and page width; then updates/publishes every managed dashboard with the AuditHero dashboard name. A publication/verification failure raises in this cell.
 # COMMAND ----------
 verified_dashboard_ids=[]; dashboard_result={"ok":False,"status":"NOT_RUN","message":""}
-if dashboard_missing_views:
-    dashboard_result={"ok":False,"status":"SKIPPED_MISSING_VIEWS","message":"Missing: "+", ".join(n for n,_ in dashboard_missing_views)}; print(dashboard_result["message"])
-else:
-    try:
-        builder=load_module("builder",repo_root/"dashboard/lakeview_builder.py"); enh=load_module("enh",repo_root/"dashboard/dashboard_enhancements.py"); pay=load_module("pay",repo_root/"dashboard/pay_simulation_dashboard.py"); sim=load_module("sim",repo_root/"dashboard/live_pay_simulator.py"); fin=load_module("fin",repo_root/"dashboard/live_pay_simulator_finalize.py")
-        spec=json.loads((repo_root/"dashboard/payroll_compliance.spec.json").read_text()); spec=fin.enhance_spec(sim.enhance_spec(pay.enhance_spec(enh.enhance_spec(spec))))
-        final_json=builder.build_dashboard(spec); final_text=json.dumps(final_json,separators=(",",":"))
-        names={x.get("widget",{}).get("name") for p in final_json.get("pages",[]) for x in p.get("layout",[])}
-        needed={"live_sim_title","sim_year","sim_scenario","sim_exact_rate","sim_pay_model","sim_selected_rate_kpi","sim_total","sim_variance","sim_summary_heading","sim_pay_outcomes_heading","sim_shift_calculations_heading","sim_award_components_heading","sim_shift_table","sim_component_table"}
-        miss=sorted(needed-names)
-        if miss:raise RuntimeError("Dashboard missing simulator widgets: "+", ".join(miss))
-        page=next((p for p in final_json.get("pages",[]) if p.get("name")=="employee_deep_dive"),None)
-        if not page:raise RuntimeError("Dashboard has no Employee Deep Dive page")
-        extent=max((x.get("position",{}).get("x",0)+x.get("position",{}).get("width",0) for x in page.get("layout",[])),default=0)
-        if extent<12:raise RuntimeError(f"Employee Deep Dive is not full-width; extent={extent}")
-        targets=[d for d in list_dashboards() if d.get("display_name")==DASHBOARD_NAME]
-        if not targets:raise RuntimeError("Managed AuditHero dashboard was not found")
-        for d in targets:
-            tid=d["dashboard_id"]; cur=call("GET",f"/api/2.0/lakeview/dashboards/{tid}") or {}; body={"dashboard_id":tid,"display_name":DASHBOARD_NAME,"warehouse_id":warehouse_id,"serialized_dashboard":final_text}
-            if cur.get("etag"):body["etag"]=cur["etag"]
-            call("PATCH",f"/api/2.0/lakeview/dashboards/{tid}",body,query={"dataset_catalog":catalog,"dataset_schema":"gold"})
-            stored=call("GET",f"/api/2.0/lakeview/dashboards/{tid}") or {}
-            if canonical(stored.get("serialized_dashboard") or "{}")!=canonical(final_text):raise RuntimeError(f"Databricks did not retain enhanced dashboard {tid}")
-            call("POST",f"/api/2.0/lakeview/dashboards/{tid}/published",{"embed_credentials":False,"warehouse_id":warehouse_id}); verified_dashboard_ids.append(tid)
-            print(f"Enhanced dashboard verified: {tid}; dashboard_build={DASHBOARD_BUILD}")
-        dashboard_id=verified_dashboard_ids[0]; dashboard_result={"ok":True,"status":"SUCCESS","message":f"Verified {len(verified_dashboard_ids)} dashboard(s)"}
-    except Exception as exc:
-        dashboard_result={"ok":False,"status":"FAILED","message":str(exc)}; print("Dashboard deployment FAILED:\n"+str(exc))
+try:
+    builder=load_module("builder",repo_root/"dashboard/lakeview_builder.py"); enh=load_module("enh",repo_root/"dashboard/dashboard_enhancements.py"); pay=load_module("pay",repo_root/"dashboard/pay_simulation_dashboard.py"); sim=load_module("sim",repo_root/"dashboard/live_pay_simulator.py"); fin=load_module("fin",repo_root/"dashboard/live_pay_simulator_finalize.py")
+    spec=json.loads((repo_root/"dashboard/payroll_compliance.spec.json").read_text()); spec=fin.enhance_spec(sim.enhance_spec(pay.enhance_spec(enh.enhance_spec(spec))))
+    final_json=builder.build_dashboard(spec); final_text=json.dumps(final_json,separators=(",",":"))
+    names={x.get("widget",{}).get("name") for p in final_json.get("pages",[]) for x in p.get("layout",[])}
+    needed={"live_sim_title","sim_year","sim_scenario","sim_exact_rate","sim_pay_model","sim_selected_rate_kpi","sim_total","sim_variance","sim_summary_heading","sim_pay_outcomes_heading","sim_shift_calculations_heading","sim_award_components_heading","sim_shift_table","sim_component_table"}
+    miss=sorted(needed-names)
+    if miss:raise RuntimeError("Dashboard missing simulator widgets: "+", ".join(miss))
+    page=next((p for p in final_json.get("pages",[]) if p.get("name")=="employee_deep_dive"),None)
+    if not page:raise RuntimeError("Dashboard has no Employee Deep Dive page")
+    extent=max((x.get("position",{}).get("x",0)+x.get("position",{}).get("width",0) for x in page.get("layout",[])),default=0)
+    if extent<12:raise RuntimeError(f"Employee Deep Dive is not full-width; extent={extent}")
+    targets=[d for d in list_dashboards() if d.get("display_name")==DASHBOARD_NAME]
+    if not targets:raise RuntimeError("Managed AuditHero dashboard was not found")
+    for d in targets:
+        tid=d["dashboard_id"]; cur=call("GET",f"/api/2.0/lakeview/dashboards/{tid}") or {}; body={"dashboard_id":tid,"display_name":DASHBOARD_NAME,"warehouse_id":warehouse_id,"serialized_dashboard":final_text}
+        if cur.get("etag"):body["etag"]=cur["etag"]
+        call("PATCH",f"/api/2.0/lakeview/dashboards/{tid}",body,query={"dataset_catalog":catalog,"dataset_schema":"gold"})
+        stored=call("GET",f"/api/2.0/lakeview/dashboards/{tid}") or {}
+        if canonical(stored.get("serialized_dashboard") or "{}")!=canonical(final_text):raise RuntimeError(f"Databricks did not retain enhanced dashboard {tid}")
+        call("POST",f"/api/2.0/lakeview/dashboards/{tid}/published",{"embed_credentials":False,"warehouse_id":warehouse_id}); verified_dashboard_ids.append(tid)
+        print(f"Enhanced dashboard verified: {tid}; dashboard_build={DASHBOARD_BUILD}")
+    dashboard_id=verified_dashboard_ids[0]; dashboard_result={"ok":True,"status":"SUCCESS","message":f"Verified {len(verified_dashboard_ids)} dashboard(s)"}
+except Exception as exc:
+    dashboard_result={"ok":False,"status":"FAILED","message":str(exc)}
+    print("Dashboard deployment FAILED:\n"+str(exc))
+    raise RuntimeError("AuditHero dashboard deployment failed: "+str(exc)) from exc
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 14. Deployment checkpoint before Self Test
-# MAGIC Shows Setup and Dashboard status before the independent calculation-engine test. This helps distinguish resource/dashboard problems from SCHADS calculation problems.
+# MAGIC At this point Setup and Dashboard deployment must both have passed. This checkpoint is informational only.
 # COMMAND ----------
-print(f"Setup: {'PASS' if setup_result['ok'] else 'FAIL'} (run {setup_run_id})")
-print(f"Dashboard: {'PASS' if dashboard_result['ok'] else 'FAIL'} ({dashboard_result['status']}) — {dashboard_result.get('message','')}")
+print(f"Setup: PASS (run {setup_run_id})")
+print(f"Dashboard: PASS ({dashboard_result['status']}) — {dashboard_result.get('message','')}")
 
 # COMMAND ----------
 # MAGIC %md
@@ -301,27 +327,26 @@ print(f"Dashboard: {'PASS' if dashboard_result['ok'] else 'FAIL'} ({dashboard_re
 # MAGIC 5. Broken-shift grouping and broken-shift allowance evidence.
 # MAGIC 6. Weekly/period overtime threshold allocation and repricing evidence.
 # MAGIC
-# MAGIC A failure means the installed code/rule runtime does not reproduce these synthetic examples. It is **not** a test of Employment Hero connectivity, uploaded source-file quality, dashboard permissions, or whether any real employee is compliant.
+# MAGIC A failure means the installed code/rule runtime does not reproduce these synthetic examples. It is **not** a test of Employment Hero connectivity, uploaded source-file quality, dashboard permissions, or whether any real employee is compliant. A failed Self Test raises in this cell.
 # COMMAND ----------
 self_test_result=run_job(installed_jobs["self_test"],"AuditHero Self Test"); self_test_run_id=self_test_result["run_id"]
+require_success(self_test_result,"AuditHero Self Test")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## 16. Save installation report and declare final production status
-# MAGIC Saves the release, resource IDs and results for Setup, Dashboard and Self Test to `/Shared/AuditHero/install_state.json`. This final cell is the only place that raises an overall deployment failure, after all three phases have had a chance to provide diagnostics.
+# MAGIC Reached only after Setup, Dashboard and Self Test have succeeded during **Run all**. Saves release/resource IDs to `/Shared/AuditHero/install_state.json` and prints the operator workflow.
 # COMMAND ----------
 state={"release_ref":release_ref,"installer_build":INSTALLER_BUILD,"dashboard_build":DASHBOARD_BUILD,"catalog":catalog,"install_root":install_root,"warehouse_id":warehouse_id,"warehouse_created_by_installer":warehouse_created_by_installer,"dashboard_id":dashboard_id,"dashboard_ids_verified":verified_dashboard_ids,"setup":setup_result,"dashboard":dashboard_result,"self_test":self_test_result,"setup_run_id":setup_run_id,"self_test_run_id":self_test_run_id,"jobs":installed_jobs,"installed_by":accounts_email}
 call("POST","/api/2.0/workspace/import",{"path":f"{install_root}/install_state.json","format":"RAW","content":base64.b64encode(json.dumps(state,indent=2).encode()).decode("ascii"),"overwrite":True})
 print("\nAUDITHERO INSTALL / UPGRADE SUMMARY")
-print(f"  Setup:     {'PASS' if setup_result['ok'] else 'FAIL'}")
-print(f"  Dashboard: {'PASS' if dashboard_result['ok'] else 'FAIL'}")
-print(f"  Self Test: {'PASS' if self_test_result['ok'] else 'FAIL'}")
-all_ok=setup_result["ok"] and dashboard_result["ok"] and self_test_result["ok"]
-if not all_ok:
-    failures=[]
-    if not setup_result["ok"]:failures.append(f"Setup run {setup_run_id} failed")
-    if not dashboard_result["ok"]:failures.append(f"Dashboard {dashboard_result['status']}: {dashboard_result.get('message','')}")
-    if not self_test_result["ok"]:failures.append(f"Self Test run {self_test_run_id} failed")
-    raise RuntimeError("AuditHero production checks failed: "+" | ".join(failures))
+print("  Setup:     PASS")
+print("  Dashboard: PASS")
+print("  Self Test: PASS")
 print("AuditHero installation completed successfully.")
 print("Employee Deep Dive should begin with Roster Pay Simulator and use the full 12-column canvas.")
+print("Primary uploaded-file workflow:")
+print("  1. Upload ordinary CSV/XLSX files to the raw import folder")
+print("  2. Run AuditHero - Preview Uploaded Files")
+print("  3. Review/confirm interpretation, then run AuditHero - Audit Reviewed Uploaded Files")
+print("  4. Open AuditHero - SCHADS Payroll Compliance")
