@@ -1,6 +1,7 @@
 from __future__ import annotations
-import json
 import pandas as pd
+
+from .json_utils import json_dumps_public
 
 
 def _sql(spark, label: str, statement: str):
@@ -47,7 +48,7 @@ def overwrite_rule_tables(spark, rule_library):
                 "classification_family": pack.get("classification_family"),
                 "operative_date": pack["operative_date"],
                 "application_basis": pack["application_basis"],
-                "source_json": json.dumps(pack.get("source", {})),
+                "source_json": json_dumps_public(pack.get("source", {})),
             })
             rate_rows.append(x)
     condition_rows = [
@@ -55,7 +56,7 @@ def overwrite_rule_tables(spark, rule_library):
             "award_code": p["award_code"],
             "condition_pack_id": p["condition_pack_id"],
             "operative_date": p["operative_date"],
-            "condition_json": json.dumps(p),
+            "condition_json": json_dumps_public(p),
         }
         for p in rule_library.condition_packs
     ]
@@ -67,7 +68,7 @@ def overwrite_rule_tables(spark, rule_library):
                 "award_code": pack["award_code"],
                 "allowance_pack_id": pack["allowance_pack_id"],
                 "operative_date": pack["operative_date"],
-                "source_json": json.dumps(pack.get("source", {})),
+                "source_json": json_dumps_public(pack.get("source", {})),
             })
             allowance_rows.append(x)
     write_df(spark, pd.DataFrame(rate_rows), "ref.rates", "overwrite")
