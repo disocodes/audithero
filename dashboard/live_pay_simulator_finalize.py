@@ -83,8 +83,13 @@ def enhance_spec(spec: dict) -> dict:
                 if candidate not in fields:
                     fields.append(candidate)
 
+        rate_filter = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_exact_rate"), None)
+        if rate_filter:
+            rate_filter["default_selection"] = _default_values("DECIMAL", "50.00")
+
         pay_model_filter = next((w for w in employee_page.get("widgets", []) if w.get("name") == "sim_pay_model"), None)
         if pay_model_filter:
+            pay_model_filter["default_selection"] = _default_values("STRING", "BASE_PLUS_SCHADS_MULTIPLIERS")
             parameters = pay_model_filter.setdefault("parameters", [])
             component_binding = {"dataset": "pay_sim_components_live", "keyword": "pay_model"}
             if component_binding not in parameters:
