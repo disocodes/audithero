@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # AuditHero — Install or Upgrade
 # MAGIC
-# MAGIC Import this notebook into the Databricks workspace where AuditHero will be installed and choose **Run all**. The notebook downloads the selected AuditHero release, installs or updates AuditHero workspace files and Jobs, prepares the AI/BI reporting assets, and runs Setup and Self Test.
+# MAGIC Import this notebook into the Databricks workspace where AuditHero is installed and choose **Run all**. The notebook downloads the selected AuditHero release, updates workspace files and Jobs, runs Setup/Self Test, then builds, publishes and verifies the fully enhanced AI/BI dashboard from that exact downloaded release.
 # MAGIC
 # MAGIC Employment Hero credentials are optional and are not required for installation or uploaded CSV/Excel audits.
 
@@ -12,9 +12,6 @@
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Installation settings
-# MAGIC
-# MAGIC Default settings target a Unity Catalog workspace with serverless Jobs enabled. `sql_warehouse_id` can remain blank; AuditHero uses an available SQL warehouse or creates **AuditHero SQL Warehouse** when permissions allow it.
-
 # COMMAND ----------
 release_ref = "main"
 catalog = "schads_payroll"
@@ -24,10 +21,10 @@ create_sql_warehouse_if_missing = True
 secret_scope = "audithero"
 monthly_cron = "0 0 9 25 * ?"
 timezone = "Australia/Perth"
-
-# Leave blank to use serverless compute for AuditHero notebook Jobs. If serverless
-# Jobs are unavailable, enter a compatible existing cluster ID.
 existing_cluster_id = ""
+
+INSTALLER_BUILD = "2026-09-08-dashboard-v3"
+DASHBOARD_NAME = "AuditHero - SCHADS Payroll Compliance"
 
 # COMMAND ----------
 import base64
@@ -49,6 +46,7 @@ accounts_email = getattr(me, "user_name", None) or getattr(me, "userName", None)
 print(f"Installing AuditHero as: {accounts_email}")
 print(f"Workspace: {w.config.host}")
 print(f"Release: {release_ref}")
+print(f"Installer build: {INSTALLER_BUILD}")
 
 # COMMAND ----------
 # MAGIC %md
@@ -71,6 +69,14 @@ print(f"Release downloaded: {repo_root.name}")
 required_release_files = [
     repo_root / "dashboard" / "payroll_compliance.spec.json",
     repo_root / "dashboard" / "lakeview_builder.py",
+    repo_root / "dashboard" / "dashboard_enhancements.py",
+    repo_root / "dashboard" / "pay_simulation_dashboard.py",
+    repo_root / "dashboard" / "live_pay_simulator.py",
+    repo_root / "dashboard" / "live_pay_simulator_finalize.py",
+    repo_root / "dashboard" / "dashboard_layout_finalize.py",
+    repo_root / "notebooks" / "00d_verify_dashboard.py",
+    repo_root / "notebooks" / "00f_setup_pay_simulation.py",
+    repo_root / "notebooks" / "00g_setup_pay_review_master.py",
     repo_root / "notebooks" / "02f_auto_intake.py",
     repo_root / "resources" / "jobs.yml",
 ]
@@ -109,6 +115,35 @@ def import_notebook(local_path: Path, workspace_path: str):
 
 def mkdirs(path: str):
     call("POST", "/api/2.0/workspace/mkdirs", {"path": path})
+
+
+def list_dashboards():
+    rows = []
+    token = None
+    while True:
+        query = {"page_size": 100}
+        if token:
+            query["page_token"] = token
+        payload = call("GET", "/api/2.0/lakeview/dashboards", query=query) or {}
+        rows.extend(payload.get("dashboards", []) or payload.get("value", []) or [])
+        token = payload.get("next_page_token") or payload.get("nextPageToken")
+        if not token:
+            return rows
+
+
+def _load_module(name: str, path: Path):
+    module_spec = importlib.util.spec_from_file_location(name, path)
+    if module_spec is None or module_spec.loader is None:
+        raise RuntimeError(f"AuditHero module could not be loaded: {path}")
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def canonical(value):
+    if isinstance(value, str):
+        value = json.loads(value)
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 mkdirs(install_root)
@@ -151,7 +186,7 @@ import_notebook(
     repo_root / "installers" / "Databricks_Uninstall_AuditHero.py",
     f"{install_root}/admin/AuditHero - Uninstall",
 )
-print("AuditHero workspace files and administration notebooks installed.")
+print("AuditHero workspace files and administration notebooks installed from the downloaded release.")
 
 # COMMAND ----------
 # MAGIC %md
@@ -200,65 +235,38 @@ print(f"AuditHero SQL warehouse: {warehouse_id}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Create or update the AI/BI dashboard
+# MAGIC ## Resolve the managed dashboard ID without downgrading an existing dashboard
 # MAGIC
-# MAGIC The installer builds the dashboard from AuditHero's version-controlled Award-oriented specification. Setup subsequently verifies the stored definition and republishes it after the governed reporting views are prepared.
+# MAGIC Existing AuditHero dashboards are deliberately left untouched here. The complete enhanced definition is published only after Setup has created the simulation/reporting views.
 # COMMAND ----------
-dashboard_name = "AuditHero - SCHADS Payroll Compliance"
-dashboard_spec_path = repo_root / "dashboard" / "payroll_compliance.spec.json"
-dashboard_builder_path = repo_root / "dashboard" / "lakeview_builder.py"
-module_spec = importlib.util.spec_from_file_location("audithero_lakeview_builder", dashboard_builder_path)
-if module_spec is None or module_spec.loader is None:
-    raise RuntimeError("AuditHero dashboard builder could not be loaded")
-dashboard_builder = importlib.util.module_from_spec(module_spec)
-module_spec.loader.exec_module(dashboard_builder)
-dashboard_spec = json.loads(dashboard_spec_path.read_text(encoding="utf-8"))
-serialized_dashboard = dashboard_builder.build_dashboard_text(dashboard_spec)
-
-
-def list_dashboards():
-    result = []
-    token = None
-    while True:
-        query = {"page_size": 100}
-        if token:
-            query["page_token"] = token
-        payload = call("GET", "/api/2.0/lakeview/dashboards", query=query) or {}
-        result.extend(payload.get("dashboards", []) or payload.get("value", []) or [])
-        token = payload.get("next_page_token") or payload.get("nextPageToken")
-        if not token:
-            return result
-
-
-existing_dashboard = next((d for d in list_dashboards() if d.get("display_name") == dashboard_name), None)
-dashboard_body = {
-    "display_name": dashboard_name,
-    "warehouse_id": warehouse_id,
-    "serialized_dashboard": serialized_dashboard,
-    "parent_path": install_root,
-}
-if existing_dashboard:
-    dashboard_body["dashboard_id"] = existing_dashboard["dashboard_id"]
-    dashboard = call(
-        "PATCH",
-        f"/api/2.0/lakeview/dashboards/{existing_dashboard['dashboard_id']}",
-        dashboard_body,
-        query={"dataset_catalog": catalog, "dataset_schema": "gold"},
-    )
+existing_matches = [d for d in list_dashboards() if d.get("display_name") == DASHBOARD_NAME]
+if existing_matches:
+    dashboard_id = existing_matches[0]["dashboard_id"]
+    print(f"Using existing AuditHero dashboard ID: {dashboard_id}")
+    if len(existing_matches) > 1:
+        print(f"Detected {len(existing_matches)} dashboards with the managed name; final verification will update all of them.")
 else:
-    dashboard = call(
+    builder = _load_module("audithero_placeholder_builder", repo_root / "dashboard" / "lakeview_builder.py")
+    base_spec = json.loads((repo_root / "dashboard" / "payroll_compliance.spec.json").read_text(encoding="utf-8"))
+    placeholder_text = builder.build_dashboard_text(base_spec)
+    created = call(
         "POST",
         "/api/2.0/lakeview/dashboards",
-        dashboard_body,
+        {
+            "display_name": DASHBOARD_NAME,
+            "warehouse_id": warehouse_id,
+            "serialized_dashboard": placeholder_text,
+            "parent_path": install_root,
+        },
         query={"dataset_catalog": catalog, "dataset_schema": "gold"},
     )
-dashboard_id = (dashboard or existing_dashboard)["dashboard_id"]
-call(
-    "POST",
-    f"/api/2.0/lakeview/dashboards/{dashboard_id}/published",
-    {"embed_credentials": False, "warehouse_id": warehouse_id},
-)
-print(f"AI/BI dashboard published: {dashboard_id}")
+    dashboard_id = created["dashboard_id"]
+    call(
+        "POST",
+        f"/api/2.0/lakeview/dashboards/{dashboard_id}/published",
+        {"embed_credentials": False, "warehouse_id": warehouse_id},
+    )
+    print(f"Created first-install placeholder dashboard: {dashboard_id}")
 
 # COMMAND ----------
 # MAGIC %md
@@ -338,8 +346,6 @@ for resource_key, raw_settings in job_defs.items():
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Run Setup and Self Test
-# MAGIC
-# MAGIC Setup prepares Unity Catalog structures, effective-dated SCHADS rules, Award scenario views, the semantic layer, dashboard and Genie. Self Test validates representative deterministic calculations inside the installed workspace.
 # COMMAND ----------
 def run_job_and_wait(job_id: int, label: str):
     run = call("POST", "/api/2.2/jobs/run-now", {"job_id": job_id})
@@ -354,13 +360,123 @@ def run_job_and_wait(job_id: int, label: str):
             if result != "SUCCESS":
                 raise RuntimeError(f"{label} failed: lifecycle={lifecycle}, result={result}, message={state.get('state_message')}")
             print(f"{label}: SUCCESS")
-            return
+            return run_id
         time.sleep(10)
     raise TimeoutError(f"Timed out waiting for {label}.")
 
 
-run_job_and_wait(installed_jobs["setup"], "AuditHero Setup")
-run_job_and_wait(installed_jobs["self_test"], "AuditHero Self Test")
+setup_run_id = run_job_and_wait(installed_jobs["setup"], "AuditHero Setup")
+self_test_run_id = run_job_and_wait(installed_jobs["self_test"], "AuditHero Self Test")
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Enforce the fully enhanced dashboard from this exact downloaded release
+# MAGIC
+# MAGIC This is intentionally duplicated with the Setup dashboard verifier. It prevents an installation from reporting success if Setup used a stale workspace copy or if multiple dashboards with the same name exist.
+# COMMAND ----------
+required_views = [
+    "v_pay_review_employee_master",
+    "v_pay_simulation_terms_latest",
+    "v_pay_simulation_employee_year",
+]
+missing_views = []
+for view in required_views:
+    try:
+        spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`{view}` LIMIT 1").collect()
+    except Exception:
+        missing_views.append(f"{catalog}.gold.{view}")
+if missing_views:
+    raise RuntimeError(
+        "AuditHero Setup completed but required pay-simulation views are missing: " + ", ".join(missing_views)
+    )
+
+builder = _load_module("audithero_release_builder", repo_root / "dashboard" / "lakeview_builder.py")
+enhancements = _load_module("audithero_release_enhancements", repo_root / "dashboard" / "dashboard_enhancements.py")
+pay_review = _load_module("audithero_release_pay_review", repo_root / "dashboard" / "pay_simulation_dashboard.py")
+simulator = _load_module("audithero_release_simulator", repo_root / "dashboard" / "live_pay_simulator.py")
+finalizer = _load_module("audithero_release_finalizer", repo_root / "dashboard" / "live_pay_simulator_finalize.py")
+
+final_spec = json.loads((repo_root / "dashboard" / "payroll_compliance.spec.json").read_text(encoding="utf-8"))
+final_spec = enhancements.enhance_spec(final_spec)
+final_spec = pay_review.enhance_spec(final_spec)
+final_spec = simulator.enhance_spec(final_spec)
+final_spec = finalizer.enhance_spec(final_spec)
+final_json = builder.build_dashboard(final_spec)
+final_text = json.dumps(final_json, separators=(",", ":"))
+
+all_layout = [item for page in final_json.get("pages", []) for item in page.get("layout", [])]
+widget_names = {item.get("widget", {}).get("name") for item in all_layout}
+required_widgets = {
+    "live_sim_title",
+    "sim_year",
+    "sim_scenario",
+    "sim_exact_rate",
+    "sim_pay_model",
+    "sim_total",
+    "sim_variance",
+    "sim_summary_heading",
+    "sim_pay_outcomes_heading",
+    "sim_shift_calculations_heading",
+    "sim_award_components_heading",
+    "sim_shift_table",
+    "sim_component_table",
+}
+missing_widgets = sorted(required_widgets - widget_names)
+if missing_widgets:
+    raise RuntimeError("Downloaded release produced an incomplete simulator dashboard: " + ", ".join(missing_widgets))
+
+employee_page = next((p for p in final_json.get("pages", []) if p.get("name") == "employee_deep_dive"), None)
+if employee_page is None:
+    raise RuntimeError("Downloaded release produced no Employee Deep Dive page")
+page_extent = max(
+    (item.get("position", {}).get("x", 0) + item.get("position", {}).get("width", 0) for item in employee_page.get("layout", [])),
+    default=0,
+)
+if page_extent < 12:
+    raise RuntimeError(f"Downloaded release dashboard is not full-width on the 12-column canvas; extent={page_extent}")
+
+matches = [d for d in list_dashboards() if d.get("display_name") == DASHBOARD_NAME]
+if not matches:
+    raise RuntimeError("AuditHero dashboard disappeared during Setup")
+if len(matches) > 1:
+    print(f"Updating all {len(matches)} dashboards named '{DASHBOARD_NAME}' to eliminate stale duplicates.")
+
+verified_dashboard_ids = []
+for item in matches:
+    target_id = item["dashboard_id"]
+    current = call("GET", f"/api/2.0/lakeview/dashboards/{target_id}") or {}
+    body = {
+        "dashboard_id": target_id,
+        "display_name": DASHBOARD_NAME,
+        "warehouse_id": warehouse_id,
+        "serialized_dashboard": final_text,
+    }
+    if current.get("etag"):
+        body["etag"] = current["etag"]
+    call(
+        "PATCH",
+        f"/api/2.0/lakeview/dashboards/{target_id}",
+        body,
+        query={"dataset_catalog": catalog, "dataset_schema": "gold"},
+    )
+    stored = call("GET", f"/api/2.0/lakeview/dashboards/{target_id}") or {}
+    if canonical(stored.get("serialized_dashboard") or "{}") != canonical(final_text):
+        raise RuntimeError(f"Databricks did not retain the enhanced dashboard definition for {target_id}")
+    call(
+        "POST",
+        f"/api/2.0/lakeview/dashboards/{target_id}/published",
+        {"embed_credentials": False, "warehouse_id": warehouse_id},
+    )
+    published = call("GET", f"/api/2.0/lakeview/dashboards/{target_id}/published") or {}
+    if str(published.get("warehouse_id") or "") != warehouse_id:
+        raise RuntimeError(f"Dashboard {target_id} published with an unexpected warehouse")
+    verified_dashboard_ids.append(target_id)
+    print(
+        f"Enhanced dashboard verified: {target_id}; installer_build={INSTALLER_BUILD}; "
+        f"revision={published.get('revision_create_time')}"
+    )
+
+dashboard_id = verified_dashboard_ids[0]
 
 # COMMAND ----------
 # MAGIC %md
@@ -368,11 +484,15 @@ run_job_and_wait(installed_jobs["self_test"], "AuditHero Self Test")
 # COMMAND ----------
 state = {
     "release_ref": release_ref,
+    "installer_build": INSTALLER_BUILD,
     "catalog": catalog,
     "install_root": install_root,
     "warehouse_id": warehouse_id,
     "warehouse_created_by_installer": warehouse_created_by_installer,
     "dashboard_id": dashboard_id,
+    "dashboard_ids_verified": verified_dashboard_ids,
+    "setup_run_id": setup_run_id,
+    "self_test_run_id": self_test_run_id,
     "jobs": installed_jobs,
     "installed_by": accounts_email,
 }
@@ -385,19 +505,17 @@ call("POST", "/api/2.0/workspace/import", {
 })
 
 print("\nAuditHero installation completed successfully.")
+print(f"Verified enhanced dashboard ID(s): {', '.join(verified_dashboard_ids)}")
+print("Expected dashboard: Employee Deep Dive begins with Roster Pay Simulator and uses the full 12-column canvas.")
 print("Primary uploaded-file workflow:")
 print("  1. Upload ordinary CSV/XLSX files to the raw import folder")
-print("  2. Run AuditHero - Auto Audit Uploaded Files")
-print("  3. Open AuditHero - SCHADS Payroll Compliance (AI/BI) or Genie")
-print("Advanced import tools remain available for unusual source layouts:")
-print("  • AuditHero - Build Source Mapping Workbook (Advanced)")
-print("  • AuditHero - Convert Mapped Files and Run Audit (Advanced)")
-print("Administration notebooks are installed under /Shared/AuditHero/admin:")
-print("  • AuditHero - Install or Upgrade")
-print("  • AuditHero - Uninstall")
+print("  2. Run AuditHero - Preview Uploaded Files")
+print("  3. Review/confirm interpretation, then run AuditHero - Audit Reviewed Uploaded Files")
+print("  4. Open AuditHero - SCHADS Payroll Compliance (AI/BI) or Genie")
+print("Advanced import tools remain available for unusual source layouts.")
 print("Employment Hero credentials are optional.")
 
-# Remove the imported bootstrap copy after successful first-time installation when
+# Remove an external bootstrap copy after successful first-time installation when
 # the managed Install or Upgrade notebook is available.
 try:
     context = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
