@@ -24,3 +24,9 @@ resources:
             base_parameters:
               catalog: "${var.catalog}"
               app_service_principal: "${resources.apps.pay_review.service_principal_client_id}"
+        - task_key: setup_pay_review_master
+          depends_on: [{task_key: setup_pay_simulation}]
+          notebook_task:
+            notebook_path: ../notebooks/00g_setup_pay_review_master.py
+            base_parameters:
+              catalog: "${var.catalog}"
