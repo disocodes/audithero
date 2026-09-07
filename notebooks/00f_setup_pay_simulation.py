@@ -4,6 +4,8 @@
 # MAGIC
 # MAGIC Creates the governed simulation and confirmation layer used when roster evidence exists before payroll evidence is available.
 # MAGIC Simulated values are never treated as confirmed actual payroll.
+# MAGIC
+# MAGIC This notebook is idempotent: when the current simulation build and all required objects already exist, it exits without rebuilding them.
 # COMMAND ----------
 from pathlib import Path
 
@@ -13,6 +15,70 @@ exec(open(str(Path.cwd() / "_common.py")).read())
 dbutils.widgets.text("catalog", "schads_payroll")
 catalog = dbutils.widgets.get("catalog").strip() or "schads_payroll"
 
+SIMULATION_BUILD = "2026-09-08-roster-simulation-v2"
+
+spark.sql(
+    f"""
+    CREATE TABLE IF NOT EXISTS `{catalog}`.`ops`.`setup_state` (
+      resource_key STRING,
+      resource_version STRING,
+      details STRING,
+      updated_at TIMESTAMP
+    ) USING DELTA
+    """
+)
+
+
+def _exists(schema: str, name: str) -> bool:
+    try:
+        spark.sql(f"DESCRIBE TABLE `{catalog}`.`{schema}`.`{name}`").limit(1).collect()
+        return True
+    except Exception:
+        return False
+
+
+def _state_version(key: str):
+    rows = spark.sql(
+        f"""
+        SELECT resource_version
+        FROM `{catalog}`.`ops`.`setup_state`
+        WHERE resource_key = '{key}'
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """
+    ).collect()
+    return rows[0]["resource_version"] if rows else None
+
+
+def _put_state(key: str, version: str) -> None:
+    spark.sql(
+        f"""
+        MERGE INTO `{catalog}`.`ops`.`setup_state` t
+        USING (
+          SELECT '{key}' AS resource_key, '{version}' AS resource_version,
+                 '{{}}' AS details, current_timestamp() AS updated_at
+        ) s
+        ON t.resource_key = s.resource_key
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+        """
+    )
+
+
+required_objects = [
+    ("silver", "pay_rate_confirmations"),
+    ("gold", "v_pay_simulation_terms_latest"),
+    ("gold", "v_pay_simulation_employee_year"),
+    ("gold", "v_pay_rate_confirmations_latest"),
+    ("gold", "v_pay_simulation_master"),
+]
+if _state_version("roster_pay_simulation") == SIMULATION_BUILD and all(
+    _exists(schema, name) for schema, name in required_objects
+):
+    print(f"SKIP   roster pay simulation already current ({SIMULATION_BUILD})")
+    dbutils.notebook.exit(f"SKIPPED:{SIMULATION_BUILD}")
+
+# Verify the upstream Award views only when a rebuild is actually required.
 required_views = [
     "v_award_scenario_detail_latest",
     "v_award_criteria_detail_latest",
@@ -24,38 +90,36 @@ for view in required_views:
 # MAGIC %md
 # MAGIC ## Manual/Payroll Rate Confirmation Evidence
 # COMMAND ----------
-spark.sql(
-    f"""
-    CREATE TABLE IF NOT EXISTS `{catalog}`.`silver`.`pay_rate_confirmations` (
-      confirmation_id STRING,
-      employee_id STRING,
-      calendar_year INT,
-      effective_from DATE,
-      effective_to DATE,
-      confirmed_hourly_rate DOUBLE,
-      pay_model STRING,
-      selected_scenario_id STRING,
-      source_type STRING,
-      source_reference STRING,
-      notes STRING,
-      confirmed_by STRING,
-      confirmed_at TIMESTAMP,
-      status STRING,
-      supersedes_confirmation_id STRING
-    ) USING DELTA
-    TBLPROPERTIES (delta.enableChangeDataFeed = true)
-    """
-)
+if _exists("silver", "pay_rate_confirmations"):
+    print(f"SKIP   table exists: {catalog}.silver.pay_rate_confirmations")
+else:
+    spark.sql(
+        f"""
+        CREATE TABLE `{catalog}`.`silver`.`pay_rate_confirmations` (
+          confirmation_id STRING,
+          employee_id STRING,
+          calendar_year INT,
+          effective_from DATE,
+          effective_to DATE,
+          confirmed_hourly_rate DOUBLE,
+          pay_model STRING,
+          selected_scenario_id STRING,
+          source_type STRING,
+          source_reference STRING,
+          notes STRING,
+          confirmed_by STRING,
+          confirmed_at TIMESTAMP,
+          status STRING,
+          supersedes_confirmation_id STRING
+        ) USING DELTA
+        TBLPROPERTIES (delta.enableChangeDataFeed = true)
+        """
+    )
+    print(f"CREATE table: {catalog}.silver.pay_rate_confirmations")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Shift-level Simulation Terms
-# MAGIC
-# MAGIC The Award engine remains authoritative. This view factorises each already-calculated scenario shift into:
-# MAGIC
-# MAGIC `rate-sensitive factor × hypothetical base rate + fixed Award-linked amount`
-# MAGIC
-# MAGIC This makes continuous what-if rates effectively instant without storing thousands of duplicate rate rows.
 # COMMAND ----------
 spark.sql(
     f"""
@@ -124,6 +188,7 @@ spark.sql(
      AND CAST(s.timesheet_id AS STRING) = f.timesheet_id
     """
 )
+print(f"REFRESH view: {catalog}.gold.v_pay_simulation_terms_latest")
 
 # COMMAND ----------
 # MAGIC %md
@@ -182,10 +247,11 @@ spark.sql(
       scenario_level, scenario_pay_point, scenario_employment_type, scenario_work_group
     """
 )
+print(f"REFRESH view: {catalog}.gold.v_pay_simulation_employee_year")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Latest Confirmed Rate and Master Review View
+# MAGIC ## Latest Confirmed Rate and Master Simulation View
 # COMMAND ----------
 spark.sql(
     f"""
@@ -205,6 +271,7 @@ spark.sql(
     WHERE rn = 1
     """
 )
+print(f"REFRESH view: {catalog}.gold.v_pay_rate_confirmations_latest")
 
 spark.sql(
     f"""
@@ -265,8 +332,10 @@ spark.sql(
      AND e.calendar_year = c.calendar_year
     """
 )
+print(f"REFRESH view: {catalog}.gold.v_pay_simulation_master")
 
-print(f"Created roster simulation views in {catalog}.gold")
-print(f"Created confirmation evidence table: {catalog}.silver.pay_rate_confirmations")
+_put_state("roster_pay_simulation", SIMULATION_BUILD)
+
+print(f"Roster simulation setup complete: {SIMULATION_BUILD}")
 print("Simulation values are hypothetical until a rate is confirmed or actual payroll evidence is loaded.")
 print("Use 'AuditHero - Confirm Employee Pay Rate' to save reviewed rate evidence; no Databricks App is required.")
