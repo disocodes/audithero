@@ -1,16 +1,17 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # AuditHero — Setup
+# MAGIC # AuditHero — Core Environment Setup
 # MAGIC
-# MAGIC **Purpose:** idempotently ensure the Databricks environment required by AuditHero.
+# MAGIC **Purpose:** idempotently ensure the Databricks data environment required by AuditHero.
 # MAGIC
-# MAGIC Setup now follows an **ensure / migrate / refresh-if-changed** model:
+# MAGIC This core Setup task follows an **ensure / migrate / refresh-if-changed** model:
 # MAGIC - persistent catalogs, schemas, volumes and Delta tables are created only when missing;
 # MAGIC - existing tables are never dropped or replaced by Setup;
 # MAGIC - schema migrations add only missing columns;
 # MAGIC - SCHADS reference tables reload only when the packaged rule library changed;
-# MAGIC - reporting / metric views refresh only when their defining source changed;
-# MAGIC - Genie is delegated to an idempotent create-or-update notebook.
+# MAGIC - reporting / metric views refresh only when their defining source changed.
+# MAGIC
+# MAGIC Genie is intentionally configured by a **separate Setup job task**. A Genie/API problem must not be hidden inside this core task as a generic nested `NotebookRun` / Py4J failure.
 # MAGIC
 # MAGIC **Data access:** this notebook does not read employee payroll data or calculate payroll entitlements.
 # COMMAND ----------
@@ -22,20 +23,18 @@ import json
 
 exec(open(str(Path.cwd() / "_common.py")).read())
 
-from databricks.sdk import WorkspaceClient
 from schads_audit.rules import RuleLibrary
 from schads_audit.databricks_io import create_catalog_objects, overwrite_rule_tables, create_views, create_metric_views
 
 dbutils.widgets.text("catalog", "schads_payroll")
 dbutils.widgets.text("sql_warehouse_id", "")
 catalog = dbutils.widgets.get("catalog").strip() or "schads_payroll"
-configured_warehouse_id = dbutils.widgets.get("sql_warehouse_id").strip()
 
 raw_import_root = f"/Volumes/{catalog}/bronze/landing/import/raw"
 canonical_input_root = f"/Volumes/{catalog}/bronze/landing/input"
 auto_input_root = f"/Volumes/{catalog}/bronze/landing/auto_input"
 
-SETUP_BUILD = "2026-09-08-idempotent-v1"
+SETUP_BUILD = "2026-09-08-idempotent-v2"
 
 # COMMAND ----------
 # MAGIC %md
@@ -358,34 +357,14 @@ else:
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## 4. Ensure the managed Genie space
+# MAGIC ## 4. Record core Setup completion
+# MAGIC Genie, investigation, simulation, pay-review and dashboard validation are separate Setup job tasks so each failure is reported by its own task key.
 # COMMAND ----------
-warehouse_id = configured_warehouse_id
-if not warehouse_id:
-    w = WorkspaceClient()
-    payload = w.api_client.do("GET", "/api/2.0/sql/warehouses") or {}
-    warehouses = payload.get("warehouses", []) or []
-    preferred = next((x for x in warehouses if x.get("name") == "AuditHero SQL Warehouse"), None)
-    selected = preferred or next((x for x in warehouses if x.get("state") == "RUNNING"), None) or (warehouses[0] if warehouses else None)
-    if selected is None:
-        raise RuntimeError("AuditHero Setup requires a SQL warehouse for AI/BI and Genie.")
-    warehouse_id = selected["id"]
+_state_put("setup_build", SETUP_BUILD, {"core_setup": "complete"})
 
-genie_space_id = dbutils.notebook.run(
-    "./00c_setup_genie",
-    600,
-    {
-        "catalog": catalog,
-        "sql_warehouse_id": warehouse_id,
-        "parent_path": "/Workspace/Shared/AuditHero",
-    },
-)
-
-_state_put("setup_build", SETUP_BUILD, {"genie_space_id": genie_space_id})
-
-print("AuditHero Databricks setup complete")
+print("AuditHero core Databricks setup complete")
 print(f"Setup build:               {SETUP_BUILD}")
 print(f"Raw upload folder:         {raw_import_root}")
 print(f"Automatic audit workspace: {auto_input_root}")
-print(f"Genie space ID:            {genie_space_id}")
 print("Existing persistent resources were skipped; only missing/migrated/version-changed resources were touched.")
+print("Next Setup job tasks configure Genie and dashboard/reporting extensions independently.")
