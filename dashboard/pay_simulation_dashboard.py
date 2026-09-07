@@ -201,7 +201,7 @@ def enhance_spec(spec: dict) -> dict:
                         {"field": "confirmed_rate_variance", "title": "Variance", "kind": "number", "number_format": "$0,0.00"},
                         {"field": "recommendation", "title": "Recommendation"},
                     ],
-                    description="Open the audithero-pay-review Databricks App to move the hourly-rate slider, save evidence, change the selected scenario or export the master workbook.",
+                    description="The dashboard is the roster-pay analysis surface. Use 'AuditHero - Confirm Employee Pay Rate' only when you want to persist reviewed rate evidence.",
                 ),
             ]
         )
@@ -212,7 +212,7 @@ def enhance_spec(spec: dict) -> dict:
             [
                 _text(
                     "emp_pay_review_title",
-                    "### Roster Pay Simulation / Saved Rate Evidence\nUse the AuditHero Pay Review app for the live slider and Save button. This section reflects the latest saved employee/year confirmation and the selected SCHADS scenario.",
+                    "### Roster Pay Simulation / Saved Rate Evidence\nThis section reflects the latest saved employee/year rate evidence and selected SCHADS scenario. Use 'AuditHero - Confirm Employee Pay Rate' when a reviewed rate needs to be persisted; no separate Databricks App is required.",
                     [0, 30, 6, 2],
                 ),
                 _filter("emp_pay_review_year", "Pay Review Year", [0, 32, 2, 1], dataset="pay_review", field="calendar_year", selection="single"),
