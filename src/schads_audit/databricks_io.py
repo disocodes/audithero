@@ -1,18 +1,6 @@
-import json
-from datetime import date, datetime
-
 import pandas as pd
 
-
-def _json_default(value):
-    """Serialize supported temporal values while failing loudly for unknown objects."""
-    if isinstance(value, (date, datetime)):
-        return value.isoformat()
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
-
-
-def _json_dumps(value):
-    return json.dumps(value, default=_json_default)
+from .json_utils import json_dumps_public
 
 
 def create_catalog_objects(spark, catalog):
@@ -108,14 +96,14 @@ def overwrite_rule_tables(spark, lib, catalog):
     for pack in lib.rate_packs:
         for row in pack['rates']:
             x=dict(row)
-            x.update({'award_code':pack['award_code'],'rate_pack_id':pack['rate_pack_id'],'classification_family':pack.get('classification_family'),'operative_date':pack['operative_date'],'application_basis':pack['application_basis'],'source_json':_json_dumps(pack.get('source',{}))})
+            x.update({'award_code':pack['award_code'],'rate_pack_id':pack['rate_pack_id'],'classification_family':pack.get('classification_family'),'operative_date':pack['operative_date'],'application_basis':pack['application_basis'],'source_json':json_dumps_public(pack.get('source',{}))})
             rates.append(x)
-    conditions=[{'award_code':p['award_code'],'condition_pack_id':p['condition_pack_id'],'operative_date':p['operative_date'],'condition_json':_json_dumps(p)} for p in lib.condition_packs]
+    conditions=[{'award_code':p['award_code'],'condition_pack_id':p['condition_pack_id'],'operative_date':p['operative_date'],'condition_json':json_dumps_public(p)} for p in lib.condition_packs]
     allowances=[]
     for pack in lib.allowance_packs:
         for row in pack['allowances']:
             x=dict(row)
-            x.update({'award_code':pack['award_code'],'allowance_pack_id':pack['allowance_pack_id'],'operative_date':pack['operative_date'],'source_json':_json_dumps(pack.get('source',{}))})
+            x.update({'award_code':pack['award_code'],'allowance_pack_id':pack['allowance_pack_id'],'operative_date':pack['operative_date'],'source_json':json_dumps_public(pack.get('source',{}))})
             allowances.append(x)
     write_df(spark,pd.DataFrame(rates),f'{catalog}.ref.rates','overwrite')
     write_df(spark,pd.DataFrame(conditions),f'{catalog}.ref.conditions','overwrite')
