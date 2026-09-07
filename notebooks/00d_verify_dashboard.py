@@ -1,18 +1,22 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # AuditHero — Verify AI/BI Dashboard
+# MAGIC # AuditHero — Validate AI/BI Dashboard
 # MAGIC
-# MAGIC Build the complete AuditHero dashboard, including roster-pay simulation, from the version-controlled dashboard layers and ensure every AuditHero dashboard with the managed name is updated and published.
-# COMMAND ----------
-# MAGIC %pip install -q "databricks-sdk>=0.20"
+# MAGIC **Purpose:** validate that the complete AuditHero dashboard can be built from the
+# MAGIC installed release and that all governed reporting/simulation views required by
+# MAGIC the dashboard exist.
+# MAGIC
+# MAGIC This Setup task deliberately **does not publish or update Lakeview dashboards**.
+# MAGIC The interactive **AuditHero - Install or Upgrade** notebook is the single dashboard
+# MAGIC publisher. Keeping publication in one place avoids job-runtime permission/auth
+# MAGIC differences and prevents Setup from hiding a useful Lakeview API error behind a
+# MAGIC generic Workload failed message.
 # COMMAND ----------
 from pathlib import Path
 import importlib.util
 import json
 
 exec(open(str(Path.cwd() / "_common.py")).read())
-
-from databricks.sdk import WorkspaceClient
 
 # COMMAND ----------
 dbutils.widgets.text("catalog", "schads_payroll")
@@ -21,10 +25,9 @@ dbutils.widgets.text("sql_warehouse_id", "")
 catalog = dbutils.widgets.get("catalog").strip() or "schads_payroll"
 warehouse_id = dbutils.widgets.get("sql_warehouse_id").strip()
 if not warehouse_id:
-    raise ValueError("sql_warehouse_id is required to verify and publish the AuditHero dashboard")
+    raise ValueError("sql_warehouse_id is required to validate the AuditHero dashboard")
 
-DASHBOARD_NAME = "AuditHero - SCHADS Payroll Compliance"
-DASHBOARD_BUILD = "2026-09-08-simulator-v3"
+DASHBOARD_BUILD = "2026-09-08-simulator-v4"
 
 paths = {
     "spec": ROOT / "dashboard" / "payroll_compliance.spec.json",
@@ -33,6 +36,7 @@ paths = {
     "pay_review": ROOT / "dashboard" / "pay_simulation_dashboard.py",
     "simulator": ROOT / "dashboard" / "live_pay_simulator.py",
     "finalizer": ROOT / "dashboard" / "live_pay_simulator_finalize.py",
+    "layout": ROOT / "dashboard" / "dashboard_layout_finalize.py",
 }
 missing_files = [str(path) for path in paths.values() if not path.exists()]
 if missing_files:
@@ -48,8 +52,8 @@ def _load_module(name: str, path: Path):
     return module
 
 
-# Setup creates these immediately before this notebook. Missing simulation views are
-# therefore an installation error, not a reason to silently publish the old dashboard.
+# These are created by Setup immediately before this task. There is no legacy/core
+# fallback in this release: if a simulation view is missing, fail with its name.
 required_views = [
     "v_audit_investigation_latest",
     "v_award_scenario_detail_latest",
@@ -68,11 +72,12 @@ for view in required_views:
     full_name = f"`{catalog}`.`gold`.`{view}`"
     try:
         spark.sql(f"SELECT 1 FROM {full_name} LIMIT 1").collect()
-    except Exception:
+    except Exception as exc:
+        print(f"Required dashboard view failed: {catalog}.gold.{view}: {type(exc).__name__}: {exc}")
         missing_views.append(f"{catalog}.gold.{view}")
 if missing_views:
     raise RuntimeError(
-        "AuditHero dashboard cannot be published because Setup did not create required reporting/simulation views: "
+        "AuditHero dashboard validation cannot continue because Setup did not create required view(s): "
         + ", ".join(missing_views)
     )
 
@@ -89,10 +94,11 @@ spec = simulator.enhance_spec(spec)
 spec = finalizer.enhance_spec(spec)
 
 desired_json = builder.build_dashboard(spec)
-desired_text = json.dumps(desired_json, separators=(",", ":"))
 
-if not desired_json.get("datasets") or not desired_json.get("pages"):
-    raise ValueError("AuditHero dashboard definition is incomplete")
+if not desired_json.get("datasets"):
+    raise ValueError("AuditHero dashboard definition contains no datasets")
+if not desired_json.get("pages"):
+    raise ValueError("AuditHero dashboard definition contains no pages")
 if len(desired_json["pages"]) > 15:
     raise ValueError(f"AuditHero dashboard exceeds Databricks page limit: {len(desired_json['pages'])}")
 
@@ -102,7 +108,9 @@ for dataset in desired_json["datasets"]:
     for parameter in dataset.get("parameters", []) or []:
         for key in ("keyword", "displayName", "dataType", "defaultSelection"):
             if key not in parameter or parameter.get(key) in (None, ""):
-                raise ValueError(f"Dashboard parameter {dataset.get('name')}.{parameter.get('keyword')} is missing {key}")
+                raise ValueError(
+                    f"Dashboard parameter {dataset.get('name')}.{parameter.get('keyword')} is missing {key}"
+                )
 
 all_layout = [item for page in desired_json["pages"] for item in page.get("layout", [])]
 widget_names = {item.get("widget", {}).get("name") for item in all_layout}
@@ -129,105 +137,27 @@ if missing_widgets:
 employee_page = next((p for p in desired_json["pages"] if p.get("name") == "employee_deep_dive"), None)
 if employee_page is None:
     raise RuntimeError("Generated AuditHero dashboard has no Employee Deep Dive page")
+
+live_title = next(
+    (item for item in employee_page.get("layout", []) if item.get("widget", {}).get("name") == "live_sim_title"),
+    None,
+)
+if live_title is None or live_title.get("position", {}).get("y") != 0:
+    raise RuntimeError("Roster Pay Simulator is not positioned at the top of Employee Deep Dive")
+
 employee_extent = max(
-    (item.get("position", {}).get("x", 0) + item.get("position", {}).get("width", 0) for item in employee_page.get("layout", [])),
+    (
+        item.get("position", {}).get("x", 0) + item.get("position", {}).get("width", 0)
+        for item in employee_page.get("layout", [])
+    ),
     default=0,
 )
 if employee_extent < 12:
-    raise RuntimeError(f"Employee Deep Dive does not fill the current 12-column Databricks canvas; extent={employee_extent}")
-
-
-def canonical(value):
-    if isinstance(value, str):
-        value = json.loads(value)
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
-w = WorkspaceClient()
-api = w.api_client
-
-
-def call(method: str, path: str, body=None, query=None):
-    return api.do(method, path, body=body, query=query)
-
-
-def list_dashboards():
-    rows = []
-    token = None
-    while True:
-        query = {"page_size": 100}
-        if token:
-            query["page_token"] = token
-        payload = call("GET", "/api/2.0/lakeview/dashboards", query=query) or {}
-        rows.extend(payload.get("dashboards", []) or payload.get("value", []) or [])
-        token = payload.get("next_page_token") or payload.get("nextPageToken")
-        if not token:
-            return rows
-
-
-matches = [d for d in list_dashboards() if d.get("display_name") == DASHBOARD_NAME]
-if not matches:
-    api_parent = str(ROOT)
-    if api_parent.startswith("/Workspace"):
-        api_parent = api_parent[len("/Workspace"):]
-    created = call(
-        "POST",
-        "/api/2.0/lakeview/dashboards",
-        {
-            "display_name": DASHBOARD_NAME,
-            "warehouse_id": warehouse_id,
-            "serialized_dashboard": desired_text,
-            "parent_path": api_parent,
-        },
-        query={"dataset_catalog": catalog, "dataset_schema": "gold"},
-    )
-    matches = [created]
-    print(f"Created AuditHero dashboard: {created['dashboard_id']}")
-
-if len(matches) > 1:
-    print(
-        f"Detected {len(matches)} dashboards named '{DASHBOARD_NAME}'. "
-        "AuditHero will update and publish every matching dashboard so no stale duplicate remains visible."
+    raise RuntimeError(
+        f"Employee Deep Dive does not fill the current 12-column Databricks canvas; extent={employee_extent}"
     )
 
-verified_ids = []
-for item in matches:
-    dashboard_id = item["dashboard_id"]
-    current = call("GET", f"/api/2.0/lakeview/dashboards/{dashboard_id}") or {}
-    body = {
-        "dashboard_id": dashboard_id,
-        "display_name": DASHBOARD_NAME,
-        "warehouse_id": warehouse_id,
-        "serialized_dashboard": desired_text,
-    }
-    if current.get("etag"):
-        body["etag"] = current["etag"]
-    call(
-        "PATCH",
-        f"/api/2.0/lakeview/dashboards/{dashboard_id}",
-        body,
-        query={"dataset_catalog": catalog, "dataset_schema": "gold"},
-    )
-
-    stored = call("GET", f"/api/2.0/lakeview/dashboards/{dashboard_id}") or {}
-    if canonical(stored.get("serialized_dashboard") or "{}") != canonical(desired_text):
-        raise RuntimeError(f"Databricks did not retain enhanced dashboard definition for {dashboard_id}")
-
-    call(
-        "POST",
-        f"/api/2.0/lakeview/dashboards/{dashboard_id}/published",
-        {"embed_credentials": False, "warehouse_id": warehouse_id},
-    )
-    published = call("GET", f"/api/2.0/lakeview/dashboards/{dashboard_id}/published") or {}
-    if str(published.get("warehouse_id") or "") != warehouse_id:
-        raise RuntimeError(f"AuditHero dashboard {dashboard_id} was published with an unexpected SQL warehouse")
-
-    verified_ids.append(dashboard_id)
-    print(
-        f"Verified enhanced dashboard {dashboard_id}; build={DASHBOARD_BUILD}; "
-        f"revision={published.get('revision_create_time')}"
-    )
-
-print(f"AuditHero dashboard verification complete. Enhanced dashboard(s): {', '.join(verified_ids)}")
-print("Employee Deep Dive contains Roster Pay Simulator at the top and spans the full 12-column canvas.")
-print("The simulator is mandatory in this release; Setup will not silently publish the legacy/core dashboard.")
+print(f"AuditHero dashboard definition validated successfully; build={DASHBOARD_BUILD}")
+print(f"Datasets: {len(desired_json['datasets'])}; pages: {len(desired_json['pages'])}; widgets: {len(all_layout)}")
+print("Roster Pay Simulator is at the top of Employee Deep Dive and the page spans 12 columns.")
+print("Lakeview publication is intentionally deferred to AuditHero - Install or Upgrade.")
