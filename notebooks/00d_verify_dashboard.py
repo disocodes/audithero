@@ -2,9 +2,9 @@
 # MAGIC %md
 # MAGIC # AuditHero — Verify AI/BI Dashboard
 # MAGIC
-# MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled Award-oriented specification, apply the AuditHero dashboard enhancement layer, then ensure the stored and published Databricks dashboard matches that definition.
+# MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled Award-oriented specification, apply the AuditHero dashboard enhancement layers, then ensure the stored and published Databricks dashboard matches that definition.
 # MAGIC
-# MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created.
+# MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created. If the optional roster-pay simulation layer has been set up, its employee/year confirmation status is also incorporated without adding another dashboard page.
 # COMMAND ----------
 # MAGIC %pip install -q "databricks-sdk>=0.20"
 # COMMAND ----------
@@ -29,6 +29,7 @@ DASHBOARD_NAME = "AuditHero - SCHADS Payroll Compliance"
 SPEC_FILE = ROOT / "dashboard" / "payroll_compliance.spec.json"
 BUILDER_FILE = ROOT / "dashboard" / "lakeview_builder.py"
 ENHANCEMENTS_FILE = ROOT / "dashboard" / "dashboard_enhancements.py"
+PAY_SIMULATION_DASHBOARD_FILE = ROOT / "dashboard" / "pay_simulation_dashboard.py"
 
 for required in (SPEC_FILE, BUILDER_FILE, ENHANCEMENTS_FILE):
     if not required.exists():
@@ -49,6 +50,18 @@ enhancements = _load_module("audithero_dashboard_enhancements", ENHANCEMENTS_FIL
 
 base_dashboard_spec = json.loads(SPEC_FILE.read_text(encoding="utf-8"))
 dashboard_spec = enhancements.enhance_spec(base_dashboard_spec)
+
+pay_review_view = f"{catalog}.gold.v_pay_review_employee_master"
+pay_review_enabled = spark.catalog.tableExists(pay_review_view)
+if pay_review_enabled:
+    if not PAY_SIMULATION_DASHBOARD_FILE.exists():
+        raise FileNotFoundError(f"AuditHero pay simulation dashboard component not found: {PAY_SIMULATION_DASHBOARD_FILE}")
+    pay_simulation_dashboard = _load_module("audithero_pay_simulation_dashboard", PAY_SIMULATION_DASHBOARD_FILE)
+    dashboard_spec = pay_simulation_dashboard.enhance_spec(dashboard_spec)
+    print("Roster Pay Simulation & Confirmation status added to Audit Overview and Employee Deep Dive.")
+else:
+    print("Roster Pay Simulation is not set up yet; publishing the core AuditHero dashboard without pay-review widgets.")
+
 desired_json = builder.build_dashboard(dashboard_spec)
 desired_text = json.dumps(desired_json, separators=(",", ":"))
 
@@ -120,6 +133,8 @@ required_views = [
     "v_readiness_findings",
     "v_rule_coverage",
 ]
+if pay_review_enabled:
+    required_views.append("v_pay_review_employee_master")
 for view in required_views:
     spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`{view}` LIMIT 1")
 
@@ -219,3 +234,5 @@ print(
     "Dashboard includes cross-dataset global filters plus Audit Overview, Employee Deep Dive, "
     "Audit Components, specialist SCHADS pages, definitive reconciliation, evidence, data quality and rule coverage."
 )
+if pay_review_enabled:
+    print("Roster pay-rate confirmation status is visible in Audit Overview and Employee Deep Dive; use audithero-pay-review for live rate simulation and write-back.")
