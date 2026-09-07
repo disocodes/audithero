@@ -56,11 +56,6 @@ def _text(widget: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def _filter_targets(widget: dict[str, Any]) -> list[dict[str, str]]:
-    """Return one field binding per dataset.
-
-    Databricks field filters can target one field in each of multiple datasets.
-    Legacy AuditHero specs may still use the single ``dataset``/``field`` form.
-    """
     if widget.get("fields"):
         targets = []
         seen = set()
@@ -78,31 +73,63 @@ def _filter_targets(widget: dict[str, Any]) -> list[dict[str, str]]:
                     "display_name": str(item.get("display_name") or widget.get("title") or field),
                 }
             )
-        if not targets:
-            raise ValueError("Filter fields list must contain at least one dataset/field binding")
         return targets
+    if widget.get("dataset") and widget.get("field"):
+        return [{
+            "dataset": str(widget["dataset"]),
+            "field": str(widget["field"]),
+            "display_name": str(widget.get("title") or widget["field"]),
+        }]
+    return []
 
-    return [{
-        "dataset": str(widget["dataset"]),
-        "field": str(widget["field"]),
-        "display_name": str(widget.get("title") or widget["field"]),
-    }]
+
+def _parameter_targets(widget: dict[str, Any]) -> list[dict[str, str]]:
+    targets = []
+    seen = set()
+    for item in widget.get("parameters", []) or []:
+        dataset = str(item["dataset"])
+        keyword = str(item.get("keyword") or item.get("parameter"))
+        key = (dataset, keyword)
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append(
+            {
+                "dataset": dataset,
+                "keyword": keyword,
+                "display_name": str(item.get("display_name") or widget.get("title") or keyword),
+            }
+        )
+    return targets
 
 
 def _filter(widget: dict[str, Any], index: int) -> dict[str, Any]:
-    targets = _filter_targets(widget)
+    field_targets = _filter_targets(widget)
+    parameter_targets = _parameter_targets(widget)
+    if not field_targets and not parameter_targets:
+        raise ValueError("A filter must bind at least one dataset field or parameter")
+
+    filter_type = widget.get("filter_type", "categorical")
     queries = []
     encodings = []
-    for target_index, target in enumerate(targets):
+
+    for target_index, target in enumerate(field_targets):
         dataset = target["dataset"]
         field = target["field"]
-        query_name = f"filter_{_slug(widget.get('name', field))}_{index}_{target_index}_q"
+        query_name = f"filter_{_slug(widget.get('name', field))}_{index}_f{target_index}_q"
+        if filter_type == "range-slider":
+            fields = [
+                {"name": f"min({field})", "expression": f"MIN(`{field}`)"},
+                {"name": f"max({field})", "expression": f"MAX(`{field}`)"},
+            ]
+        else:
+            fields = [{"name": field, "expression": f"`{field}`"}]
         queries.append(
             {
                 "name": query_name,
                 "query": {
                     "datasetName": dataset,
-                    "fields": [{"name": field, "expression": f"`{field}`"}],
+                    "fields": fields,
                     "disaggregated": False,
                 },
             }
@@ -115,21 +142,43 @@ def _filter(widget: dict[str, Any], index: int) -> dict[str, Any]:
             }
         )
 
-    filter_type = widget.get("filter_type", "categorical")
+    for target_index, target in enumerate(parameter_targets):
+        dataset = target["dataset"]
+        keyword = target["keyword"]
+        query_name = f"filter_{_slug(widget.get('name', keyword))}_{index}_p{target_index}_q"
+        queries.append(
+            {
+                "name": query_name,
+                "query": {
+                    "datasetName": dataset,
+                    "parameters": [{"name": keyword, "keyword": keyword}],
+                    "disaggregated": False,
+                },
+            }
+        )
+        encodings.append(
+            {
+                "parameterName": keyword,
+                "displayName": target["display_name"],
+                "queryName": query_name,
+            }
+        )
+
     if filter_type == "date-range":
         widget_type = "filter-date-range-picker"
+    elif filter_type == "range-slider":
+        widget_type = "range-slider"
     else:
         multiple = widget.get("selection", "multi") == "multi"
         widget_type = "filter-multi-select" if multiple else "filter-single-select"
 
-    title = widget.get("title", targets[0]["field"])
-    spec = {
+    spec: dict[str, Any] = {
         "version": 2,
         "widgetType": widget_type,
         "encodings": {"fields": encodings},
         "frame": {
             "showTitle": True,
-            "title": title,
+            "title": widget.get("title", (field_targets or parameter_targets)[0].get("field") or (field_targets or parameter_targets)[0].get("keyword")),
             **(
                 {"showDescription": True, "description": widget["description"]}
                 if widget.get("description")
@@ -137,6 +186,9 @@ def _filter(widget: dict[str, Any], index: int) -> dict[str, Any]:
             ),
         },
     }
+    if widget.get("default_selection") is not None:
+        spec["selection"] = {"defaultSelection": widget["default_selection"]}
+
     return {
         "widget": {
             "name": widget.get("name", f"filter_{index}"),
@@ -325,13 +377,14 @@ def build_dashboard(spec: dict[str, Any]) -> dict[str, Any]:
     datasets = []
     for dataset in spec["datasets"]:
         query = re.sub(r"\s+", " ", dataset["query"]).strip()
-        datasets.append(
-            {
-                "name": dataset["name"],
-                "displayName": dataset.get("display_name", dataset["name"]),
-                "queryLines": [query],
-            }
-        )
+        item: dict[str, Any] = {
+            "name": dataset["name"],
+            "displayName": dataset.get("display_name", dataset["name"]),
+            "queryLines": [query],
+        }
+        if dataset.get("parameters"):
+            item["parameters"] = dataset["parameters"]
+        datasets.append(item)
 
     pages = []
     for page in spec["pages"]:
