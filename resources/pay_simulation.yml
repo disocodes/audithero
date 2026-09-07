@@ -30,3 +30,10 @@ resources:
             notebook_path: ../notebooks/00g_setup_pay_review_master.py
             base_parameters:
               catalog: "${var.catalog}"
+        - task_key: republish_dashboard
+          depends_on: [{task_key: setup_pay_review_master}]
+          notebook_task:
+            notebook_path: ../notebooks/00d_verify_dashboard.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              sql_warehouse_id: "${var.sql_warehouse_id}"
