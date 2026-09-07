@@ -1,0 +1,26 @@
+resources:
+  apps:
+    pay_review:
+      name: "audithero-pay-review"
+      description: "AuditHero roster pay simulator, manual rate confirmation and employee master review"
+      source_code_path: ../apps/pay_review
+      compute_size: MEDIUM
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.sql_warehouse_id}
+            permission: CAN_USE
+      permissions:
+        - level: CAN_USE
+          group_name: users
+
+  jobs:
+    pay_simulation_setup:
+      name: "AuditHero - Setup Pay Simulation & Review"
+      tasks:
+        - task_key: setup_pay_simulation
+          notebook_task:
+            notebook_path: ../notebooks/00f_setup_pay_simulation.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              app_service_principal: "${resources.apps.pay_review.service_principal_client_id}"
