@@ -9,21 +9,34 @@ resources:
             base_parameters:
               catalog: "${var.catalog}"
               sql_warehouse_id: "${var.sql_warehouse_id}"
+
+        - task_key: setup_genie
+          depends_on: [{task_key: setup}]
+          notebook_task:
+            notebook_path: ../notebooks/00c_setup_genie.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              sql_warehouse_id: "${var.sql_warehouse_id}"
+              parent_path: "/Workspace/Shared/AuditHero"
+
         - task_key: setup_investigation_view
           depends_on: [{task_key: setup}]
           notebook_task:
             notebook_path: ../notebooks/00e_setup_investigation_view.py
             base_parameters: {catalog: "${var.catalog}"}
+
         - task_key: setup_pay_simulation
           depends_on: [{task_key: setup_investigation_view}]
           notebook_task:
             notebook_path: ../notebooks/00f_setup_pay_simulation.py
             base_parameters: {catalog: "${var.catalog}"}
+
         - task_key: setup_pay_review_master
           depends_on: [{task_key: setup_pay_simulation}]
           notebook_task:
             notebook_path: ../notebooks/00g_setup_pay_review_master.py
             base_parameters: {catalog: "${var.catalog}"}
+
         - task_key: verify_dashboard
           depends_on: [{task_key: setup_pay_review_master}]
           notebook_task:
