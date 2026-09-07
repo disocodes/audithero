@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC **Purpose:** build the managed AuditHero AI/BI dashboard from its version-controlled Award-oriented specification, apply the AuditHero dashboard enhancement layers, then ensure the stored and published Databricks dashboard matches that definition.
 # MAGIC
-# MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created. If the roster-pay simulation layer has been set up, its employee/year confirmation status is also incorporated without adding another dashboard page.
+# MAGIC This notebook is run by **AuditHero - Setup** after the governed investigation and Award reporting views have been created. If the roster-pay simulation layer has been set up, its employee/year confirmation status and connected live what-if simulator are incorporated without adding another dashboard page.
 # COMMAND ----------
 # MAGIC %pip install -q "databricks-sdk>=0.20"
 # COMMAND ----------
@@ -30,6 +30,8 @@ SPEC_FILE = ROOT / "dashboard" / "payroll_compliance.spec.json"
 BUILDER_FILE = ROOT / "dashboard" / "lakeview_builder.py"
 ENHANCEMENTS_FILE = ROOT / "dashboard" / "dashboard_enhancements.py"
 PAY_SIMULATION_DASHBOARD_FILE = ROOT / "dashboard" / "pay_simulation_dashboard.py"
+LIVE_PAY_SIMULATOR_FILE = ROOT / "dashboard" / "live_pay_simulator.py"
+LIVE_PAY_SIMULATOR_FINALIZE_FILE = ROOT / "dashboard" / "live_pay_simulator_finalize.py"
 
 for required in (SPEC_FILE, BUILDER_FILE, ENHANCEMENTS_FILE):
     if not required.exists():
@@ -54,11 +56,28 @@ dashboard_spec = enhancements.enhance_spec(base_dashboard_spec)
 pay_review_view = f"{catalog}.gold.v_pay_review_employee_master"
 pay_review_enabled = spark.catalog.tableExists(pay_review_view)
 if pay_review_enabled:
-    if not PAY_SIMULATION_DASHBOARD_FILE.exists():
-        raise FileNotFoundError(f"AuditHero pay simulation dashboard component not found: {PAY_SIMULATION_DASHBOARD_FILE}")
+    for required in (
+        PAY_SIMULATION_DASHBOARD_FILE,
+        LIVE_PAY_SIMULATOR_FILE,
+        LIVE_PAY_SIMULATOR_FINALIZE_FILE,
+    ):
+        if not required.exists():
+            raise FileNotFoundError(f"AuditHero pay simulation dashboard component not found: {required}")
+
     pay_simulation_dashboard = _load_module("audithero_pay_simulation_dashboard", PAY_SIMULATION_DASHBOARD_FILE)
+    live_pay_simulator = _load_module("audithero_live_pay_simulator", LIVE_PAY_SIMULATOR_FILE)
+    live_pay_simulator_finalize = _load_module(
+        "audithero_live_pay_simulator_finalize",
+        LIVE_PAY_SIMULATOR_FINALIZE_FILE,
+    )
+
     dashboard_spec = pay_simulation_dashboard.enhance_spec(dashboard_spec)
-    print("Roster Pay Simulation & Confirmation status added to Audit Overview and Employee Deep Dive.")
+    dashboard_spec = live_pay_simulator.enhance_spec(dashboard_spec)
+    dashboard_spec = live_pay_simulator_finalize.enhance_spec(dashboard_spec)
+    print(
+        "Roster Pay Simulation & Confirmation status plus the connected live what-if simulator "
+        "were added to Audit Overview and Employee Deep Dive."
+    )
 else:
     print("Roster Pay Simulation is not set up yet; publishing the core AuditHero dashboard without pay-review widgets.")
 
@@ -75,6 +94,23 @@ if len(desired_json["pages"]) > 15:
 if not all(isinstance(ds.get("queryLines"), list) and ds.get("queryLines") for ds in desired_json["datasets"]):
     raise ValueError("AuditHero dashboard datasets must use non-empty queryLines arrays")
 
+for dataset in desired_json["datasets"]:
+    for parameter in dataset.get("parameters", []) or []:
+        if not parameter.get("keyword"):
+            raise ValueError(f"Dashboard dataset {dataset.get('name')} has a parameter without a keyword")
+        if not parameter.get("displayName"):
+            raise ValueError(
+                f"Dashboard parameter {dataset.get('name')}.{parameter.get('keyword')} requires displayName"
+            )
+        if not parameter.get("dataType"):
+            raise ValueError(
+                f"Dashboard parameter {dataset.get('name')}.{parameter.get('keyword')} requires dataType"
+            )
+        if "defaultSelection" not in parameter:
+            raise ValueError(
+                f"Dashboard parameter {dataset.get('name')}.{parameter.get('keyword')} requires defaultSelection"
+            )
+
 widgets = [
     item.get("widget", {})
     for page in desired_json["pages"]
@@ -86,13 +122,17 @@ if not any(widget.get("queries") for widget in widgets):
 filter_widgets = [
     widget
     for widget in widgets
-    if str(widget.get("spec", {}).get("widgetType", "")).startswith("filter-")
+    if (
+        str(widget.get("spec", {}).get("widgetType", "")).startswith("filter-")
+        or str(widget.get("spec", {}).get("widgetType", "")) == "range-slider"
+    )
 ]
 if not filter_widgets:
     raise ValueError("AuditHero dashboard definition contains no interactive filters")
 
 for widget in filter_widgets:
     spec = widget.get("spec", {})
+    widget_type = str(spec.get("widgetType", ""))
     if spec.get("version") != 2:
         raise ValueError("AuditHero dashboard filters must use Lakeview filter specification version 2")
 
@@ -103,9 +143,27 @@ for widget in filter_widgets:
         if not query_name or query_name in query_names:
             raise ValueError(f"AuditHero dashboard filter has an invalid/duplicate query name: {query_name!r}")
         query_names.add(query_name)
-        fields = query.get("query", {}).get("fields", [])
-        if len(fields) != 1 or not fields[0].get("expression"):
-            raise ValueError("AuditHero dashboard field filters must bind directly to one field per dataset query")
+
+        query_body = query.get("query", {})
+        fields = query_body.get("fields", []) or []
+        parameters = query_body.get("parameters", []) or []
+
+        if parameters:
+            for parameter in parameters:
+                if not parameter.get("name") or not parameter.get("keyword"):
+                    raise ValueError(
+                        f"AuditHero dashboard parameter filter has an invalid parameter binding: {parameter!r}"
+                    )
+        elif widget_type == "range-slider":
+            if len(fields) != 2 or not all(field.get("expression") for field in fields):
+                raise ValueError(
+                    "AuditHero dashboard range sliders must expose MIN/MAX expressions for the numeric field"
+                )
+        elif len(fields) != 1 or not fields[0].get("expression"):
+            raise ValueError(
+                "AuditHero dashboard field filters must bind directly to one field per dataset query"
+            )
+
         if "associative_filter_predicate_group" in json.dumps(query):
             raise ValueError("AuditHero dashboard contains an obsolete filter associativity expression")
 
@@ -117,6 +175,8 @@ for widget in filter_widgets:
             raise ValueError(
                 f"AuditHero dashboard filter encoding references unknown query: {encoding.get('queryName')!r}"
             )
+        if not encoding.get("fieldName") and not encoding.get("parameterName"):
+            raise ValueError("AuditHero dashboard filter encoding must bind a fieldName or parameterName")
 
 if not desired_json.get("uiSettings", {}).get("theme"):
     raise ValueError("AuditHero dashboard must define a coherent light/dark theme")
@@ -134,7 +194,13 @@ required_views = [
     "v_rule_coverage",
 ]
 if pay_review_enabled:
-    required_views.append("v_pay_review_employee_master")
+    required_views.extend(
+        [
+            "v_pay_review_employee_master",
+            "v_pay_simulation_terms_latest",
+            "v_pay_simulation_employee_year",
+        ]
+    )
 for view in required_views:
     spark.sql(f"SELECT 1 FROM `{catalog}`.`gold`.`{view}` LIMIT 1")
 
@@ -235,4 +301,11 @@ print(
     "Audit Components, specialist SCHADS pages, definitive reconciliation, evidence, data quality and rule coverage."
 )
 if pay_review_enabled:
-    print("Roster pay-rate confirmation status is visible in Audit Overview and Employee Deep Dive; use 'AuditHero - Confirm Employee Pay Rate' only to persist reviewed evidence.")
+    print(
+        "Employee Deep Dive includes the connected live roster-pay simulator. Exact assumed rate and pay-model "
+        "selectors drive the same parameter state across summary, rate-position, shift and Award-component views."
+    )
+    print(
+        "Use 'AuditHero - Confirm Employee Pay Rate' only to persist reviewed evidence; "
+        "simulation controls do not become actual payroll evidence automatically."
+    )
